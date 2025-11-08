@@ -8,15 +8,6 @@
   </PropertyGroup>
 
 	<ItemGroup>
-		<None Include="JsonIndicators\liquidity.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-		<None Include="JsonIndicators\fibo.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-	</ItemGroup>
-
-	<ItemGroup>
 	  <PackageReference Include="Microsoft.ML" Version="4.0.3" />
 	  <PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
 	</ItemGroup>
