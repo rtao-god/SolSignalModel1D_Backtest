@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
+﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core;
 using SolSignalModel1D_Backtest.Core.Analytics;
 using SolSignalModel1D_Backtest.Core.Data;
@@ -11,6 +6,12 @@ using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -20,16 +21,22 @@ namespace SolSignalModel1D_Backtest
 		private const int RollingTestDays = 60;
 		private const double TpPct = 0.03;
 
+		// SL-онлайн: учим только на прошлых оффлайн-сделках
+		private const int SlMinTrainSamples = 80;
+		private const int SlRetrainEvery = 30;
+		private const float SlFilterThreshold = 0.67f;
+
 		public static async Task Main ( string[] args )
 			{
 			Console.OutputEncoding = System.Text.Encoding.UTF8;
 			CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 
-			Console.WriteLine ("[init] start SOL daily backtest (DETAILED, hourly TP/SL)");
+			Console.WriteLine ("[init] start SOL daily backtest (with offline SL dataset, causal)");
+
 
 			var http = HttpFactory.CreateDefault ("SolSignalModel1D_Backtest/1.0");
 
-			// ===== загрузка данных =====
+			// ===== загрузка базовых данных =====
 			Console.WriteLine ("[binance] load 6h SOL...");
 			var sol6h = await DataLoading.GetBinance6h (http, "SOLUSDT", 6000);
 
@@ -51,7 +58,7 @@ namespace SolSignalModel1D_Backtest
 			var sol6hDict = sol6h.ToDictionary (c => c.OpenTimeUtc, c => c);
 			var nyTz = TimeZones.GetNewYork ();
 
-			// окна NY
+			// окна
 			var solTrainWindows = Windowing.FilterNyTrainWindows (sol6h, nyTz);
 			var solMorningWindows = Windowing.FilterNyMorningOnly (sol6h, nyTz);
 			var btcTrainWindows = Windowing.FilterNyTrainWindows (btc6h, nyTz);
@@ -72,7 +79,7 @@ namespace SolSignalModel1D_Backtest
 
 			var extraDaily = DataLoading.TryLoadExtraDaily ("extra.json");
 
-			// ===== строим датасет =====
+			// ===== строим дневной датасет =====
 			var rows = RowBuilder.BuildRowsDaily (
 				solTrainWindows,
 				btcTrainWindows,
@@ -87,28 +94,34 @@ namespace SolSignalModel1D_Backtest
 			rows = rows.OrderBy (r => r.Date).ToList ();
 			Console.WriteLine ($"[dataset] строк после фильтров: {rows.Count}");
 
-			// ===== фиксируем длину фич, чтобы ML.NET не ругался =====
-			int targetLen = SolSignalModel1D_Backtest.Core.ML.MlSchema.FeatureCount;
+			// паддинг фич до фиксированной длины
 			foreach (var r in rows)
 				{
 				if (r.Features == null)
 					{
-					r.Features = new double[targetLen];
+					r.Features = new double[MlSchema.FeatureCount];
 					continue;
 					}
 
-				if (r.Features.Length < targetLen)
+				if (r.Features.Length < MlSchema.FeatureCount)
 					{
-					var arr = new double[targetLen];
+					var arr = new double[MlSchema.FeatureCount];
 					Array.Copy (r.Features, arr, r.Features.Length);
 					r.Features = arr;
 					}
-				else if (r.Features.Length > targetLen)
+				else if (r.Features.Length > MlSchema.FeatureCount)
 					{
-					var arr = new double[targetLen];
-					Array.Copy (r.Features, arr, targetLen);
+					var arr = new double[MlSchema.FeatureCount];
+					Array.Copy (r.Features, arr, MlSchema.FeatureCount);
 					r.Features = arr;
 					}
+				}
+
+			// ===== оффлайн SL-датасет (гипотетический лонг/шорт каждый день) =====
+			var slOfflineSamples = new List<SlHitSample> ();
+			if (sol1h != null && sol1h.Count > 0)
+				{
+				slOfflineSamples = SlOfflineBuilder.Build (rows, sol1h, sol6hDict);
 				}
 
 			var allMorning = rows.Where (r => r.IsMorning).OrderBy (r => r.Date).ToList ();
@@ -121,10 +134,30 @@ namespace SolSignalModel1D_Backtest
 			DateTime minDate = allMorning.First ().Date;
 			DateTime maxDate = allMorning.Last ().Date;
 
+			var allRecords = new List<PredictionRecord> ();
+
+			// ===== состояние SL-модели (онлайн) =====
+			var slTrainer = new SlFirstTrainer ();
+			ITransformer? slModel = null;
+			PredictionEngine<SlHitSample, SlHitPrediction>? slEngine = null;
+			int slSamplesAtLastTrain = 0;
+
+			// онлайн PnL после фильтра
+			double filtEq = 1.0;
+			double filtPeak = 1.0;
+			double filtMaxDd = 0.0;
+			int filtTrades = 0;
+			int filtTp = 0;
+			int filtSl = 0;
+			int filtSkipped = 0;
+
+			// для анализа качества SL-модели
+			double slProbSum = 0.0;
+			double slProbMax = 0.0;
+			int slProbCount = 0;
+
 			Console.WriteLine ();
 			Console.WriteLine ("==== ROLLING ====");
-
-			var allRecords = new List<PredictionRecord> ();
 
 			DateTime cursor = minDate.AddDays (RollingTrainDays);
 			while (true)
@@ -133,13 +166,11 @@ namespace SolSignalModel1D_Backtest
 				DateTime trainEnd = cursor;
 				DateTime testEnd = cursor.AddDays (RollingTestDays);
 
-				// trainRows — ТОЛЬКО до конца trainEnd, будущего тут нет
 				var trainRows = rows
 					.Where (r => r.Date >= trainStart && r.Date < trainEnd)
 					.OrderBy (r => r.Date)
 					.ToList ();
 
-				// testRows — будущее относительно trainEnd
 				var testRows = rows
 					.Where (r => r.IsMorning && r.Date >= trainEnd && r.Date < testEnd)
 					.OrderBy (r => r.Date)
@@ -152,11 +183,10 @@ namespace SolSignalModel1D_Backtest
 					continue;
 					}
 
-				// эти даты можно выкинуть из train, если вдруг попали (не должны)
 				var testDates = new HashSet<DateTime> (testRows.Select (r => r.Date));
 
+				// дневную модель учим как в твоём оригинале — на всём rows, но с исключёнными датами теста
 				var trainer = new ModelTrainer ();
-				// ВАЖНО: сюда отдаём ТОЛЬКО trainRows
 				var bundle = trainer.TrainAll (trainRows, testDates);
 				var engine = new PredictionEngine (bundle);
 
@@ -172,6 +202,20 @@ namespace SolSignalModel1D_Backtest
 
 				foreach (var r in testRows)
 					{
+					// ===== подготовим SL-модель на прошлом оффлайн-наборе =====
+					var pastSl = slOfflineSamples
+						.Where (s => s.EntryUtc < r.Date)
+						.ToList ();
+
+					if (pastSl.Count >= SlMinTrainSamples &&
+						(slModel == null || pastSl.Count - slSamplesAtLastTrain >= SlRetrainEvery))
+						{
+						slModel = slTrainer.Train (pastSl, r.Date);
+						slEngine = slTrainer.CreateEngine (slModel);
+						slSamplesAtLastTrain = pastSl.Count;
+						}
+
+					// ===== дневной прогноз =====
 					var (predClass, probs, reason, microInfo) = engine.Predict (r);
 
 					var fwdInfo = BacktestHelpers.GetForwardInfo (r.Date, sol6hDict);
@@ -185,39 +229,20 @@ namespace SolSignalModel1D_Backtest
 						predClass == 0 ||
 						(predClass == 1 && (microInfo.ConsiderUp || microInfo.ConsiderDown));
 
-					if (hasDir)
-						localTpTrades++;
+					if (hasDir) localTpTrades++;
 
 					bool tpHit = false;
-					double dealPnl = 0.0;
-
 					if (hasDir)
 						{
 						if (predClass == 2 || (predClass == 1 && microInfo.ConsiderUp))
 							{
 							double tpPrice = entry * (1.0 + TpPct);
-							if (maxHigh >= tpPrice)
-								{
-								tpHit = true;
-								dealPnl = TpPct;
-								}
-							else
-								{
-								dealPnl = (close24 - entry) / entry;
-								}
+							if (maxHigh >= tpPrice) tpHit = true;
 							}
 						else
 							{
 							double tpPrice = entry * (1.0 - TpPct);
-							if (minLow <= tpPrice)
-								{
-								tpHit = true;
-								dealPnl = TpPct;
-								}
-							else
-								{
-								dealPnl = (entry - close24) / entry;
-								}
+							if (minLow <= tpPrice) tpHit = true;
 							}
 
 						if (tpHit) localTpOk++;
@@ -235,14 +260,84 @@ namespace SolSignalModel1D_Backtest
 						PredMicroDown = microInfo.ConsiderDown,
 						FactMicroUp = r.FactMicroUp,
 						FactMicroDown = r.FactMicroDown,
-						Entry = fwdInfo.entry,
-						MaxHigh24 = fwdInfo.maxHigh,
-						MinLow24 = fwdInfo.minLow,
-						Close24 = fwdInfo.fwdClose,
+						Entry = entry,
+						MaxHigh24 = maxHigh,
+						MinLow24 = minLow,
+						Close24 = close24,
 						RegimeDown = r.RegimeDown,
 						Reason = reason,
 						MinMove = r.MinMove
 						});
+
+					// ===== почасовой слой с фильтром =====
+					if (sol1h != null && sol1h.Count > 0 && hasDir)
+						{
+						bool goLong = predClass == 2 || (predClass == 1 && microInfo.ConsiderUp);
+						bool goShort = predClass == 0 || (predClass == 1 && microInfo.ConsiderDown);
+						bool strong = predClass == 2 || predClass == 0;
+
+						var hourOutcome = HourlyTradeEvaluator.EvaluateOne (
+							sol1h,
+							r.Date,
+							goLong,
+							goShort,
+							entry,
+							r.MinMove,
+							strong
+						);
+
+						// нас интересуют только однозначные дни
+						if (hourOutcome.Result == HourlyTradeResult.TpFirst ||
+							hourOutcome.Result == HourlyTradeResult.SlFirst)
+							{
+							bool skip = false;
+							if (slEngine != null)
+								{
+								var slFeats = SlFeatureBuilder.Build (
+									r.Date,
+									goLong,
+									strong,
+									r.MinMove,
+									entry,
+									sol1h
+								);
+
+								var predSl = slEngine.Predict (new SlHitSample
+									{
+									Label = false,
+									Features = slFeats,
+									EntryUtc = r.Date
+									});
+
+								// статистика
+								slProbSum += predSl.Probability;
+								slProbCount++;
+								if (predSl.Probability > slProbMax) slProbMax = predSl.Probability;
+
+								if (predSl.Probability >= SlFilterThreshold)
+									{
+									skip = true;
+									filtSkipped++;
+									}
+								}
+
+							if (!skip)
+								{
+								filtTrades++;
+								double tradeRet = hourOutcome.Result == HourlyTradeResult.TpFirst
+									? hourOutcome.TpPct
+									: -hourOutcome.SlPct;
+
+								filtEq *= (1.0 + tradeRet);
+								if (filtEq > filtPeak) filtPeak = filtEq;
+								double dd = (filtPeak - filtEq) / filtPeak;
+								if (dd > filtMaxDd) filtMaxDd = dd;
+
+								if (hourOutcome.Result == HourlyTradeResult.TpFirst) filtTp++;
+								else filtSl++;
+								}
+							}
+						}
 
 					localTested++;
 					}
@@ -251,28 +346,27 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine ($"[roll] micro-aware acc: {(localTested == 0 ? 0 : 100.0 * localMicro / localTested):0.0}% ({localMicro}/{localTested})");
 				Console.WriteLine ($"[roll] tp-hit: {(localTpTrades == 0 ? 0 : 100.0 * localTpOk / localTpTrades):0.0}% ({localTpOk}/{localTpTrades})");
 
-				// для дебага
-				var last3 = testRows.OrderByDescending (r => r.Date).Take (3).ToList ();
-				foreach (var r in last3)
+				// один последний день — как ты просил
+				var lastDay = testRows.OrderByDescending (x => x.Date).First ();
 					{
-					var (predClass, probs, reason, microInfo) = engine.Predict (r);
-					var fwd2 = BacktestHelpers.GetForwardInfo (r.Date, sol6hDict);
+					var (predClass, _, reason, microInfo) = engine.Predict (lastDay);
+					var fwd2 = BacktestHelpers.GetForwardInfo (lastDay.Date, sol6hDict);
 
-					double rsi = r.SolRsiCentered + 50.0;
-					double atrPct = r.AtrPct * 100.0;
-					double minMovePct = r.MinMove * 100.0;
+					double rsi = lastDay.SolRsiCentered + 50.0;
+					double atrPct = lastDay.AtrPct * 100.0;
+					double minMovePct = lastDay.MinMove * 100.0;
 
-					Console.WriteLine ($"[dbg-day] {r.Date:yyyy-MM-dd HH:mm}");
+					Console.WriteLine ($"[dbg-day] {lastDay.Date:yyyy-MM-dd HH:mm}");
 					Console.WriteLine ($"  entry={fwd2.entry:0.####}  maxHigh24={fwd2.maxHigh:0.####}  minLow24={fwd2.minLow:0.####}  fwdClose24={fwd2.fwdClose:0.####}");
 					Console.WriteLine ($"  rsi:{rsi:0.0}  atr:{atrPct:0.00}%  minMove:{minMovePct:0.00}%");
-					Console.WriteLine ($"  Прогноз:{PrintHelpers.ClassToRu (predClass)}  Микро:{PrintHelpers.MicroToRu (microInfo)}  Факт:{PrintHelpers.FactToRu (r)}  (reason:{reason})");
+					Console.WriteLine ($"  Прогноз:{PrintHelpers.ClassToRu (predClass)}  Микро:{PrintHelpers.MicroToRu (microInfo)}  Факт:{PrintHelpers.FactToRu (lastDay)}  (reason:{reason})");
 					}
 
 				cursor = cursor.AddDays (RollingTestDays);
 				if (cursor >= maxDate) break;
 				}
 
-			// ===== финальный отчёт =====
+			// ===== SUMMARY =====
 			Console.WriteLine ();
 			Console.WriteLine ("==== SUMMARY ====");
 			Console.WriteLine ($"total tested: {allRecords.Count}");
@@ -305,15 +399,45 @@ namespace SolSignalModel1D_Backtest
 			Console.WriteLine ($"Trades (opened): {tr.Trades}");
 			Console.WriteLine ($"tp-hit overall: {(tr.TpTotal == 0 ? 0 : 100.0 * tr.TpHits / tr.TpTotal):0.0}% ({tr.TpHits}/{tr.TpTotal})");
 
-			var hourly = HourlyTradeEvaluator.Evaluate (allRecords, sol1h);
+			// ===== raw hourly =====
+			if (sol1h != null && sol1h.Count > 0)
+				{
+				var hourly = HourlyTradeEvaluator.Evaluate (allRecords, sol1h);
+				Console.WriteLine ();
+				Console.WriteLine ("=== Trading WITH hourly TP/SL (raw) ===");
+				Console.WriteLine ($"Total PnL: {hourly.TotalPnlPct:0.0}% (~x{hourly.TotalPnlMultiplier:0.00})");
+				Console.WriteLine ($"Max DD: {hourly.MaxDrawdownPct:0.0}%");
+				Console.WriteLine ($"Trades (opened): {hourly.Trades}");
+				Console.WriteLine ($"tp-first: {hourly.TpFirst}");
+				Console.WriteLine ($"sl-first: {hourly.SlFirst}");
+				Console.WriteLine ($"ambiguous (tp & sl in 1h): {hourly.Ambiguous}");
+				}
+			else
+				{
+				Console.WriteLine ("[hourly] skipped: no 1h candles");
+				}
+
+			// ===== filtered hourly (онлайн) =====
 			Console.WriteLine ();
-			Console.WriteLine ("=== Trading WITH hourly TP/SL (adaptive from MinMove) ===");
-			Console.WriteLine ($"Total PnL: {hourly.TotalPnlPct:0.0}% (~x{hourly.TotalPnlMultiplier:0.00})");
-			Console.WriteLine ($"Max DD: {hourly.MaxDrawdownPct:0.0}%");
-			Console.WriteLine ($"Trades (opened): {hourly.Trades}");
-			Console.WriteLine ($"tp-first: {hourly.TpFirst}");
-			Console.WriteLine ($"sl-first: {hourly.SlFirst}");
-			Console.WriteLine ($"ambiguous (tp & sl in 1h): {hourly.Ambiguous}");
+			Console.WriteLine ("=== Trading WITH hourly TP/SL (filtered by online SL-model) ===");
+			Console.WriteLine ($"Total PnL: {(filtEq - 1.0) * 100.0:0.0}% (~x{filtEq:0.00})");
+			Console.WriteLine ($"Max DD: {filtMaxDd * 100.0:0.0}%");
+			Console.WriteLine ($"Trades (opened): {filtTrades}");
+			Console.WriteLine ($"tp-first: {filtTp}");
+			Console.WriteLine ($"sl-first: {filtSl}");
+			Console.WriteLine ($"skipped by sl-model: {filtSkipped}");
+
+			Console.WriteLine ();
+			Console.WriteLine ($"[sl-offline] total samples: {slOfflineSamples.Count}");
+			if (slProbCount > 0)
+				{
+				Console.WriteLine ($"[sl-model] avg p(SL-first) on real entries: {slProbSum / slProbCount:0.000}");
+				Console.WriteLine ($"[sl-model] max p(SL-first) on real entries: {slProbMax:0.000}");
+				}
+			else
+				{
+				Console.WriteLine ("[sl-model] no real entries were scored by SL-model");
+				}
 			}
 		}
 	}

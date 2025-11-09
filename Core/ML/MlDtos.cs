@@ -1,15 +1,14 @@
-﻿using System;
-using Microsoft.ML.Data;
+﻿using Microsoft.ML.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
-	// обычный мультикласс (если где-то ещё нужен)
+	// обычный мультикласс
 	public sealed class MlSample
 		{
 		public float Label { get; set; }
 
 		[VectorType (MlSchema.FeatureCount)]
-		public float[] Features { get; set; } = Array.Empty<float> ();
+		public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
 		}
 
 	// мультикласс с весом
@@ -18,32 +17,8 @@ namespace SolSignalModel1D_Backtest.Core.ML
 		public float Label { get; set; }
 
 		[VectorType (MlSchema.FeatureCount)]
-		public float[] Features { get; set; } = Array.Empty<float> ();
+		public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
 
 		public float Weight { get; set; }
-		}
-
-	// бинарка
-	public sealed class MlSampleBinary
-		{
-		public bool Label { get; set; }
-
-		[VectorType (MlSchema.FeatureCount)]
-		public float[] Features { get; set; } = Array.Empty<float> ();
-		}
-
-	// выход мультикласса
-	public sealed class MlOutput
-		{
-		public float PredictedLabel { get; set; }
-		public float[] Score { get; set; } = Array.Empty<float> ();
-		}
-
-	// выход бинарки
-	public sealed class MlBinaryOutput
-		{
-		public bool PredictedLabel { get; set; }
-		public float Score { get; set; }
-		public float Probability { get; set; }
 		}
 	}
