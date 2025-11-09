@@ -49,8 +49,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 				if (!goLong && !goShort)
 					continue;
 
-				// если дневной порог очень маленький — пропускаем этот день,
-				// потому что там много шума и SL будет ловиться часто
 				double dayMinMove = rec.MinMove;
 				if (dayMinMove <= 0)
 					dayMinMove = 0.02; // фолбэк
@@ -66,7 +64,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 
 				report.Trades++;
 
-				// сильный сигнал или микро-сигнал
 				bool strongSignal = rec.PredLabel == 0 || rec.PredLabel == 2;
 
 				double tpPct;
@@ -74,13 +71,11 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 
 				if (strongSignal)
 					{
-					// для сильных: чуть больше TP, SL мягче
 					tpPct = Math.Max (0.022, dayMinMove * 1.25);
 					slPct = Math.Max (0.009, dayMinMove * 0.55);
 					}
 				else
 					{
-					// для боковика с наклоном: поменьше TP, но и SL поменьше
 					tpPct = Math.Max (0.017, dayMinMove * 1.10);
 					slPct = Math.Max (0.008, dayMinMove * 0.50);
 					}
@@ -97,7 +92,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 					}
 				else
 					{
-					// short
 					tpPrice = entry * (1.0 - tpPct);
 					slPrice = entry * (1.0 + slPct);
 					}
@@ -117,7 +111,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 
 						if (tpInBar && slInBar)
 							{
-							// внутри часа не знаем порядок
 							isAmb = true;
 							break;
 							}
@@ -134,7 +127,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 						}
 					else
 						{
-						// short
 						bool tpInBar = bar.Low <= tpPrice;
 						bool slInBar = bar.High >= slPrice;
 
@@ -156,13 +148,11 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 						}
 					}
 
-				// считаем результат
 				double tradeRet;
 
 				if (isAmb)
 					{
 					report.Ambiguous++;
-					// не портим equity, просто пропускаем
 					continue;
 					}
 				else if (hitTp)
@@ -177,7 +167,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 					}
 				else
 					{
-					// ни TP, ни SL — закрываемся по последнему часу
 					if (goLong)
 						tradeRet = (closePrice - entry) / entry;
 					else

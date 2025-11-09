@@ -62,5 +62,13 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public double TrendAbs30 { get; set; }
 
 		public int HardRegime { get; set; }
+
+		// EMA-фичи
+		public double SolEma50 { get; set; }
+		public double SolEma200 { get; set; }
+		public double BtcEma50 { get; set; }
+		public double BtcEma200 { get; set; }
+		public double SolEma50vs200 { get; set; }
+		public double BtcEma50vs200 { get; set; }
 		}
 	}

@@ -4,7 +4,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 	{
 	/// <summary>
 	/// Контейнер для всех моделей, которые реально используются рантаймом.
-	/// Никакого легаси, только то, что дергает PredictionEngine.
+	/// Только то, что дергает PredictionEngine.
 	/// </summary>
 	public sealed class ModelBundle
 		{

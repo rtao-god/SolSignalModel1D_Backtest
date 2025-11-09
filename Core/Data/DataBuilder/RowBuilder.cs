@@ -3,6 +3,7 @@ using SolSignalModel1D_Backtest.Core.Domain;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Intrinsics.X86;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
@@ -29,6 +30,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		private const double MonthlyCapMin = 0.75;  // не давать месяцу слишком занизить
 		private const double MonthlyCapMax = 1.35;  // и слишком завысить
 
+		private const int SolEmaFast = 50;
+		private const int SolEmaSlow = 200;
+		private const int BtcEmaFast = 50;
+		private const int BtcEmaSlow = 200;
+
+
 		public static List<DataRow> BuildRowsDaily (
 			List<Candle6h> solWinTrain,
 			List<Candle6h> btcWinTrain,
@@ -44,6 +51,14 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			var solAtr = Indicators.ComputeAtr6h (solAll6h, AtrPeriod);
 			var solRsi = Indicators.ComputeRsi6h (solWinTrain, RsiPeriod);
 			var btcSma200 = Indicators.ComputeSma6h (btcWinTrain, BtcSmaPeriod);
+
+			// EMA по SOL считаем по всем 6h, как и ATR — чтобы были непрерывные даты
+			var solEma50 = Indicators.ComputeEma6h (solAll6h, SolEmaFast);
+			var solEma200 = Indicators.ComputeEma6h (solAll6h, SolEmaSlow);
+
+			// по BTC у нас только btcWinTrain, но этого хватает для фоновой фичи
+			var btcEma50 = Indicators.ComputeEma6h (btcWinTrain, BtcEmaFast);
+			var btcEma200 = Indicators.ComputeEma6h (btcWinTrain, BtcEmaSlow);
 
 			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
 
@@ -85,6 +100,29 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				double btcRet1 = Indicators.Ret6h (btcWinTrain, btcIdx, 1);
 				double btcRet3 = Indicators.Ret6h (btcWinTrain, btcIdx, 3);
 				double btcRet30 = Indicators.Ret6h (btcWinTrain, btcIdx, 30);
+
+				// EMA по SOL
+				double solEma50Val = Indicators.FindNearest (solEma50, openUtc, 0.0);
+				double solEma200Val = Indicators.FindNearest (solEma200, openUtc, 0.0);
+
+				// EMA по BTC
+				double btcEma50Val = Indicators.FindNearest (btcEma50, openUtc, 0.0);
+				double btcEma200Val = Indicators.FindNearest (btcEma200, openUtc, 0.0);
+
+				// нормализованные/производные
+				double solAboveEma50 = (solEma50Val > 0 && solClose > 0)
+					? (solClose - solEma50Val) / solEma50Val
+					: 0.0;
+
+				double solEmaSlope = 0.0; // можно добавить позже из соседних свечей
+
+				double solEma50vs200 = (solEma200Val > 0)
+					? (solEma50Val - solEma200Val) / solEma200Val
+					: 0.0;
+
+				double btcEma50vs200 = (btcEma200Val > 0)
+					? (btcEma50Val - btcEma200Val) / btcEma200Val
+					: 0.0;
 
 				if (double.IsNaN (solRet1) || double.IsNaN (solRet3) || double.IsNaN (solRet30) ||
 					double.IsNaN (btcRet1) || double.IsNaN (btcRet3) || double.IsNaN (btcRet30))
@@ -212,7 +250,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					funding,
 					oi / 1_000_000.0,
 					// стрессовый режим как бинарная фича
-					hardRegime == 2 ? 1.0 : 0.0
+					hardRegime == 2 ? 1.0 : 0.0,
+
+					 // EMA-блок
+					solAboveEma50,     // насколько SOL выше/ниже своей EMA50
+					solEma50vs200,     // быстрый EMA vs медленный по SOL
+					btcEma50vs200      // фон: быстрый EMA vs медленный по BTC
 				};
 
 				rows.Add (new DataRow
@@ -249,8 +292,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					FactMicroUp = Math.Abs (solFwd1) < minMove && solFwd1 >= minMove * 0.1,
 					FactMicroDown = Math.Abs (solFwd1) < minMove && solFwd1 <= -minMove * 0.1,
 
-					// новое
-					HardRegime = hardRegime
+					HardRegime = hardRegime,
+
+					// EMA
+					SolEma50 = solEma50Val,
+					SolEma200 = solEma200Val,
+					BtcEma50 = btcEma50Val,
+					BtcEma200 = btcEma200Val,
+					SolEma50vs200 = solEma50vs200,
+					BtcEma50vs200 = btcEma50vs200,
 					});
 				}
 

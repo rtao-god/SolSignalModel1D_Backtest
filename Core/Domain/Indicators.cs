@@ -159,5 +159,36 @@ namespace SolSignalModel1D_Backtest.Core.Domain
 			if (now > 0 && ago > 0) return now / ago - 1.0;
 			return 0.0;
 			}
+		public static Dictionary<DateTime, double> ComputeEma6h ( List<Candle6h> candles, int period )
+			{
+			var result = new Dictionary<DateTime, double> ();
+			if (candles == null || candles.Count == 0)
+				return result;
+
+			// сортируем на всякий
+			var ordered = candles.OrderBy (c => c.OpenTimeUtc).ToList ();
+
+			double k = 2.0 / (period + 1.0);
+			double? prevEma = null;
+
+			foreach (var c in ordered)
+				{
+				double price = c.Close;
+				if (price <= 0)
+					continue;
+
+				double ema;
+				if (prevEma == null)
+					ema = price;              // старт — с цены
+				else
+					ema = price * k + prevEma.Value * (1.0 - k);
+
+				result[c.OpenTimeUtc] = ema;
+				prevEma = ema;
+				}
+
+			return result;
+			}
+
 		}
 	}

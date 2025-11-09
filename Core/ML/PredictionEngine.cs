@@ -4,7 +4,7 @@ using SolSignalModel1D_Backtest.Core.Data;
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
 	/// <summary>
-	/// Обёртка над натрененным бандлом. Никакого System.Data здесь нет.
+	/// Обёртка над натрененным бандлом
 	/// </summary>
 	public sealed class PredictionEngine
 		{
@@ -97,14 +97,25 @@ namespace SolSignalModel1D_Backtest.Core.ML
 						Features = r.Features.Select (f => (float) f).ToArray ()
 						});
 
-					if (dirOut.PredictedLabel)
+					bool wantsUp = dirOut.PredictedLabel;
+
+					if (wantsUp)
 						{
-						// вверх
+						// простое правило: если BTC в явном даун-тренде по EMA и при этом короткие ретурны отрицательные — не лонговать SOL
+						bool btcEmaDown = r.BtcEma50vs200 < -0.002;  // -0.2% между 50 и 200 — уже наклон
+						bool btcShortRed = r.BtcRet1 < 0 && r.BtcRet30 < 0;
+
+						if (btcEmaDown && btcShortRed)
+							{
+							// принудительно считаем, что это боковик — модель по SOL не должна перетянуть
+							return (1, new double[] { 0.05, 0.9, 0.05 }, "2stage:move-up-blocked-by-btc-ema", new MicroInfo ());
+							}
+
+						// иначе — нормальный лонг
 						return (2, new double[] { 0.05, 0.05, 0.9 }, "2stage:move-up", new MicroInfo ());
 						}
 					else
 						{
-						// вниз
 						return (0, new double[] { 0.9, 0.05, 0.05 }, "2stage:move-down", new MicroInfo ());
 						}
 					}
@@ -117,9 +128,6 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			return (1, new double[] { 0.05, 0.9, 0.05 }, "fallback", new MicroInfo ());
 			}
 
-		/// <summary>
-		/// твой "микро-зачёт"
-		/// </summary>
 		public bool EvalMicroAware ( DataRow r, int predClass, MicroInfo micro )
 			{
 			bool baseCorrect = predClass == r.Label;
@@ -135,9 +143,6 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			return false;
 			}
 
-		/// <summary>
-		/// твоя весовая оценка
-		/// </summary>
 		public double EvalWeighted ( DataRow r, int predClass, MicroInfo micro )
 			{
 			int fact = r.Label;
