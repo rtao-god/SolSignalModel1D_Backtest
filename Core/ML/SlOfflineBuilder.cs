@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			if (sol1h == null || sol1h.Count == 0)
 				return result;
 
-			// берём только утренние ряды — как твои реальные входы
+			// берём только утренние ряды
 			var mornings = rows
 				.Where (r => r.IsMorning)
 				.OrderBy (r => r.Date)

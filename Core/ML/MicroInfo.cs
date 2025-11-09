@@ -2,7 +2,6 @@
 
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
-	// отдельный тип, чтобы его можно было везде использовать
 	public sealed class MicroInfo
 		{
 		public bool Predicted { get; set; }
