@@ -1,4 +1,5 @@
-﻿using Microsoft.ML.Data;
+﻿using System;
+using Microsoft.ML.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
@@ -7,27 +8,27 @@ namespace SolSignalModel1D_Backtest.Core.ML
 		{
 		public float Label { get; set; }
 
-		[VectorType (24)]
+		[VectorType (MlSchema.FeatureCount)]
 		public float[] Features { get; set; } = Array.Empty<float> ();
 		}
 
-	// МУЛЬТИКЛАСС С ВЕСОМ — это для LightGbmModelTrainer, пусть лежит
+	// мультикласс с весом
 	public sealed class MlSampleWeighted
 		{
 		public float Label { get; set; }
 
-		[VectorType (24)]
+		[VectorType (MlSchema.FeatureCount)]
 		public float[] Features { get; set; } = Array.Empty<float> ();
 
 		public float Weight { get; set; }
 		}
 
-	// бинарка для микро и вообще для бинарных моделей
+	// бинарка
 	public sealed class MlSampleBinary
 		{
 		public bool Label { get; set; }
 
-		[VectorType (24)]
+		[VectorType (MlSchema.FeatureCount)]
 		public float[] Features { get; set; } = Array.Empty<float> ();
 		}
 

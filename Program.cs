@@ -10,7 +10,7 @@ using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.Trading;
-using SolSignalModel1D_Backtest.Core.Utils; // BacktestHelpers и (предположительно) PrintHelpers
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest
 		{
 		private const int RollingTrainDays = 260;
 		private const int RollingTestDays = 60;
-		private const double TpPct = 0.03; // дневной "tp-or-close"
+		private const double TpPct = 0.03;
 
 		public static async Task Main ( string[] args )
 			{
@@ -87,60 +87,29 @@ namespace SolSignalModel1D_Backtest
 			rows = rows.OrderBy (r => r.Date).ToList ();
 			Console.WriteLine ($"[dataset] строк после фильтров: {rows.Count}");
 
-			// выровнять длину фичей у всех строк
-			int maxFeatLen = rows.Max (r => r.Features?.Length ?? 0);
+			// ===== фиксируем длину фич, чтобы ML.NET не ругался =====
+			int targetLen = SolSignalModel1D_Backtest.Core.ML.MlSchema.FeatureCount;
 			foreach (var r in rows)
 				{
 				if (r.Features == null)
 					{
-					r.Features = new double[maxFeatLen];
+					r.Features = new double[targetLen];
 					continue;
 					}
 
-				if (r.Features.Length < maxFeatLen)
+				if (r.Features.Length < targetLen)
 					{
-					var arr = new double[maxFeatLen];
+					var arr = new double[targetLen];
 					Array.Copy (r.Features, arr, r.Features.Length);
-					// остальное по умолчанию 0.0
+					r.Features = arr;
+					}
+				else if (r.Features.Length > targetLen)
+					{
+					var arr = new double[targetLen];
+					Array.Copy (r.Features, arr, targetLen);
 					r.Features = arr;
 					}
 				}
-
-			// === быстрая диагностика EMA ===
-			var emaSample = rows.Where (r => r.IsMorning).TakeLast (5).ToList ();
-			Console.WriteLine ("[ema] последние 5 утренних строк с сырыми EMA:");
-			foreach (var r in emaSample)
-				{
-				Console.WriteLine ($"[ema] {r.Date:yyyy-MM-dd HH:mm}  sol={r.SolEma50:0.####}/{r.SolEma200:0.####}  btc={r.BtcEma50:0.####}/{r.BtcEma200:0.####}  solEma50vs200={r.SolEma50vs200:0.####}  btcEma50vs200={r.BtcEma50vs200:0.####}");
-				}
-
-			// A. SOL над своей EMA50
-			var solAbove = rows.Where (r => r.SolEma50 > 0 && r.SolEma200 > 0 && r.SolEma50 > r.SolEma200).ToList ();
-			int solAboveCnt = solAbove.Count;
-			int solAboveGrowth = solAbove.Count (r => r.Label == 2);
-			double solAboveGrowthRate = solAboveCnt > 0 ? (double) solAboveGrowth / solAboveCnt : 0.0;
-
-			// B. BTC в даун по EMA (50 < 200)
-			var btcDown = rows.Where (r => r.BtcEma50 > 0 && r.BtcEma200 > 0 && r.BtcEma50 < r.BtcEma200).ToList ();
-			int btcDownCnt = btcDown.Count;
-			int btcDownGrowth = btcDown.Count (r => r.Label == 2);
-			double btcDownGrowthRate = btcDownCnt > 0 ? (double) btcDownGrowth / btcDownCnt : 0.0;
-
-			// C. SOL над EMA50 и BTC не в даун
-			var solAbove_btcOk = rows.Where (r =>
-				r.SolEma50 > 0 && r.SolEma200 > 0 && r.SolEma50 > r.SolEma200 &&      // sol в лонг-тренде
-				!(r.BtcEma50 > 0 && r.BtcEma200 > 0 && r.BtcEma50 < r.BtcEma200)      // и btc не в явном даун-EMA
-			).ToList ();
-			int solAbove_btcOkCnt = solAbove_btcOk.Count;
-			int solAbove_btcOkGrowth = solAbove_btcOk.Count (r => r.Label == 2);
-			double solAbove_btcOkGrowthRate = solAbove_btcOkCnt > 0 ? (double) solAbove_btcOkGrowth / solAbove_btcOkCnt : 0.0;
-
-			Console.WriteLine ();
-			Console.WriteLine ("=== EMA diagnostics (very rough) ===");
-			Console.WriteLine ($"SOL EMA50>EMA200: {solAboveCnt} строк, из них ростов: {solAboveGrowth} ({solAboveGrowthRate * 100:0.0}%)");
-			Console.WriteLine ($"BTC EMA50<EMA200: {btcDownCnt} строк, при таком фоне ростов по SOL: {btcDownGrowth} ({btcDownGrowthRate * 100:0.0}%)");
-			Console.WriteLine ($"SOL EMA50>EMA200 и BTC не в даун-EMA: {solAbove_btcOkCnt} строк, ростов: {solAbove_btcOkGrowth} ({solAbove_btcOkGrowthRate * 100:0.0}%)");
-			Console.WriteLine ();
 
 			var allMorning = rows.Where (r => r.IsMorning).OrderBy (r => r.Date).ToList ();
 			if (allMorning.Count == 0)
@@ -164,8 +133,17 @@ namespace SolSignalModel1D_Backtest
 				DateTime trainEnd = cursor;
 				DateTime testEnd = cursor.AddDays (RollingTestDays);
 
-				var trainRows = rows.Where (r => r.Date >= trainStart && r.Date < trainEnd).ToList ();
-				var testRows = rows.Where (r => r.IsMorning && r.Date >= trainEnd && r.Date < testEnd).ToList ();
+				// trainRows — ТОЛЬКО до конца trainEnd, будущего тут нет
+				var trainRows = rows
+					.Where (r => r.Date >= trainStart && r.Date < trainEnd)
+					.OrderBy (r => r.Date)
+					.ToList ();
+
+				// testRows — будущее относительно trainEnd
+				var testRows = rows
+					.Where (r => r.IsMorning && r.Date >= trainEnd && r.Date < testEnd)
+					.OrderBy (r => r.Date)
+					.ToList ();
 
 				if (testRows.Count == 0)
 					{
@@ -174,10 +152,12 @@ namespace SolSignalModel1D_Backtest
 					continue;
 					}
 
+				// эти даты можно выкинуть из train, если вдруг попали (не должны)
 				var testDates = new HashSet<DateTime> (testRows.Select (r => r.Date));
 
 				var trainer = new ModelTrainer ();
-				var bundle = trainer.TrainAll (rows, testDates);
+				// ВАЖНО: сюда отдаём ТОЛЬКО trainRows
+				var bundle = trainer.TrainAll (trainRows, testDates);
 				var engine = new PredictionEngine (bundle);
 
 				Console.WriteLine ();
@@ -194,14 +174,12 @@ namespace SolSignalModel1D_Backtest
 					{
 					var (predClass, probs, reason, microInfo) = engine.Predict (r);
 
-					// forward-инфа — из helper
 					var fwdInfo = BacktestHelpers.GetForwardInfo (r.Date, sol6hDict);
 					double entry = fwdInfo.entry;
 					double close24 = fwdInfo.fwdClose;
 					double maxHigh = fwdInfo.maxHigh;
 					double minLow = fwdInfo.minLow;
 
-					// дневной tp-or-close
 					bool hasDir =
 						predClass == 2 ||
 						predClass == 0 ||
@@ -245,7 +223,6 @@ namespace SolSignalModel1D_Backtest
 						if (tpHit) localTpOk++;
 						}
 
-					// точность
 					if (predClass == r.Label) localBase++;
 					if (engine.EvalMicroAware (r, predClass, microInfo)) localMicro++;
 
@@ -274,7 +251,7 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine ($"[roll] micro-aware acc: {(localTested == 0 ? 0 : 100.0 * localMicro / localTested):0.0}% ({localMicro}/{localTested})");
 				Console.WriteLine ($"[roll] tp-hit: {(localTpTrades == 0 ? 0 : 100.0 * localTpOk / localTpTrades):0.0}% ({localTpOk}/{localTpTrades})");
 
-				// 3 последних дня
+				// для дебага
 				var last3 = testRows.OrderByDescending (r => r.Date).Take (3).ToList ();
 				foreach (var r in last3)
 					{
@@ -289,7 +266,6 @@ namespace SolSignalModel1D_Backtest
 					Console.WriteLine ($"  entry={fwd2.entry:0.####}  maxHigh24={fwd2.maxHigh:0.####}  minLow24={fwd2.minLow:0.####}  fwdClose24={fwd2.fwdClose:0.####}");
 					Console.WriteLine ($"  rsi:{rsi:0.0}  atr:{atrPct:0.00}%  minMove:{minMovePct:0.00}%");
 					Console.WriteLine ($"  Прогноз:{PrintHelpers.ClassToRu (predClass)}  Микро:{PrintHelpers.MicroToRu (microInfo)}  Факт:{PrintHelpers.FactToRu (r)}  (reason:{reason})");
-					Console.WriteLine ($"  EMA: sol50={r.SolEma50:0.####} sol200={r.SolEma200:0.####}  btc50={r.BtcEma50:0.####} btc200={r.BtcEma200:0.####}  sol50vs200={r.SolEma50vs200:0.####} btc50vs200={r.BtcEma50vs200:0.####}");
 					}
 
 				cursor = cursor.AddDays (RollingTestDays);
@@ -301,7 +277,6 @@ namespace SolSignalModel1D_Backtest
 			Console.WriteLine ("==== SUMMARY ====");
 			Console.WriteLine ($"total tested: {allRecords.Count}");
 
-			// 1) классификация
 			var cls = ClassificationMetrics.Compute (allRecords, useMicro: true);
 			Console.WriteLine ("=== Classification (micro-aware from file) ===");
 			Console.WriteLine ($"accuracy: {cls.Accuracy * 100:0.0}%");
@@ -314,13 +289,11 @@ namespace SolSignalModel1D_Backtest
 				);
 				}
 
-			// 2) lenient — печатаем сами
 			var len = ClassificationMetrics.ComputeLenient (allRecords);
 			Console.WriteLine ();
 			Console.WriteLine ("=== Lenient accuracy (direction-aware) ===");
 			Console.WriteLine ($"lenient acc: {len.Accuracy * 100:0.0}% ({len.Correct}/{len.Total})");
 
-			// 3) дневной трейдинг
 			var tr = TradingMetrics.Compute (allRecords, TpPct);
 			Console.WriteLine ();
 			Console.WriteLine ($"=== Trading (tp-or-close, {TpPct * 100:0.#}%) ===");
@@ -332,7 +305,6 @@ namespace SolSignalModel1D_Backtest
 			Console.WriteLine ($"Trades (opened): {tr.Trades}");
 			Console.WriteLine ($"tp-hit overall: {(tr.TpTotal == 0 ? 0 : 100.0 * tr.TpHits / tr.TpTotal):0.0}% ({tr.TpHits}/{tr.TpTotal})");
 
-			// 4) почасовой TP/SL — из готового класса
 			var hourly = HourlyTradeEvaluator.Evaluate (allRecords, sol1h);
 			Console.WriteLine ();
 			Console.WriteLine ("=== Trading WITH hourly TP/SL (adaptive from MinMove) ===");
