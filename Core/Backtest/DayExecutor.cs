@@ -56,7 +56,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				DelayedEntryPrice = 0.0,
 				DelayedIntradayResult = 0,
 				DelayedIntradayTpPct = 0.0,
-				DelayedIntradaySlPct = 0.0
+				DelayedIntradaySlPct = 0.0,
+				 SlHighDecision = false,
+				DelayedEntryExecutedAtUtc = null
 				};
 
 			// если нет направления или нет 1h — просто вернуть дневной рекорд
@@ -103,8 +105,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				slProb = slPred.Probability;
 				stats.AddSlScore (slProb, slPred.PredictedLabel, baseOutcome);
 
-				// вот здесь — твой SLRiskThreshold, уже с дефолтом 0.55
 				slSaidRisk = slPred.Probability >= slState.SLRiskThreshold;
+
+				rec.SlHighDecision = slSaidRisk;
 				}
 
 			// если день нормальный — просто фиксируем базу и выходим
@@ -166,6 +169,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				rec.DelayedIntradayResult = (int) delayed.Result;
 				rec.DelayedIntradayTpPct = delayed.TpPct;
 				rec.DelayedIntradaySlPct = delayed.SlPct;
+				rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
 
 				stats.AddDelayed ("A", delayed);
 				return rec;
@@ -217,6 +221,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				rec.DelayedIntradayResult = (int) delayed.Result;
 				rec.DelayedIntradayTpPct = delayed.TpPct;
 				rec.DelayedIntradaySlPct = delayed.SlPct;
+				rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
 
 				stats.AddDelayed ("B", delayed);
 				return rec;

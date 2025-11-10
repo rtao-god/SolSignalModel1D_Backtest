@@ -10,8 +10,10 @@ namespace SolSignalModel1D_Backtest.Core.ML
 		{
 		private readonly ModelBundle _bundle;
 
+		// порог для уверенного микро-сигнала
 		private const float FlatMicroProbThresh = 0.60f;
 
+		// дневной SL мы тут не трогаем — это делает DayExecutor
 		public PredictionEngine ( ModelBundle bundle )
 			{
 			_bundle = bundle;
@@ -31,9 +33,10 @@ namespace SolSignalModel1D_Backtest.Core.ML
 					Features = r.Features.Select (f => (float) f).ToArray ()
 					});
 
-				// хода нет → боковик → пробуем микро
+				// ===== ВЕТКА "хода нет" → пробуем микро
 				if (!moveOut.PredictedLabel)
 					{
+					// есть ли отдельная микро-модель
 					if (_bundle.MicroFlatModel != null)
 						{
 						var microEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
@@ -42,52 +45,54 @@ namespace SolSignalModel1D_Backtest.Core.ML
 							Features = r.Features.Select (f => (float) f).ToArray ()
 							});
 
-						float p = microOut.Probability;
-						bool isFactMicro = r.FactMicroUp || r.FactMicroDown;
+						float pUp = microOut.Probability;           // это P(class=true) = "micro UP"
+						float pDn = 1.0f - pUp;                      // это вероятность "micro DOWN"
 
-						if (isFactMicro && p >= FlatMicroProbThresh)
+						// UP-микро
+						if (pUp >= FlatMicroProbThresh)
 							{
-							bool predUp = microOut.PredictedLabel;
-							bool correct = (predUp && r.FactMicroUp) || (!predUp && r.FactMicroDown);
-
-							if (predUp)
-								{
-								return (1,
-									new double[] { 0.05, 0.7, 0.25 },
-									"2stage:flat+microUp",
-									new MicroInfo
-										{
-										Predicted = true,
-										Up = true,
-										ConsiderUp = true,
-										ConsiderDown = false,
-										Prob = p,
-										Correct = correct
-										});
-								}
-							else
-								{
-								return (1,
-									new double[] { 0.25, 0.7, 0.05 },
-									"2stage:flat+microDown",
-									new MicroInfo
-										{
-										Predicted = true,
-										Up = false,
-										ConsiderUp = false,
-										ConsiderDown = true,
-										Prob = p,
-										Correct = correct
-										});
-								}
+							bool correct = (r.FactMicroUp);           // для отладки на бэктесте
+							return (
+								1,
+								new double[] { 0.05, 0.7, 0.25 },
+								"2stage:flat+microUp",
+								new MicroInfo
+									{
+									Predicted = true,
+									Up = true,
+									ConsiderUp = true,
+									ConsiderDown = false,
+									Prob = pUp,
+									Correct = correct
+									}
+							);
+							}
+						// DOWN-микро
+						else if (pDn >= FlatMicroProbThresh)
+							{
+							bool correct = (r.FactMicroDown);
+							return (
+								1,
+								new double[] { 0.25, 0.7, 0.05 },
+								"2stage:flat+microDown",
+								new MicroInfo
+									{
+									Predicted = true,
+									Up = false,
+									ConsiderUp = false,
+									ConsiderDown = true,
+									Prob = pDn,
+									Correct = correct
+									}
+							);
 							}
 						}
 
-					// просто боковик
+					// просто боковик (микро неуверенно / модели нет)
 					return (1, new double[] { 0.05, 0.9, 0.05 }, "2stage:flat", new MicroInfo ());
 					}
 
-				// 2) ход есть → берём модель направления по режиму
+				// ===== ВЕТКА "ход есть" → берём модель направления по режиму
 				var dirModel = r.RegimeDown ? _bundle.DirModelDown : _bundle.DirModelNormal;
 				if (dirModel != null)
 					{
@@ -102,7 +107,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 					if (wantsUp)
 						{
 						// простое правило: если BTC в явном даун-тренде по EMA и при этом короткие ретурны отрицательные — не лонговать SOL
-						bool btcEmaDown = r.BtcEma50vs200 < -0.002;  // -0.2% между 50 и 200 — уже наклон
+						bool btcEmaDown = r.BtcEma50vs200 < -0.002;
 						bool btcShortRed = r.BtcRet1 < 0 && r.BtcRet30 < 0;
 
 						if (btcEmaDown && btcShortRed)

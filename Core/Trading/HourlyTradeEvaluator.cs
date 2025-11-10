@@ -166,7 +166,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 			}
 
 		/// <summary>
-		/// Твой старый "прогон по всем сделкам" — оставляю как есть.
+		/// прогон по всем сделкам
 		/// </summary>
 		public static HourlyTpSlReport Evaluate (
 			IReadOnlyList<PredictionRecord> records,

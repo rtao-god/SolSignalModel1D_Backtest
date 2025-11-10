@@ -37,7 +37,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 
 	/// <summary>
 	/// Онлайн-состояние target-level / delayed-модели (базовое).
-	/// Ты можешь на его основе сделать отдельные PullbackContinuationOnlineState и SmallImprovementOnlineState.
 	/// </summary>
 	public sealed class TargetLevelOnlineState
 		{
