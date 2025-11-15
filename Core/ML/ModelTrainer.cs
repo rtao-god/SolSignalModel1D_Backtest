@@ -1,36 +1,50 @@
-﻿using Microsoft.ML;
-using Microsoft.ML.Trainers.LightGbm;
-using SolSignalModel1D_Backtest.Core.Data;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.ML;
+using Microsoft.ML.Trainers.LightGbm;
+using SolSignalModel1D_Backtest.Core.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
-	/// <summary>
-	/// 2-ступенчатый тренер + микро для реальных микро-дней (FactMicroUp/Down)
-	/// </summary>
 	public sealed class ModelTrainer
 		{
 		private readonly MLContext _ml = new MLContext (seed: 42);
 		private static readonly DateTime RecentCutoff = new DateTime (2025, 1, 1);
 
-		public ModelBundle TrainAll (
-			List<DataRow> rows,
-			HashSet<DateTime> testDates )
-			{
-			// train = всё, что НЕ в тесте
-			var trainRows = rows
-				.Where (r => !testDates.Contains (r.Date))
-				.OrderByDescending (r => r.Date)
-				.ToList ();
+		private static readonly bool BalanceMove = false;
+		private static readonly bool BalanceDir = true;
+		private const double BalanceTargetFrac = 0.70;
 
-			// ===== 1) Модель "будет ход" =====
+		public ModelBundle TrainAll (
+			List<DataRow> trainRows,
+			HashSet<DateTime>? datesToExclude = null )
+			{
+			if (datesToExclude != null && datesToExclude.Count > 0)
+				{
+				trainRows = trainRows
+					.Where (r => !datesToExclude.Contains (r.Date))
+					.ToList ();
+				}
+
+			trainRows = trainRows.OrderBy (r => r.Date).ToList ();
+
+			// ===== move =====
+			List<DataRow> moveTrainRows = trainRows;
+			if (BalanceMove)
+				{
+				moveTrainRows = OversampleBinary (
+					trainRows,
+					r => Math.Abs (r.SolFwd1) >= r.MinMove,
+					BalanceTargetFrac
+				);
+				}
+
 			var moveData = _ml.Data.LoadFromEnumerable (
-				trainRows.Select (r => new MlSampleBinary
+				moveTrainRows.Select (r => new MlSampleBinary
 					{
 					Label = Math.Abs (r.SolFwd1) >= r.MinMove,
-					Features = r.Features.Select (f => (float) f).ToArray ()
+					Features = ToFloatFixed (r.Features)
 					})
 			);
 
@@ -40,30 +54,41 @@ namespace SolSignalModel1D_Backtest.Core.ML
 					NumberOfLeaves = 16,
 					NumberOfIterations = 90,
 					LearningRate = 0.07f,
-					MinimumExampleCountPerLeaf = 20
+					MinimumExampleCountPerLeaf = 20,
+					Seed = 42,
+					NumberOfThreads = 1
 					});
 
 			var moveModel = movePipe.Fit (moveData);
-			Console.WriteLine ($"[2stage] move-model trained on {trainRows.Count} rows");
+			Console.WriteLine ($"[2stage] move-model trained on {moveTrainRows.Count} rows");
 
-			// ===== 2) Строки с реальным ходом → модели направления =====
-			var moveRows = trainRows.Where (r => Math.Abs (r.SolFwd1) >= r.MinMove).ToList ();
+			// ===== dir =====
+			var moveRows = trainRows
+				.Where (r => Math.Abs (r.SolFwd1) >= r.MinMove)
+				.OrderBy (r => r.Date)
+				.ToList ();
 
-			var dirNormalRows = moveRows.Where (r => !r.RegimeDown).ToList ();
-			var dirDownRows = moveRows.Where (r => r.RegimeDown).ToList ();
+			var dirNormalRows = moveRows.Where (r => !r.RegimeDown).OrderBy (r => r.Date).ToList ();
+			var dirDownRows = moveRows.Where (r => r.RegimeDown).OrderBy (r => r.Date).ToList ();
+
+			if (BalanceDir)
+				{
+				dirNormalRows = OversampleBinary (dirNormalRows, r => r.SolFwd1 > 0, BalanceTargetFrac);
+				dirDownRows = OversampleBinary (dirDownRows, r => r.SolFwd1 > 0, BalanceTargetFrac);
+				}
 
 			var dirNormalModel = BuildDirModel (dirNormalRows, "dir-normal");
 			var dirDownModel = BuildDirModel (dirDownRows, "dir-down");
 
-			// ===== 3) Микро — только по твоим реальным микро-дням =====
-			var microFlatModel = BuildMicroFlatModel (trainRows);
+			// ===== micro =====
+			var microModel = BuildMicroFlatModel (trainRows);
 
 			return new ModelBundle
 				{
 				MoveModel = moveModel,
 				DirModelNormal = dirNormalModel,
 				DirModelDown = dirDownModel,
-				MicroFlatModel = microFlatModel,
+				MicroFlatModel = microModel,
 				MlCtx = _ml
 				};
 			}
@@ -82,7 +107,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				rows.Select (r => new MlSampleBinary
 					{
 					Label = r.SolFwd1 > 0,
-					Features = r.Features.Select (f => (float) f).ToArray ()
+					Features = ToFloatFixed (r.Features)
 					})
 			);
 
@@ -92,7 +117,9 @@ namespace SolSignalModel1D_Backtest.Core.ML
 					NumberOfLeaves = 16,
 					NumberOfIterations = 90,
 					LearningRate = 0.07f,
-					MinimumExampleCountPerLeaf = 15
+					MinimumExampleCountPerLeaf = 15,
+					Seed = 42,
+					NumberOfThreads = 1
 					});
 
 			var model = pipe.Fit (data);
@@ -100,15 +127,11 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			return model;
 			}
 
-		/// <summary>
-		/// микро для боковика — только реальные микро-дни из RowBuilder (FactMicroUp/Down)
-		/// </summary>
 		private ITransformer? BuildMicroFlatModel ( List<DataRow> rows )
 			{
-			// берём только то, что ты уже пометил как микро
 			var flats = rows
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderByDescending (r => r.Date)
+				.OrderBy (r => r.Date)
 				.ToList ();
 
 			if (flats.Count < 30)
@@ -117,24 +140,21 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				return null;
 				}
 
-			// можно чуть сбалансировать, но без фанатизма
-			var upFlats = flats.Where (r => r.FactMicroUp).ToList ();
-			var downFlats = flats.Where (r => r.FactMicroDown).ToList ();
-			int take = Math.Min (upFlats.Count, downFlats.Count);
+			var up = flats.Where (r => r.FactMicroUp).ToList ();
+			var dn = flats.Where (r => r.FactMicroDown).ToList ();
+			int take = Math.Min (up.Count, dn.Count);
 			if (take > 0)
 				{
-				upFlats = upFlats.Take (take).ToList ();
-				downFlats = downFlats.Take (take).ToList ();
-				flats = upFlats.Concat (downFlats)
-							   .OrderByDescending (r => r.Date)
-							   .ToList ();
+				up = up.Take (take).OrderBy (r => r.Date).ToList ();
+				dn = dn.Take (take).OrderBy (r => r.Date).ToList ();
+				flats = up.Concat (dn).OrderBy (r => r.Date).ToList ();
 				}
 
 			var data = _ml.Data.LoadFromEnumerable (
 				flats.Select (r => new MlSampleBinary
 					{
-					Label = r.FactMicroUp, // вверх = 1
-					Features = r.Features.Select (f => (float) f).ToArray ()
+					Label = r.FactMicroUp,
+					Features = ToFloatFixed (r.Features)
 					})
 			);
 
@@ -144,12 +164,53 @@ namespace SolSignalModel1D_Backtest.Core.ML
 					NumberOfLeaves = 12,
 					NumberOfIterations = 70,
 					LearningRate = 0.07f,
-					MinimumExampleCountPerLeaf = 15
+					MinimumExampleCountPerLeaf = 15,
+					Seed = 42,
+					NumberOfThreads = 1
 					});
 
 			var model = pipe.Fit (data);
 			Console.WriteLine ($"[2stage-micro] обучено на {flats.Count} REAL микро-днях");
 			return model;
+			}
+
+		private static List<DataRow> OversampleBinary (
+			List<DataRow> src,
+			Func<DataRow, bool> isPositive,
+			double targetFrac )
+			{
+			var pos = src.Where (isPositive).ToList ();
+			var neg = src.Where (r => !isPositive (r)).ToList ();
+
+			if (pos.Count == 0 || neg.Count == 0)
+				return src;
+
+			bool posIsMajor = pos.Count >= neg.Count;
+			int major = posIsMajor ? pos.Count : neg.Count;
+			int minor = posIsMajor ? neg.Count : pos.Count;
+
+			int target = (int) Math.Round (major * targetFrac, MidpointRounding.AwayFromZero);
+			if (target <= minor)
+				return src;
+
+			var minorList = posIsMajor ? neg : pos;
+			var res = new List<DataRow> (src.Count + (target - minor));
+			res.AddRange (src);
+
+			int need = target - minor;
+			for (int i = 0; i < need; i++)
+				res.Add (minorList[i % minorList.Count]);
+
+			return res.OrderBy (r => r.Date).ToList ();
+			}
+
+		private static float[] ToFloatFixed ( double[] src )
+			{
+			var f = new float[MlSchema.FeatureCount];
+			int len = Math.Min (src.Length, MlSchema.FeatureCount);
+			for (int i = 0; i < len; i++)
+				f[i] = (float) src[i];
+			return f;
 			}
 		}
 	}

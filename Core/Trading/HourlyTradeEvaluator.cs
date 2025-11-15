@@ -17,13 +17,156 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 		public int Ambiguous { get; set; }
 		}
 
+	public enum HourlyTradeResult
+		{
+		None = 0,
+		TpFirst = 1,
+		SlFirst = 2,
+		Ambiguous = 3
+		}
+
+	public sealed class HourlyTradeOutcome
+		{
+		public HourlyTradeResult Result { get; set; }
+		public double TpPct { get; set; }
+		public double SlPct { get; set; }
+		}
+
 	public static class HourlyTradeEvaluator
 		{
+		// базовые коэффициенты
+		private const double MinDayTradeable = 0.018; // дни с minMove < 1.8% — шум
+		private const double StrongTpMul = 1.25;
+		private const double StrongSlMul = 0.55;
+		private const double WeakTpMul = 1.10;
+		private const double WeakSlMul = 0.50;
+
+		private const double StrongTpFloor = 0.022;
+		private const double StrongSlFloor = 0.009;
+		private const double WeakTpFloor = 0.017;
+		private const double WeakSlFloor = 0.008;
+
 		/// <summary>
-		/// Часовой backtest: кто первый за день — TP или SL.
-		/// TP/SL берём адаптивно от дневного MinMove, но:
-		/// 1) слишком узкие дни вообще не торгуем (minMove &lt; 1.8%)
-		/// 2) сильные и слабые сигналы имеют разные коэффициенты
+		/// Простой “одиночный” расчёт: что случится в следующие 24 часа для заданного входа.
+		/// </summary>
+		public static HourlyTradeOutcome EvaluateOne (
+			IReadOnlyList<Candle1h> candles1h,
+			DateTime entryUtc,
+			bool goLong,
+			bool goShort,
+			double entryPrice,
+			double dayMinMove,
+			bool strongSignal )
+			{
+			var outcome = new HourlyTradeOutcome
+				{
+				Result = HourlyTradeResult.None,
+				TpPct = 0.0,
+				SlPct = 0.0
+				};
+
+			if (candles1h == null || candles1h.Count == 0)
+				return outcome;
+
+			if (!goLong && !goShort)
+				return outcome;
+
+			if (dayMinMove <= 0)
+				dayMinMove = 0.02;
+
+			if (dayMinMove < MinDayTradeable)
+				return outcome;
+
+			DateTime endUtc = entryUtc.AddHours (24);
+
+			var dayBars = candles1h
+				.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
+				.OrderBy (h => h.OpenTimeUtc)
+				.ToList ();
+
+			if (dayBars.Count == 0)
+				return outcome;
+
+			double tpPct, slPct;
+			if (strongSignal)
+				{
+				tpPct = Math.Max (StrongTpFloor, dayMinMove * StrongTpMul);
+				slPct = Math.Max (StrongSlFloor, dayMinMove * StrongSlMul);
+				}
+			else
+				{
+				tpPct = Math.Max (WeakTpFloor, dayMinMove * WeakTpMul);
+				slPct = Math.Max (WeakSlFloor, dayMinMove * WeakSlMul);
+				}
+
+			outcome.TpPct = tpPct;
+			outcome.SlPct = slPct;
+
+			double tpPrice, slPrice;
+			if (goLong)
+				{
+				tpPrice = entryPrice * (1.0 + tpPct);
+				slPrice = entryPrice * (1.0 - slPct);
+				}
+			else
+				{
+				tpPrice = entryPrice * (1.0 - tpPct);
+				slPrice = entryPrice * (1.0 + slPct);
+				}
+
+			foreach (var bar in dayBars)
+				{
+				if (goLong)
+					{
+					bool tpInBar = bar.High >= tpPrice;
+					bool slInBar = bar.Low <= slPrice;
+
+					if (tpInBar && slInBar)
+						{
+						outcome.Result = HourlyTradeResult.Ambiguous;
+						return outcome;
+						}
+					if (tpInBar)
+						{
+						outcome.Result = HourlyTradeResult.TpFirst;
+						return outcome;
+						}
+					if (slInBar)
+						{
+						outcome.Result = HourlyTradeResult.SlFirst;
+						return outcome;
+						}
+					}
+				else
+					{
+					bool tpInBar = bar.Low <= tpPrice;
+					bool slInBar = bar.High >= slPrice;
+
+					if (tpInBar && slInBar)
+						{
+						outcome.Result = HourlyTradeResult.Ambiguous;
+						return outcome;
+						}
+					if (tpInBar)
+						{
+						outcome.Result = HourlyTradeResult.TpFirst;
+						return outcome;
+						}
+					if (slInBar)
+						{
+						outcome.Result = HourlyTradeResult.SlFirst;
+						return outcome;
+						}
+					}
+				}
+
+			// ни TP ни SL за 24h
+			outcome.Result = HourlyTradeResult.None;
+			return outcome;
+			}
+
+		/// <summary>
+		/// прогон по всем сделкам
 		/// </summary>
 		public static HourlyTpSlReport Evaluate (
 			IReadOnlyList<PredictionRecord> records,
@@ -34,7 +177,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 			if (candles1h == null || candles1h.Count == 0)
 				return report;
 
-			// на всякий сортируем
 			var hours = candles1h.OrderBy (c => c.OpenTimeUtc).ToList ();
 
 			double equity = 1.0;
@@ -43,7 +185,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 
 			foreach (var rec in records.OrderBy (r => r.DateUtc))
 				{
-				// направление
 				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
 				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
 				if (!goLong && !goShort)
@@ -51,8 +192,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 
 				double dayMinMove = rec.MinMove;
 				if (dayMinMove <= 0)
-					dayMinMove = 0.02; // фолбэк
-				if (dayMinMove < 0.018)
+					dayMinMove = 0.02;
+				if (dayMinMove < MinDayTradeable)
 					continue;
 
 				DateTime start = rec.DateUtc;
@@ -66,25 +207,20 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 
 				bool strongSignal = rec.PredLabel == 0 || rec.PredLabel == 2;
 
-				double tpPct;
-				double slPct;
-
+				double tpPct, slPct;
 				if (strongSignal)
 					{
-					tpPct = Math.Max (0.022, dayMinMove * 1.25);
-					slPct = Math.Max (0.009, dayMinMove * 0.55);
+					tpPct = Math.Max (StrongTpFloor, dayMinMove * StrongTpMul);
+					slPct = Math.Max (StrongSlFloor, dayMinMove * StrongSlMul);
 					}
 				else
 					{
-					tpPct = Math.Max (0.017, dayMinMove * 1.10);
-					slPct = Math.Max (0.008, dayMinMove * 0.50);
+					tpPct = Math.Max (WeakTpFloor, dayMinMove * WeakTpMul);
+					slPct = Math.Max (WeakSlFloor, dayMinMove * WeakSlMul);
 					}
 
 				double entry = rec.Entry;
-
-				double tpPrice;
-				double slPrice;
-
+				double tpPrice, slPrice;
 				if (goLong)
 					{
 					tpPrice = entry * (1.0 + tpPct);
@@ -149,7 +285,6 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 					}
 
 				double tradeRet;
-
 				if (isAmb)
 					{
 					report.Ambiguous++;
