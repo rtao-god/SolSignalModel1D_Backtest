@@ -2,6 +2,7 @@
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using System;
 using System.Collections.Generic;
 using System.Linq;

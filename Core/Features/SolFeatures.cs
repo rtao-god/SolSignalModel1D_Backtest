@@ -15,7 +15,7 @@ namespace SolSignalModel1D_Backtest.Core.Features
 			ctx.Add (r.SolRet3);
 			ctx.Add (r.SolRet1);
 
-			// флаг "это утро NY" — полезно, если ты потом смешиваешь
+			// флаг "это утро NY" — полезно
 			ctx.Add (r.IsMorning ? 1.0 : 0.0);
 			}
 		}

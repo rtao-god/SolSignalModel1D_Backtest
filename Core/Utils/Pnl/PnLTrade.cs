@@ -11,12 +11,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 		public DateTime EntryTimeUtc { get; set; }
 		public DateTime ExitTimeUtc { get; set; }
 
-		/// <summary>Daily / DelayedA / DelayedB ...</summary>
-		public string Source { get; set; } = string.Empty;
-
-		/// <summary>daily / intraday / delayed</summary>
-		public string Bucket { get; set; } = string.Empty;
-
 		public bool IsLong { get; set; }
 
 		/// <summary>Цена входа (SOL).</summary>
@@ -47,5 +41,8 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 		/// <summary>Фактическое плечо.</summary>
 		public double LeverageUsed { get; set; }
+
+		public string Source { get; set; } = "";   // Daily / DelayedA / DelayedB
+		public string Bucket { get; set; } = "";   // daily / intraday / delayed
 		}
 	}

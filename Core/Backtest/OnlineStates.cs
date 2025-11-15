@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Delayed;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{

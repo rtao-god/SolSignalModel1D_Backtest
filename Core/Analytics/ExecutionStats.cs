@@ -1,5 +1,5 @@
 ﻿using System;
-using SolSignalModel1D_Backtest.Core.Trading;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics
