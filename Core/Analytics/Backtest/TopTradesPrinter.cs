@@ -2,64 +2,59 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Utils.Format;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
 	public static class TopTradesPrinter
 		{
-		public static void Print ( IReadOnlyList<PnLTrade> trades, double startEquity )
+		public static void PrintTop1PerPolicy ( IReadOnlyList<PnLTrade> trades )
 			{
 			Console.WriteLine ();
-			ConsoleStyler.WithColor (ConsoleStyler.HeaderColor, () =>
-			{
-				Console.WriteLine ("=== Top 10 BEST trades (by Net%) ===");
-			});
+			ConsoleStyler.WriteHeader ("=== Top 1 best / worst per policy ===");
 
-			var best = trades
-				.OrderByDescending (t => t.NetReturnPct)
-				.Take (10)
+			var groups = trades
+				.GroupBy (t => $"{t.Source}:{t.Bucket}:{t.LeverageUsed:0.0}x")
+				.OrderBy (g => g.Key)
 				.ToList ();
 
-			var tBest = new TextTable ();
-			tBest.AddHeader ("date", "src", "net %", "comm", "eq after");
-			foreach (var b in best)
+			var t = new TextTable ();
+			t.AddHeader (
+				"policy",
+				"BEST date", "BEST side", "BEST net%", "BEST entry", "BEST exit", "BEST liq",
+				"WORST date", "WORST side", "WORST net%", "WORST entry", "WORST exit", "WORST liq"
+			);
+
+			foreach (var g in groups)
 				{
-				tBest.AddRow (
-					b.DateUtc.ToString ("yyyy-MM-dd"),
-					b.Source,
-					ConsoleNumberFormatter.PctShort (b.NetReturnPct),
-					ConsoleNumberFormatter.MoneyShort (b.Commission),
-					ConsoleNumberFormatter.MoneyShort (b.EquityAfter)
+				var best = g.OrderByDescending (x => x.NetReturnPct).FirstOrDefault ();
+				var worst = g.OrderBy (x => x.NetReturnPct).FirstOrDefault ();
+
+				if (best == null || worst == null)
+					continue;
+
+				var color = (best.NetReturnPct - Math.Abs (worst.NetReturnPct)) >= 0
+					? ConsoleStyler.GoodColor
+					: ConsoleStyler.BadColor;
+
+				t.AddColoredRow (color,
+					g.Key,
+					best.DateUtc.ToString ("yyyy-MM-dd"),
+					best.IsLong ? "LONG" : "SHORT",
+					best.NetReturnPct.ToString ("+0.00;-0.00"),
+					best.EntryPrice.ToString ("0.####"),
+					best.ExitPrice.ToString ("0.####"),
+					best.IsLiquidated ? "YES" : "no",
+					worst.DateUtc.ToString ("yyyy-MM-dd"),
+					worst.IsLong ? "LONG" : "SHORT",
+					worst.NetReturnPct.ToString ("+0.00;-0.00"),
+					worst.EntryPrice.ToString ("0.####"),
+					worst.ExitPrice.ToString ("0.####"),
+					worst.IsLiquidated ? "YES" : "no"
 				);
 				}
-			tBest.WriteToConsole ();
 
-			Console.WriteLine ();
-			ConsoleStyler.WithColor (ConsoleStyler.HeaderColor, () =>
-			{
-				Console.WriteLine ("=== Top 10 WORST trades (by Net%) ===");
-			});
-
-			var worst = trades
-				.OrderBy (t => t.NetReturnPct)
-				.Take (10)
-				.ToList ();
-
-			var tWorst = new TextTable ();
-			tWorst.AddHeader ("date", "src", "net %", "comm", "eq after");
-			foreach (var w in worst)
-				{
-				tWorst.AddRow (
-					w.DateUtc.ToString ("yyyy-MM-dd"),
-					w.Source,
-					ConsoleNumberFormatter.PctShort (w.NetReturnPct),
-					ConsoleNumberFormatter.MoneyShort (w.Commission),
-					ConsoleNumberFormatter.MoneyShort (w.EquityAfter)
-				);
-				}
-			tWorst.WriteToConsole ();
+			t.WriteToConsole ();
 			}
 		}
 	}

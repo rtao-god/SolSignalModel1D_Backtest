@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -21,28 +22,105 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			["CHF"] = 3.6
 			};
 
-		// =========================================================
-		// 6h свечи с Binance, двигаемся НАЗАД по времени
-		// =========================================================
+		// ===== 1m =====
+		public static async Task<List<Candle1m>> GetBinance1m (
+			HttpClient http,
+			string symbol,
+			int max,
+			bool allowNull = false )
+			{
+			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
+			int ws = symbol.IndexOfAny (new[] { ' ', '\t', '\r', '\n' });
+			if (ws >= 0)
+				symbol = symbol.Substring (0, ws);
+
+			string symbolEsc = Uri.EscapeDataString (symbol);
+
+			const int chunk = 1000;
+			var all = new List<Candle1m> (max);
+			long? endTimeMs = null;
+
+			try
+				{
+				while (all.Count < max)
+					{
+					int need = Math.Min (chunk, max - all.Count);
+					string url = $"https://api.binance.com/api/v3/klines?symbol={symbolEsc}&interval=1m&limit={need}";
+					if (endTimeMs.HasValue)
+						url += $"&endTime={endTimeMs.Value}";
+
+					using var resp = await http.GetAsync (url);
+					if (!resp.IsSuccessStatusCode)
+						{
+						if (allowNull)
+							return all;
+						resp.EnsureSuccessStatusCode ();
+						}
+
+					await using var s = await resp.Content.ReadAsStreamAsync ();
+					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+					if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
+						break;
+
+					long earliestOpenMs = long.MaxValue;
+
+					foreach (var el in root.EnumerateArray ())
+						{
+						long openTime = el[0].GetInt64 ();
+						double open = double.Parse (el[1].GetString ()!, CultureInfo.InvariantCulture);
+						double high = double.Parse (el[2].GetString ()!, CultureInfo.InvariantCulture);
+						double low = double.Parse (el[3].GetString ()!, CultureInfo.InvariantCulture);
+						double close = double.Parse (el[4].GetString ()!, CultureInfo.InvariantCulture);
+
+						DateTime dt = DateTimeOffset.FromUnixTimeMilliseconds (openTime).UtcDateTime;
+						all.Insert (0, new Candle1m
+							{
+							OpenTimeUtc = dt,
+							Open = open,
+							High = high,
+							Low = low,
+							Close = close
+							});
+
+						if (openTime < earliestOpenMs)
+							earliestOpenMs = openTime;
+						}
+
+					const long oneMinuteMs = 1L * 60 * 1000;
+					endTimeMs = earliestOpenMs - oneMinuteMs;
+
+					if (all.Count >= max)
+						break;
+					}
+
+				all.Sort (( a, b ) => a.OpenTimeUtc.CompareTo (b.OpenTimeUtc));
+				if (all.Count > max)
+					all = all.GetRange (all.Count - max, max);
+
+				return all;
+				}
+			catch
+				{
+				if (allowNull)
+					return new List<Candle1m> ();
+				throw;
+				}
+			}
+
+		// ===== 6h =====
 		public static async Task<List<Candle6h>> GetBinance6h (
 			HttpClient http,
 			string symbol,
 			int max,
 			bool allowNull = false )
 			{
-			// на всякий случай подчистим то, что тебе прилетело из Program.cs
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
-			// вырезаем всё после первого пробела/таба, если вдруг кто-то передал "BTCUSDT 6h"
 			int ws = symbol.IndexOfAny (new[] { ' ', '\t', '\r', '\n' });
-			if (ws >= 0)
-				symbol = symbol.Substring (0, ws);
-
-			symbol = symbol.ToUpperInvariant ();
+			if (ws >= 0) symbol = symbol.Substring (0, ws);
 			string symbolEsc = Uri.EscapeDataString (symbol);
 
 			const int chunk = 1000;
 			var all = new List<Candle6h> (max);
-
 			long? endTimeMs = null;
 
 			try
@@ -59,11 +137,8 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					using var resp = await http.GetAsync (url);
 					if (!resp.IsSuccessStatusCode)
 						{
-						var err = await resp.Content.ReadAsStringAsync ();
-
 						if (allowNull)
 							return all;
-
 						resp.EnsureSuccessStatusCode ();
 						}
 
@@ -101,17 +176,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					if (batch.Count == 0)
 						break;
 
-					// чтобы было по времени
 					batch.Sort (( a, b ) => a.OpenTimeUtc.CompareTo (b.OpenTimeUtc));
-
-					// идём назад → вставляем в начало
 					all.InsertRange (0, batch);
 
-					// готовим следующий заход "ещё старше"
 					const long sixHoursMs = 6L * 60 * 60 * 1000;
 					endTimeMs = earliestOpenMs - sixHoursMs;
 
-					// если вернул меньше — дальше нечего
 					if (batch.Count < need)
 						break;
 					}
@@ -130,9 +200,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				}
 			}
 
-		// =========================================================
-		// 1h свечи (для точного TP/SL)
-		// =========================================================
+		// ===== 1h =====
 		public static async Task<List<Candle1h>> GetBinance1h (
 			HttpClient http,
 			string symbol,
@@ -140,17 +208,13 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			bool allowNull = false )
 			{
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
-			// вырезаем всё после первого пробела/таба, если вдруг кто-то передал "BTCUSDT 6h"
 			int ws = symbol.IndexOfAny (new[] { ' ', '\t', '\r', '\n' });
 			if (ws >= 0)
 				symbol = symbol.Substring (0, ws);
-
-			symbol = symbol.ToUpperInvariant ();
 			string symbolEsc = Uri.EscapeDataString (symbol);
 
 			const int chunk = 1000;
 			var all = new List<Candle1h> (max);
-
 			long? endTimeMs = null;
 
 			try
@@ -167,11 +231,8 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					using var resp = await http.GetAsync (url);
 					if (!resp.IsSuccessStatusCode)
 						{
-						var err = await resp.Content.ReadAsStringAsync ();
-
 						if (allowNull)
 							return all;
-
 						resp.EnsureSuccessStatusCode ();
 						}
 
@@ -226,7 +287,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				}
 			}
 
-		// ===== FNG, DXY и extra.json оставляю как у тебя =====
+		// ===== FNG / DXY / extra ===== 
 
 		public static async Task<Dictionary<DateTime, int>> GetFngHistory ( HttpClient http )
 			{
@@ -252,7 +313,6 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				}
 			catch
 				{
-				// проглотим
 				}
 			return dict;
 			}
@@ -331,6 +391,69 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			public DateTime Date { get; set; }
 			public double Funding { get; set; }
 			public double OI { get; set; }
+			}
+
+		// ===== диапазонный загрузчик =====
+
+		public static async Task<List<(DateTime openUtc, double open, double high, double low, double close)>> GetBinanceKlinesRange (
+			HttpClient http,
+			string symbol,
+			string interval,
+			DateTime fromUtc,
+			DateTime toUtc )
+			{
+			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
+			string symbolEsc = Uri.EscapeDataString (symbol);
+
+			long startMs = new DateTimeOffset (fromUtc).ToUnixTimeMilliseconds ();
+			long endMs = new DateTimeOffset (toUtc).ToUnixTimeMilliseconds ();
+
+			const int limit = 1000;
+
+			var result = new List<(DateTime openUtc, double open, double high, double low, double close)> (1024);
+
+			long cursor = startMs;
+
+			while (cursor < endMs)
+				{
+				string url =
+					$"https://api.binance.com/api/v3/klines?symbol={symbolEsc}&interval={interval}&limit={limit}&startTime={cursor}&endTime={endMs}";
+
+				using var resp = await http.GetAsync (url);
+				if (!resp.IsSuccessStatusCode)
+					resp.EnsureSuccessStatusCode ();
+
+				await using var s = await resp.Content.ReadAsStreamAsync ();
+				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+
+				if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
+					break;
+
+				long maxTs = 0;
+
+				foreach (var el in root.EnumerateArray ())
+					{
+					long openTime = el[0].GetInt64 ();
+					double open = double.Parse (el[1].GetString ()!, CultureInfo.InvariantCulture);
+					double high = double.Parse (el[2].GetString ()!, CultureInfo.InvariantCulture);
+					double low = double.Parse (el[3].GetString ()!, CultureInfo.InvariantCulture);
+					double close = double.Parse (el[4].GetString ()!, CultureInfo.InvariantCulture);
+
+					var dt = DateTimeOffset.FromUnixTimeMilliseconds (openTime).UtcDateTime;
+					result.Add ((dt, open, high, low, close));
+
+					if (openTime > maxTs)
+						maxTs = openTime;
+					}
+
+				if (maxTs == 0)
+					break;
+
+				cursor = maxTs + 1;
+				}
+
+			result.Sort (( a, b ) => a.openUtc.CompareTo (b.openUtc));
+			return result;
 			}
 		}
 	}

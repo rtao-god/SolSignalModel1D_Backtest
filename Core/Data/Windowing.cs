@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 

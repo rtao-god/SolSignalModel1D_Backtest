@@ -1,6 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.States;
 using SolSignalModel1D_Backtest.Core.Trading;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
 using System;
 using System.Collections.Generic;
@@ -10,22 +14,26 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	public static class DayExecutor
 		{
-		// пороги для онлайн-прогонов A/B — можно крутить
 		private const float PullbackProbThresh = 0.70f;
 		private const float SmallProbThresh = 0.75f;
+		private const bool EnableDelayedB = false;
 
 		public static PredictionRecord ProcessDay (
 			DataRow dayRow,
 			PredictionEngine dailyEngine,
-			IReadOnlyList<Candle1h>? sol1h,
+			IReadOnlyList<Candle1h> sol1h,
+			IReadOnlyList<Candle1m> sol1m,
 			Dictionary<DateTime, Candle6h> sol6hDict,
 			SlOnlineState slState,
 			PullbackContinuationOnlineState pullbackState,
 			SmallImprovementOnlineState smallState,
 			Analytics.ExecutionStats stats )
 			{
-			// 1. дневной прогноз
-			var (predCls, _, reason, micro) = dailyEngine.Predict (dayRow);
+			// дневной предикт из PredictionEngine
+			var pred = dailyEngine.Predict (dayRow);
+			int predCls = pred.Class;
+			var micro = pred.Micro;
+			string reason = pred.Reason;
 
 			var fwd = BacktestHelpers.GetForwardInfo (dayRow.Date, sol6hDict);
 			double entry = fwd.entry;
@@ -57,21 +65,30 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				DelayedIntradayResult = 0,
 				DelayedIntradayTpPct = 0.0,
 				DelayedIntradaySlPct = 0.0,
-				 SlHighDecision = false,
-				DelayedEntryExecutedAtUtc = null
+				DelayedEntryExecutedAtUtc = null,
+				SlHighDecision = false
 				};
 
-			// если нет направления или нет 1h — просто вернуть дневной рекорд
-			if (!hasDir || sol1h == null || sol1h.Count == 0)
+			if (!hasDir)
 				return rec;
 
-			bool strong = predCls == 2 || predCls == 0;
-			double dayMinMove = dayRow.MinMove;
-			if (dayMinMove <= 0) dayMinMove = 0.02;
+			// 1h и 1m за день
+			var day1h = sol1h
+				.Where (h => h.OpenTimeUtc >= dayRow.Date && h.OpenTimeUtc < dayRow.Date.AddHours (24))
+				.OrderBy (h => h.OpenTimeUtc)
+				.ToList ();
 
-			// 2. базовый исход за 24h от входа в 12:00
-			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				sol1h,
+			var day1m = sol1m
+				.Where (m => m.OpenTimeUtc >= dayRow.Date && m.OpenTimeUtc < dayRow.Date.AddHours (24))
+				.OrderBy (m => m.OpenTimeUtc)
+				.ToList ();
+
+			bool strong = predCls == 2 || predCls == 0;
+			double dayMinMove = dayRow.MinMove > 0 ? dayRow.MinMove : 0.02;
+
+			// базовый исход — ТОЛЬКО по минуте
+			var baseOutcome = MinuteTradeEvaluator.Evaluate (
+				day1m,
 				dayRow.Date,
 				goLong,
 				goShort,
@@ -80,11 +97,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				strong
 			);
 
-			// 3. SL-оценка
-			bool slSaidRisk = false;
-			double slProb = 0.0;
-
-			if (slState.Engine != null)
+			// SL-фичи всё ещё по 1h
+			if (slState.Engine != null && sol1h.Count > 0)
 				{
 				var slFeats = SlFeatureBuilder.Build (
 					dayRow.Date,
@@ -102,132 +116,143 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					EntryUtc = dayRow.Date
 					});
 
-				slProb = slPred.Probability;
+				double slProb = slPred.Probability;
 				stats.AddSlScore (slProb, slPred.PredictedLabel, baseOutcome);
 
-				slSaidRisk = slPred.Probability >= slState.SLRiskThreshold;
-
+				bool slSaidRisk = slProb >= slState.SLRiskThreshold;
 				rec.SlHighDecision = slSaidRisk;
-				}
 
-			// если день нормальный — просто фиксируем базу и выходим
-			if (!slSaidRisk)
+				if (slSaidRisk)
+					{
+					// A
+					bool wantA = false;
+					if (pullbackState.Engine != null)
+						{
+						var featsA = TargetLevelFeatureBuilder.Build (
+							dayRow.Date,
+							goLong,
+							strong,
+							dayMinMove,
+							entry,
+							day1h
+						);
+
+						var sampleA = new PullbackContinuationSample
+							{
+							Label = false,
+							Features = featsA,
+							EntryUtc = dayRow.Date
+							};
+
+						var predA = pullbackState.Engine.Predict (sampleA);
+						if (predA.Probability >= PullbackProbThresh)
+							wantA = true;
+						}
+
+					if (wantA)
+						{
+						var delayed = MinuteDelayedEntryEvaluator.Evaluate (
+							day1m,
+							dayRow.Date,
+							goLong,
+							goShort,
+							entry,
+							dayMinMove,
+							strong,
+							0.45,
+							4.0
+						);
+
+						rec.DelayedEntryUsed = true;
+						rec.DelayedSource = "A";
+						rec.DelayedEntryExecuted = delayed.Executed;
+						rec.DelayedEntryPrice = delayed.TargetEntryPrice;
+						rec.DelayedIntradayResult = (int) delayed.Result;
+						rec.DelayedIntradayTpPct = delayed.TpPct;
+						rec.DelayedIntradaySlPct = delayed.SlPct;
+						rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
+
+						stats.AddDelayed ("A", new DelayedEntryResult
+							{
+							Executed = delayed.Executed,
+							ExecutedAtUtc = delayed.ExecutedAtUtc,
+							TargetEntryPrice = delayed.TargetEntryPrice,
+							Result = delayed.Result,
+							TpPct = delayed.TpPct,
+							SlPct = delayed.SlPct
+							});
+						return rec;
+						}
+
+					// B (если включим)
+					if (EnableDelayedB && smallState.Engine != null)
+						{
+						var featsB = TargetLevelFeatureBuilder.Build (
+							dayRow.Date,
+							goLong,
+							strong,
+							dayMinMove,
+							entry,
+							day1h
+						);
+
+						var sampleB = new SmallImprovementSample
+							{
+							Label = false,
+							Features = featsB,
+							EntryUtc = dayRow.Date
+							};
+
+						var predB = smallState.Engine.Predict (sampleB);
+						if (predB.Probability >= SmallProbThresh)
+							{
+							var delayed = MinuteDelayedEntryEvaluator.Evaluate (
+								day1m,
+								dayRow.Date,
+								goLong,
+								goShort,
+								entry,
+								dayMinMove,
+								strong,
+								0.18,
+								2.0
+							);
+
+							rec.DelayedEntryUsed = true;
+							rec.DelayedSource = "B";
+							rec.DelayedEntryExecuted = delayed.Executed;
+							rec.DelayedEntryPrice = delayed.TargetEntryPrice;
+							rec.DelayedIntradayResult = (int) delayed.Result;
+							rec.DelayedIntradayTpPct = delayed.TpPct;
+							rec.DelayedIntradaySlPct = delayed.SlPct;
+							rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
+
+							stats.AddDelayed ("B", new DelayedEntryResult
+								{
+								Executed = delayed.Executed,
+								ExecutedAtUtc = delayed.ExecutedAtUtc,
+								TargetEntryPrice = delayed.TargetEntryPrice,
+								Result = delayed.Result,
+								TpPct = delayed.TpPct,
+								SlPct = delayed.SlPct
+								});
+							return rec;
+							}
+						}
+
+					// риск был, но ничего не подошло
+					stats.AddImmediate (baseOutcome);
+					return rec;
+					}
+				}
+			else
 				{
+				// SL-модели нет → просто фиксируем базовый вариант
 				stats.AddImmediate (baseOutcome);
 				return rec;
 				}
 
-			// соберём 24h бары на день, чтобы A/B иметь intraday-картинку
-			var dayHours = sol1h
-				.Where (h => h.OpenTimeUtc >= dayRow.Date && h.OpenTimeUtc < dayRow.Date.AddHours (24))
-				.OrderBy (h => h.OpenTimeUtc)
-				.ToList ();
-
-			// 4. пробуем "глубокий откат" (A)
-			bool wantA = false;
-			if (pullbackState.Engine != null)
-				{
-				var featsA = TargetLevelFeatureBuilder.Build (
-					dayRow.Date,
-					goLong,
-					strong,
-					dayMinMove,
-					entry,
-					dayHours
-				);
-
-				var sampleA = new PullbackContinuationSample
-					{
-					Label = false,
-					Features = featsA,
-					EntryUtc = dayRow.Date
-					};
-
-				var predA = pullbackState.Engine.Predict (sampleA);
-				if (predA.Probability >= PullbackProbThresh)
-					wantA = true;
-				}
-
-			if (wantA)
-				{
-				var delayed = DelayedEntryEvaluator.Evaluate (
-					sol1h,
-					dayRow.Date,
-					goLong,
-					goShort,
-					entry,
-					dayMinMove,
-					strong,
-					0.45,   // deep
-					4.0     // up to 4h
-				);
-
-				rec.DelayedEntryUsed = true;
-				rec.DelayedSource = "A";
-				rec.DelayedEntryExecuted = delayed.Executed;
-				rec.DelayedEntryPrice = delayed.TargetEntryPrice;
-				rec.DelayedIntradayResult = (int) delayed.Result;
-				rec.DelayedIntradayTpPct = delayed.TpPct;
-				rec.DelayedIntradaySlPct = delayed.SlPct;
-				rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
-
-				stats.AddDelayed ("A", delayed);
-				return rec;
-				}
-
-			// 5. пробуем "мелкий откат" (B)
-			bool wantB = false;
-			if (smallState.Engine != null)
-				{
-				var featsB = TargetLevelFeatureBuilder.Build (
-					dayRow.Date,
-					goLong,
-					strong,
-					dayMinMove,
-					entry,
-					dayHours
-				);
-
-				var sampleB = new SmallImprovementSample
-					{
-					Label = false,
-					Features = featsB,
-					EntryUtc = dayRow.Date
-					};
-
-				var predB = smallState.Engine.Predict (sampleB);
-				if (predB.Probability >= SmallProbThresh)
-					wantB = true;
-				}
-
-			if (wantB)
-				{
-				var delayed = DelayedEntryEvaluator.Evaluate (
-					sol1h,
-					dayRow.Date,
-					goLong,
-					goShort,
-					entry,
-					dayMinMove,
-					strong,
-					0.18,   // small
-					2.0     // up to 2h
-				);
-
-				rec.DelayedEntryUsed = true;
-				rec.DelayedSource = "B";
-				rec.DelayedEntryExecuted = delayed.Executed;
-				rec.DelayedEntryPrice = delayed.TargetEntryPrice;
-				rec.DelayedIntradayResult = (int) delayed.Result;
-				rec.DelayedIntradayTpPct = delayed.TpPct;
-				rec.DelayedIntradaySlPct = delayed.SlPct;
-				rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
-
-				stats.AddDelayed ("B", delayed);
-				return rec;
-				}
-
-			// SL сказал "опасно", но A/B не нашли разумного отката → считаем как обычный "immediate"
+			// обычный день
 			stats.AddImmediate (baseOutcome);
 			return rec;
 			}
