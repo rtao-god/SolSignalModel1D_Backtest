@@ -5,7 +5,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 	/// <summary>
 	/// LEGACY
 	/// </summary>
-	 
+
 	/// <summary>
 	/// Заглушка для уровней ликвидаций.
 	/// Сейчас возвращает 0, но интерфейс стабильный:

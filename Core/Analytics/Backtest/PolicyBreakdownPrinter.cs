@@ -34,21 +34,63 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				"Liq #"
 			);
 
-			foreach (var r in results.OrderBy (x => x.PolicyName).ThenBy (x => x.Margin.ToString ()))
+			foreach (var r in results
+				.OrderBy (x => x.PolicyName)
+				.ThenBy (x => x.Margin.ToString ()))
 				{
 				var trades = r.Trades ?? new List<PnLTrade> ();
-				var longs = trades.Where (x => x.IsLong).ToList ();
+				var longs  = trades.Where (x => x.IsLong).ToList ();
 				var shorts = trades.Where (x => !x.IsLong).ToList ();
 
 				int w = trades.Count (x => x.NetReturnPct > 0.0);
 				int l = trades.Count - w;
 				string wl = $"{w}/{l}";
-				string winRate = trades.Count > 0 ? $"{(double) w / trades.Count * 100.0:0.0}%" : "—";
-				double avgTradePct = trades.Count > 0 ? trades.Average (x => x.NetReturnPct) : 0.0;
+				string winRate = trades.Count > 0
+					? $"{(double) w / trades.Count * 100.0:0.0}%"
+					: "—";
+				double avgTradePct = trades.Count > 0
+					? trades.Average (x => x.NetReturnPct)
+					: 0.0;
 
-				double longUsd = longs.Sum (x => x.PositionUsd * (x.NetReturnPct / 100.0));
-				double shortUsd = shorts.Sum (x => x.PositionUsd * (x.NetReturnPct / 100.0));
-				double totalUsd = longUsd + shortUsd;
+				// --- "сырые" PnL по трейдам, только для направления ---
+				double longUsdRaw = longs.Sum (x => x.PositionUsd * (x.NetReturnPct / 100.0));
+				double shortUsdRaw = shorts.Sum (x => x.PositionUsd * (x.NetReturnPct / 100.0));
+				double rawTotalUsd = longUsdRaw + shortUsdRaw;
+
+				// --- wealth-based Totals через снапшоты бакетов ---
+				double startCapital = 0.0;
+				double equityNow    = 0.0;
+
+				if (r.BucketSnapshots != null && r.BucketSnapshots.Count > 0)
+					{
+					startCapital = r.BucketSnapshots.Sum (b => b.StartCapital);
+					equityNow    = r.BucketSnapshots.Sum (b => b.EquityNow);
+					}
+
+				double withdrawn = r.WithdrawnTotal;
+				double wealthNow = equityNow + withdrawn;     // активный капитал + выведенное
+
+				double totalUsdWealth;
+				if (startCapital > 0.0)
+					{
+					totalUsdWealth = wealthNow - startCapital;
+					}
+				else
+					{
+					// fallback на старую логику, если вдруг нет снапшотов
+					totalUsdWealth = wealthNow - startCapital;
+					}
+
+				// --- приводим long/short к wealth-based Total, чтобы суммы сходились ---
+				double longUsd  = longUsdRaw;
+				double shortUsd = shortUsdRaw;
+
+				if (startCapital > 0.0 && Math.Abs (rawTotalUsd) > 1e-9)
+					{
+					double scale = totalUsdWealth / rawTotalUsd;
+					longUsd  = longUsdRaw  * scale;
+					shortUsd = shortUsdRaw * scale;
+					}
 
 				int liqCnt = trades.Count (x => x.IsLiquidated);
 
@@ -62,16 +104,19 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 					$"{avgTradePct:0.00}%",
 					longs.Count.ToString(),
 					shorts.Count.ToString(),
-					$"{Math.Round(longUsd,2):0.##}$",
-					$"{Math.Round(shortUsd,2):0.##}$",
-					$"{Math.Round(totalUsd,2):0.##}$",
-					$"{Math.Round(r.WithdrawnTotal,2):0.##}$",
+					$"{Math.Round(longUsd, 2):0.##}$",
+					$"{Math.Round(shortUsd, 2):0.##}$",
+					$"{Math.Round(totalUsdWealth, 2):0.##}$",
+					$"{Math.Round(withdrawn, 2):0.##}$",
 					$"{r.TotalPnlPct:0.00}%",
 					$"{r.MaxDdPct:0.00}%",
 					liqCnt.ToString()
 				};
 
-				var color = r.TotalPnlPct >= 0 ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+				var color = r.TotalPnlPct >= 0
+					? ConsoleStyler.GoodColor
+					: ConsoleStyler.BadColor;
+
 				t.AddColoredRow (color, line);
 				}
 
@@ -83,7 +128,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		/// </summary>
 		public static void PrintMonthlySkew ( IReadOnlyList<BacktestPolicyResult> results, int months = 12 )
 			{
-			var allTrades = results.SelectMany (r => r.Trades ?? Enumerable.Empty<PnLTrade> ()).ToList ();
+			var allTrades = results
+				.SelectMany (r => r.Trades ?? Enumerable.Empty<PnLTrade> ())
+				.ToList ();
 			if (allTrades.Count == 0) return;
 
 			var groups = allTrades
@@ -100,16 +147,19 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			foreach (var g in last)
 				{
-				var longs = g.Where (x => x.IsLong).ToList ();
+				var longs  = g.Where (x => x.IsLong).ToList ();
 				var shorts = g.Where (x => !x.IsLong).ToList ();
 
-				double longAvg = longs.Count > 0 ? longs.Average (x => x.NetReturnPct) : 0.0;
+				double longAvg  = longs.Count  > 0 ? longs.Average  (x => x.NetReturnPct) : 0.0;
 				double shortAvg = shorts.Count > 0 ? shorts.Average (x => x.NetReturnPct) : 0.0;
 
 				var monthStr = $"{g.Key.Y}-{g.Key.M:00}";
-				var color = (longAvg + shortAvg) >= 0 ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+				var color = (longAvg + shortAvg) >= 0
+					? ConsoleStyler.GoodColor
+					: ConsoleStyler.BadColor;
 
-				t.AddColoredRow (color,
+				t.AddColoredRow (
+					color,
 					monthStr,
 					longs.Count.ToString (),
 					shorts.Count.ToString (),

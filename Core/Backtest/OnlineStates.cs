@@ -20,8 +20,16 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		public int RetrainEvery { get; set; } = 30;
 		public int SamplesAtLastTrain { get; set; } = 0;
 
-		// ВАЖНО: дефолтный порог, чтобы DayExecutor не считал все дни опасными
-		public float SLRiskThreshold { get; set; } = 0.55f;
+		/// <summary>
+		/// Порог "опасности" для SL-модели.
+		/// 0.50 = стандартный бинарный порог; всегда можно переопределить снаружи.
+		/// </summary>
+		public float SLRiskThreshold { get; set; } = 0.50f;
+
+		/// <summary>
+		/// Удобный флаг, готова ли модель (есть Engine).
+		/// </summary>
+		public bool IsReady => Engine != null;
 
 		public void TryRetrain ( List<SlHitSample> pastSamples, DateTime asOf )
 			{

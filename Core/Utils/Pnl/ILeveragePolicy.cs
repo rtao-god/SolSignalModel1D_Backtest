@@ -7,7 +7,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 	/// </summary>
 	public interface ILeveragePolicy
 		{
-		/// <summary>Человеческое имя политики для вывода в отчёте.</summary>
+		/// <summary> имя политики для вывода в отчёте.</summary>
 		string Name { get; }
 
 		/// <summary>Вернуть плечо для данной сделки.</summary>

@@ -7,21 +7,84 @@ using SolSignalModel1D_Backtest.Core.Utils.Backtest;
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
 	/// <summary>
-	/// Сравнение политик WITH SL vs WITHOUT SL в трёх таблицах:
-	/// 1) PnL-таблица (Total %, Total $, Withdrawn, OnExch и т.д.).
-	/// 2) Risk-таблица (ликвидации, BalMin, время ниже порога, восстановление из MaxDD).
-	/// 3) Доходности по горизонту (день/неделя/месяц/год) на основе wealth-кривой.
-	/// Все расчёты вынесены в PolicySlMetrics; здесь только сборка и печать.
+	/// Сравнение политик BASE vs ANTI-Direction.
+	/// Для каждого режима (BASE и ANTI-D overlay) печатает ТРИ таблицы:
+	///   1) PnL-таблица (Total %, Total $, Withdrawn, OnExch и т.д.).
+	///   2) Risk-таблица (ликвидации, BalMin, время ниже порога, восстановление из MaxDD).
+	///   3) Доходности по горизонту (день/неделя/месяц/год) на основе wealth-кривой.
+	/// Формат строк и логика — как в PolicySlComparisonPrinter:
+	/// внутри режима строки идут: "with SL", затем "no SL", затем снова "with SL"/"no SL" по политикам.
 	/// </summary>
-	public static class PolicySlComparisonPrinter
+	public static class AntiDirectionComparisonPrinter
 		{
+		/// <param name="withSlBase">BASE-режим, WITH SL.</param>
+		/// <param name="withSlAnti">ANTI-D-режим, WITH SL.</param>
+		/// <param name="noSlBase">BASE-режим, NO SL.</param>
+		/// <param name="noSlAnti">ANTI-D-режим, NO SL.</param>
 		public static void Print (
+			IReadOnlyList<BacktestPolicyResult> withSlBase,
+			IReadOnlyList<BacktestPolicyResult> withSlAnti,
+			IReadOnlyList<BacktestPolicyResult> noSlBase,
+			IReadOnlyList<BacktestPolicyResult> noSlAnti )
+			{
+			// Блок 1: BASE direction
+			PrintModeBlock (
+				modeLabel: "BASE direction",
+				withSl: withSlBase,
+				noSl: noSlBase
+			);
+
+			// Блок 2: ANTI-D overlay
+			PrintModeBlock (
+				modeLabel: "ANTI-D overlay",
+				withSl: withSlAnti,
+				noSl: noSlAnti
+			);
+			}
+
+		/// <summary>
+		/// Печатает три таблицы для одного режима (BASE или ANTI-D):
+		/// PnL, Risk/Drawdown, Returns-by-horizon.
+		/// </summary>
+		private static void PrintModeBlock (
+			string modeLabel,
 			IReadOnlyList<BacktestPolicyResult> withSl,
 			IReadOnlyList<BacktestPolicyResult> noSl )
 			{
-			if (withSl == null || withSl.Count == 0) return;
+			if (withSl == null || withSl.Count == 0)
+				return;
 
-			// 1) Собираем метрики для WITH SL и соответствующих NO SL.
+			var rows = BuildRows (withSl, noSl);
+			if (rows.Count == 0)
+				return;
+
+			// 1) PnL-таблица
+			PrintPnlTable (
+				title: $"=== Policies ({modeLabel}): WITH SL vs WITHOUT SL (PnL) ===",
+				rows: rows
+			);
+
+			// 2) Таблица риска / ликвидаций
+			PrintRiskTable (
+				title: $"=== Policies ({modeLabel}): Risk / Drawdown metrics ===",
+				rows: rows
+			);
+
+			// 3) Таблица доходностей по горизонту
+			PrintReturnHorizonTable (
+				title: $"=== Policies ({modeLabel}): Avg returns by horizon (calendar) ===",
+				rows: rows
+			);
+			}
+
+		/// <summary>
+		/// Собирает PolicyRowMetrics для WITH SL и соответствующих NO SL.
+		/// Порядок: для каждой политики — сначала with SL, потом no SL (если есть).
+		/// </summary>
+		private static List<PolicySlMetrics.PolicyRowMetrics> BuildRows (
+			IReadOnlyList<BacktestPolicyResult> withSl,
+			IReadOnlyList<BacktestPolicyResult> noSl )
+			{
 			var rows = new List<PolicySlMetrics.PolicyRowMetrics> ();
 
 			foreach (var w in withSl
@@ -31,34 +94,30 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				// WITH SL
 				rows.Add (PolicySlMetrics.BuildMetrics (w, "with SL"));
 
-				// Пара "без SL", если есть.
+				// Пара NO SL, если есть
 				var n = noSl?
 					.FirstOrDefault (x => x.PolicyName == w.PolicyName && x.Margin.Equals (w.Margin));
 
 				if (n != null)
+					{
 					rows.Add (PolicySlMetrics.BuildMetrics (n, "no SL"));
+					}
 				}
 
-			if (rows.Count == 0) return;
-
-			// 2) Таблица PnL
-			PrintPnlTable (rows);
-
-			// 3) Таблица риска / ликвидаций
-			PrintRiskTable (rows);
-
-			// 4) Таблица средних доходностей по горизонту
-			PrintReturnHorizonTable (rows);
+			return rows;
 			}
 
 		/// <summary>
-		/// Основная PnL-таблица:
+		/// PnL-таблица:
 		/// Policy / Margin / Mode / Trades / Total% / Total$ / MaxDD% / Withdrawn / OnExch$ /
 		/// Long/Short n/$ и средние проценты.
+		/// Формат полностью совпадает с PolicySlComparisonPrinter.PrintPnlTable.
 		/// </summary>
-		private static void PrintPnlTable ( IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
+		private static void PrintPnlTable (
+			string title,
+			IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
 			{
-			ConsoleStyler.WriteHeader ("=== Policies: WITH SL vs WITHOUT SL (PnL) ===");
+			ConsoleStyler.WriteHeader (title);
 
 			var t = new TextTable ();
 			t.AddHeader (
@@ -111,10 +170,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 		/// <summary>
 		/// Risk-таблица: ликвидации, баланс, восстановление из MaxDD, время «внизу», ReqGain%.
+		/// Формат совпадает с PolicySlComparisonPrinter.PrintRiskTable.
 		/// </summary>
-		private static void PrintRiskTable ( IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
+		private static void PrintRiskTable (
+			string title,
+			IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
 			{
-			ConsoleStyler.WriteHeader ("=== Policies: Risk / Drawdown metrics ===");
+			ConsoleStyler.WriteHeader (title);
 
 			var t = new TextTable ();
 			t.AddHeader (
@@ -187,10 +249,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		/// <summary>
 		/// Таблица средних доходностей по горизонту (день/неделя/месяц/год).
 		/// Всё считается на wealth-кривой (equity + withdrawn) по календарному времени.
+		/// Формат совпадает с PolicySlComparisonPrinter.PrintReturnHorizonTable.
 		/// </summary>
-		private static void PrintReturnHorizonTable ( IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
+		private static void PrintReturnHorizonTable (
+			string title,
+			IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
 			{
-			ConsoleStyler.WriteHeader ("=== Policies: Avg returns by horizon (calendar) ===");
+			ConsoleStyler.WriteHeader (title);
 
 			var t = new TextTable ();
 			t.AddHeader (
@@ -233,10 +298,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		/// Логика раскраски строки:
 		/// красный — если политика «умерла» по балансу / ликвидации,
 		/// зелёный — если выжила.
-		/// Условие смерти:
-		/// - была account liquidation (AccRuin > 0), ИЛИ
-		/// - баланс падал ниже 35% от старта (BalMinFrac &lt;= threshold), ИЛИ
-		/// - к концу OnExch ≈ 0 и суммарное состояние wealthNow не выше старта.
+		/// Та же, что в PolicySlComparisonPrinter.
 		/// </summary>
 		private static ConsoleColor ChooseRowColorBySurvival ( PolicySlMetrics.PolicyRowMetrics m )
 			{

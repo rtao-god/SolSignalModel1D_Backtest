@@ -1,5 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.States;
@@ -14,7 +15,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	public static class DayExecutor
 		{
-		private const float PullbackProbThresh = 0.70f;
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+		private const float PullbackProbThresh = 0.85f;  // было 0.70f
 		private const float SmallProbThresh = 0.75f;
 		private const bool EnableDelayedB = false;
 
@@ -72,7 +74,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (!hasDir)
 				return rec;
 
-			// 1h и 1m за день
+			// 1h и 1m только для "фактов" внутри дня
 			var day1h = sol1h
 				.Where (h => h.OpenTimeUtc >= dayRow.Date && h.OpenTimeUtc < dayRow.Date.AddHours (24))
 				.OrderBy (h => h.OpenTimeUtc)
@@ -86,7 +88,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			bool strong = predCls == 2 || predCls == 0;
 			double dayMinMove = dayRow.MinMove > 0 ? dayRow.MinMove : 0.02;
 
-			// базовый исход — ТОЛЬКО по минуте
+			// базовый исход — ТОЛЬКО по минуте (факт, для статистики)
 			var baseOutcome = MinuteTradeEvaluator.Evaluate (
 				day1m,
 				dayRow.Date,
@@ -97,44 +99,49 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				strong
 			);
 
-			// SL-фичи всё ещё по 1h
+			// SL-фичи по 1h (каузально, как и раньше)
 			if (slState.Engine != null && sol1h.Count > 0)
 				{
 				var slFeats = SlFeatureBuilder.Build (
-					dayRow.Date,
-					goLong,
-					strong,
-					dayMinMove,
-					entry,
-					sol1h
+					rec.DateUtc,     // дата входа
+					goLong,          // направление
+					strong,          // сильный/не сильный сигнал
+					dayMinMove,      // MinMove дня
+					entry,           // цена входа
+					sol1h            // ВСЯ 1h-история SOL
 				);
 
 				var slPred = slState.Engine.Predict (new SlHitSample
 					{
+					// Label в рантайме не используется, но безопасно заполним false
 					Label = false,
 					Features = slFeats,
 					EntryUtc = dayRow.Date
 					});
 
 				double slProb = slPred.Probability;
-				stats.AddSlScore (slProb, slPred.PredictedLabel, baseOutcome);
+				bool slPredictedSlFirst = slPred.PredictedLabel;
 
-				bool slSaidRisk = slProb >= slState.SLRiskThreshold;
+				stats.AddSlScore (slProb, slPredictedSlFirst, baseOutcome);
+
+				// HIGH = модель считает, что первым будет SL И уверенность выше порога
+				bool slSaidRisk = slPredictedSlFirst && slProb >= slState.SLRiskThreshold;
 				rec.SlHighDecision = slSaidRisk;
 
 				if (slSaidRisk)
 					{
-					// A
+					// ===== Model A (deep pullback) =====
 					bool wantA = false;
-					if (pullbackState.Engine != null)
+					if (strong && pullbackState.Engine != null)
 						{
+						// фичи только из окна [t-6h, t) по всей SOL 1h истории
 						var featsA = TargetLevelFeatureBuilder.Build (
-							dayRow.Date,
-							goLong,
-							strong,
-							dayMinMove,
-							entry,
-							day1h
+							entryUtc: dayRow.Date,
+							goLong: goLong,
+							strongSignal: strong,
+							dayMinMove: dayMinMove,
+							entryPrice: entry,
+							candles1h: sol1h
 						);
 
 						var sampleA = new PullbackContinuationSample
@@ -159,8 +166,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 							entry,
 							dayMinMove,
 							strong,
-							0.45,
-							4.0
+							delayFactor: 0.45,
+							maxDelayHours: 4.0,
+							nyTz: NyTz
 						);
 
 						rec.DelayedEntryUsed = true;
@@ -172,28 +180,28 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 						rec.DelayedIntradaySlPct = delayed.SlPct;
 						rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
 
-						stats.AddDelayed ("A", new DelayedEntryResult
+						stats.AddDelayed ("A", new Trading.Evaluator.DelayedEntryResult
 							{
 							Executed = delayed.Executed,
 							ExecutedAtUtc = delayed.ExecutedAtUtc,
 							TargetEntryPrice = delayed.TargetEntryPrice,
-							Result = delayed.Result,
+							Result = (Trading.Evaluator.DelayedIntradayResult) (int) delayed.Result,
 							TpPct = delayed.TpPct,
 							SlPct = delayed.SlPct
 							});
 						return rec;
 						}
 
-					// B (если включим)
+					// ===== Model B (мелкое улучшение, если включим) =====
 					if (EnableDelayedB && smallState.Engine != null)
 						{
 						var featsB = TargetLevelFeatureBuilder.Build (
-							dayRow.Date,
-							goLong,
-							strong,
-							dayMinMove,
-							entry,
-							day1h
+							entryUtc: dayRow.Date,
+							goLong: goLong,
+							strongSignal: strong,
+							dayMinMove: dayMinMove,
+							entryPrice: entry,
+							candles1h: sol1h
 						);
 
 						var sampleB = new SmallImprovementSample
@@ -214,8 +222,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 								entry,
 								dayMinMove,
 								strong,
-								0.18,
-								2.0
+								delayFactor: 0.18,
+								maxDelayHours: 2.0,
+								nyTz: NyTz
 							);
 
 							rec.DelayedEntryUsed = true;
@@ -227,12 +236,12 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 							rec.DelayedIntradaySlPct = delayed.SlPct;
 							rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
 
-							stats.AddDelayed ("B", new DelayedEntryResult
+							stats.AddDelayed ("B", new Trading.Evaluator.DelayedEntryResult
 								{
 								Executed = delayed.Executed,
 								ExecutedAtUtc = delayed.ExecutedAtUtc,
 								TargetEntryPrice = delayed.TargetEntryPrice,
-								Result = delayed.Result,
+								Result = (Trading.Evaluator.DelayedIntradayResult) (int) delayed.Result,
 								TpPct = delayed.TpPct,
 								SlPct = delayed.SlPct
 								});
@@ -240,7 +249,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 							}
 						}
 
-					// риск был, но ничего не подошло
+					// риск был, но ни A, ни B не сработали → остаёмся на "мгновенном" исходе
 					stats.AddImmediate (baseOutcome);
 					return rec;
 					}
@@ -252,7 +261,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				return rec;
 				}
 
-			// обычный день
+			// обычный день без вмешательства delayed-слоя
 			stats.AddImmediate (baseOutcome);
 			return rec;
 			}

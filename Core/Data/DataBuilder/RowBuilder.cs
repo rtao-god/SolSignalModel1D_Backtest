@@ -1,7 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Domain;
+﻿using SolSignalModel1D_Backtest.Core;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
-using SolSignalModel1D_Backtest.Core;
+using SolSignalModel1D_Backtest.Core.Domain;
+using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
+using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 
 using System;
 using System.Collections.Generic;
@@ -9,30 +11,35 @@ using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
+	/// <summary>
+	/// Построитель дневных строк DataRow из 6h/1m свечей и дневных индикаторов.
+	/// Делает:
+	/// - расчёт индикаторов (RSI, ATR, EMA, BTC 200SMA, FNG, DXY, GOLD);
+	/// - определение режима (NORMAL/DOWN);
+	/// - каузальный adaptive MinMove;
+	/// - path-based разметку по 1m (PathLabeler + micro-факт);
+	/// - таргет SolFwd1 по базовому горизонту выхода (NY→следующее NY утро).
+	/// </summary>
 	public static class RowBuilder
 		{
 		private const int AtrPeriod = 14;
 		private const int RsiPeriod = 14;
 		private const int BtcSmaPeriod = 200;
 
-		private const double TargetHorizonHours = 24.0;
-
-		private const double DailyMinMoveFloor = 0.0075;
-		private const double DailyMinMoveCap = 0.036;
-		private const double DailyMinMoveAtrMul = 1.10;
-		private const double DailyMinMoveVolMul = 1.10;
-
 		private const double DownSol30Thresh = -0.07;
 		private const double DownBtc30Thresh = -0.05;
-
-		private const double MonthlyCapMin = 0.75;
-		private const double MonthlyCapMax = 1.35;
 
 		private const int SolEmaFast = 50;
 		private const int SolEmaSlow = 200;
 		private const int BtcEmaFast = 50;
 		private const int BtcEmaSlow = 200;
 
+		/// <summary>
+		/// Старый удобный вход без 1m. Сейчас 1m обязательны,
+		/// поэтому этот оверлоад просто прокидывает null и улетает
+		/// в InvalidOperationException внутри нового метода.
+		/// Оставлен для совместимости по сигнатурам.
+		/// </summary>
 		public static List<DataRow> BuildRowsDaily (
 			List<Candle6h> solWinTrain,
 			List<Candle6h> btcWinTrain,
@@ -41,9 +48,41 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			Dictionary<DateTime, int> fngHistory,
 			Dictionary<DateTime, double> dxySeries,
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily,
-			TimeZoneInfo nyTz
-		)
+			TimeZoneInfo nyTz )
 			{
+			return BuildRowsDaily (
+				solWinTrain,
+				btcWinTrain,
+				paxgWinTrain,
+				solAll6h,
+				solAll1m: null,
+				fngHistory: fngHistory,
+				dxySeries: dxySeries,
+				extraDaily: extraDaily,
+				nyTz: nyTz);
+			}
+
+		/// <summary>
+		/// Основной вариант: 6h + 1m + адаптивный minMove через MinMoveEngine.
+		/// 1m ОБЯЗАТЕЛЬНЫ. Если их нет — кидается InvalidOperationException.
+		/// Горизонт выхода SolFwd1: baseline exit → следующая рабочая NY-утренняя
+		/// граница 08:00 локального времени (с учётом DST), минус 2 минуты.
+		/// </summary>
+		public static List<DataRow> BuildRowsDaily (
+			List<Candle6h> solWinTrain,
+			List<Candle6h> btcWinTrain,
+			List<Candle6h> paxgWinTrain,
+			List<Candle6h> solAll6h,
+			IReadOnlyList<Candle1m>? solAll1m,
+			Dictionary<DateTime, int> fngHistory,
+			Dictionary<DateTime, double> dxySeries,
+			Dictionary<DateTime, (double Funding, double OI)>? extraDaily,
+			TimeZoneInfo nyTz )
+			{
+			if (solAll1m == null || solAll1m.Count == 0)
+				throw new InvalidOperationException ("[RowBuilder] solAll1m is required for path-based labels and MinMoveEngine.");
+
+			// Индикаторы по 6h
 			var solAtr = Indicators.Indicators.ComputeAtr6h (solAll6h, AtrPeriod);
 			var solRsi = Indicators.Indicators.ComputeRsi6h (solWinTrain, RsiPeriod);
 			var btcSma200 = Indicators.Indicators.ComputeSma6h (btcWinTrain, BtcSmaPeriod);
@@ -54,7 +93,22 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			var btcEma50 = Indicators.Indicators.ComputeEma6h (btcWinTrain, BtcEmaFast);
 			var btcEma200 = Indicators.Indicators.ComputeEma6h (btcWinTrain, BtcEmaSlow);
 
+			// Быстрый доступ к 6h SOL по времени открытия
 			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
+
+			// Отсортированные 1m-свечи для path-разметки
+			var sol1mSorted = solAll1m
+				.OrderBy (m => m.OpenTimeUtc)
+				.ToList ();
+
+			// Конфиг/состояние адаптивного minMove (каузальное накопление истории)
+			var minCfg = new MinMoveConfig ();
+			var minState = new MinMoveState
+				{
+				EwmaVol = 0.0,
+				QuantileQ = 0.0,
+				LastQuantileTune = DateTime.MinValue
+				};
 
 			var rows = new List<DataRow> ();
 
@@ -62,16 +116,22 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				{
 				DateTime openUtc = c.OpenTimeUtc;
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (openUtc, nyTz);
+
+				// Сигналы и строки строятся только для будних дней.
 				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
 					continue;
 
-				DateTime targetUtc = openUtc.AddHours (TargetHorizonHours);
-				if (!sol6hDict.TryGetValue (targetUtc, out var fwdCandle))
-					continue;
+				// Базовый выход: следующая рабочая NY-утренняя граница 08:00 (минус 2 минуты).
+				DateTime exitUtc = Windowing.ComputeBaselineExitUtc (openUtc, nyTz);
 
-				var targetNy = TimeZoneInfo.ConvertTimeFromUtc (targetUtc, nyTz);
-				if (targetNy.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-					continue;
+				// 6h-свеча, которая покрывает момент выхода.
+				var exitCandle = Find6hCandleContainingTime (solAll6h, exitUtc);
+				if (exitCandle == null)
+					{
+					Console.WriteLine ($"[RowBuilder] missing 6h candle for baseline exit {exitUtc:O}, entry {openUtc:O}");
+					throw new InvalidOperationException (
+						$"[RowBuilder] no 6h candle covering baseline exit {exitUtc:O} for entry {openUtc:O}");
+					}
 
 				var btcC = btcWinTrain.FirstOrDefault (x => x.OpenTimeUtc == openUtc);
 				if (btcC == null) continue;
@@ -81,10 +141,10 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				if (solIdx <= 0 || btcIdx <= 0) continue;
 
 				double solClose = c.Close;
-				double solCloseFwd = fwdCandle.Close;
+				double solCloseFwd = exitCandle.Close;
 				if (solClose <= 0 || solCloseFwd <= 0) continue;
 
-				// ретурны
+				// Ретурны SOL/BTC на разных горизонтах (по 6h-окнам)
 				double solRet1 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 1);
 				double solRet3 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 3);
 				double solRet30 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 30);
@@ -93,29 +153,35 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				double btcRet3 = Indicators.Indicators.Ret6h (btcWinTrain, btcIdx, 3);
 				double btcRet30 = Indicators.Indicators.Ret6h (btcWinTrain, btcIdx, 30);
 
-				// EMA
-				double solEma50Val = Indicators.Indicators.FindNearest (solEma50, openUtc, 0.0);
-				double solEma200Val = Indicators.Indicators.FindNearest (solEma200, openUtc, 0.0);
-				double btcEma50Val = Indicators.Indicators.FindNearest (btcEma50, openUtc, 0.0);
-				double btcEma200Val = Indicators.Indicators.FindNearest (btcEma200, openUtc, 0.0);
-
-				double solAboveEma50 = (solEma50Val > 0 && solClose > 0) ? (solClose - solEma50Val) / solEma50Val : 0.0;
-				double solEma50vs200 = (solEma200Val > 0) ? (solEma50Val - solEma200Val) / solEma200Val : 0.0;
-				double btcEma50vs200 = (btcEma200Val > 0) ? (btcEma50Val - btcEma200Val) / btcEma200Val : 0.0;
-
 				if (double.IsNaN (solRet1) || double.IsNaN (solRet3) || double.IsNaN (solRet30) ||
 					double.IsNaN (btcRet1) || double.IsNaN (btcRet3) || double.IsNaN (btcRet30))
 					continue;
 
 				double solBtcRet30 = solRet30 - btcRet30;
 
-				// FNG
+				// EMA-блок по SOL/BTC (50/200) и производные фичи
+				double solEma50Val = Indicators.Indicators.FindNearest (solEma50, openUtc, 0.0);
+				double solEma200Val = Indicators.Indicators.FindNearest (solEma200, openUtc, 0.0);
+				double btcEma50Val = Indicators.Indicators.FindNearest (btcEma50, openUtc, 0.0);
+				double btcEma200Val = Indicators.Indicators.FindNearest (btcEma200, openUtc, 0.0);
+
+				double solAboveEma50 = (solEma50Val > 0 && solClose > 0)
+					? (solClose - solEma50Val) / solEma50Val
+					: 0.0;
+				double solEma50vs200 = (solEma200Val > 0)
+					? (solEma50Val - solEma200Val) / solEma200Val
+					: 0.0;
+				double btcEma50vs200 = (btcEma200Val > 0)
+					? (btcEma50Val - btcEma200Val) / btcEma200Val
+					: 0.0;
+
+				// Fear & Greed
 				int fng = 50;
 				if (fngHistory != null && fngHistory.Count > 0)
 					fng = Indicators.Indicators.PickNearestFng (fngHistory, openUtc.Date);
 				double fngNorm = (fng - 50.0) / 50.0;
 
-				// DXY
+				// DXY (сжатый 30-дневный change)
 				double dxyChg30 = 0.0;
 				if (dxySeries != null && dxySeries.Count > 0)
 					{
@@ -123,7 +189,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					dxyChg30 = Math.Clamp (dxyChg30, -0.03, 0.03);
 					}
 
-				// GOLD (через PAXG)
+				// GOLD через PAXG (30-дневный change)
 				double goldChg30 = 0.0;
 				if (paxgWinTrain.Count > 0)
 					{
@@ -142,45 +208,46 @@ namespace SolSignalModel1D_Backtest.Core.Data
 						}
 					}
 
-				// BTC vs 200SMA
+				// BTC vs 200SMA (позиция BTC относительно долгосрочной средней)
 				double btcVs200 = 0.0;
 				if (btcSma200.TryGetValue (openUtc, out double sma200) && sma200 > 0)
 					btcVs200 = (btcC.Close - sma200) / sma200;
 
-				// RSI
+				// RSI-блок (центрированный и наклон за 3 шага)
 				double solRsiVal = solRsi.TryGetValue (openUtc, out double rsiTmp) ? rsiTmp : 50.0;
 				double solRsiCentered = solRsiVal - 50.0;
 				double rsiSlope3 = Indicators.Indicators.GetRsiSlope6h (solRsi, openUtc, 3);
 
-				// gap BTC-SOL
+				// GAP между BTC и SOL на коротких горизонтах
 				double gapBtcSol1 = btcRet1 - solRet1;
 				double gapBtcSol3 = btcRet3 - solRet3;
 
-				// вола
+				// Волатильность: dynVol + ATR (в процентах)
 				double dynVol = Indicators.Indicators.ComputeDynVol6h (solWinTrain, solIdx, 10);
 				if (dynVol <= 0) dynVol = 0.004;
 
-				// ATR
 				double atrAbs = Indicators.Indicators.FindNearest (solAtr, openUtc, 0.0);
 				double atrPct = atrAbs > 0 && solClose > 0 ? atrAbs / solClose : 0.0;
 
-				// адаптивный minMove
-				double baseMinMove = Math.Max (
-					DailyMinMoveFloor,
-					Math.Max (atrPct * DailyMinMoveAtrMul, dynVol * DailyMinMoveVolMul)
-				);
-				double monthFactor = ComputeMonthlyMinMoveFactor (openUtc, solAll6h, 1.0);
-				monthFactor = Math.Clamp (monthFactor, MonthlyCapMin, MonthlyCapMax);
-				double minMove = Math.Min (baseMinMove * monthFactor, DailyMinMoveCap);
-
-				// таргет
-				double solFwd1 = solCloseFwd / solClose - 1.0;
-				int label = solFwd1 <= -minMove ? 0 : (solFwd1 >= +minMove ? 2 : 1);
-
-				// старый режим
+				// Режим рынка (DOWN / NORMAL) по Sol/BTC 30d
 				bool isDownRegime = solRet30 < DownSol30Thresh || btcRet30 < DownBtc30Thresh;
 
-				// extra
+				// Таргет по close на базовом горизонте выхода (entry → baseline exit)
+				double solFwd1 = solCloseFwd / solClose - 1.0;
+
+				// Адаптивный MinMove (каузально, на основе уже построенной истории rows)
+				var mm = MinMoveEngine.ComputeAdaptive (
+					asOfUtc: openUtc,
+					regimeDown: isDownRegime,
+					atrPct: atrPct,
+					dynVol: dynVol,
+					historyRows: rows,
+					cfg: minCfg,
+					state: minState);
+
+				double minMove = mm.MinMove;
+
+				// Дневные extra-поля (funding / OI), если есть
 				double funding = 0.0, oi = 0.0;
 				if (extraDaily != null && extraDaily.TryGetValue (openUtc.Date, out var ex))
 					{
@@ -188,16 +255,45 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					oi = ex.OI;
 					}
 
+				// Path-based разметка по 1m (полный путь от entry, минMove-ориентированный)
+				int pathLabel;
+				int firstPassDir;
+				DateTime? firstPassTimeUtc;
+				double pathUp, pathDown;
+
+				pathLabel = PathLabeler.AssignLabel (
+					entryUtc: openUtc,
+					entryPrice: solClose,
+					minMove: minMove,
+					minutes: sol1mSorted,
+					out firstPassDir,
+					out firstPassTimeUtc,
+					out pathUp,
+					out pathDown);
+
+				// Micro-факты строго через pathUp/pathDown только для боковика (label=1)
+				bool factMicroUp = false;
+				bool factMicroDown = false;
+				if (pathLabel == 1)
+					{
+					if (pathUp > Math.Abs (pathDown) + 0.001)
+						factMicroUp = true;
+					else if (Math.Abs (pathDown) > pathUp + 0.001)
+						factMicroDown = true;
+					}
+
+				// Жёсткий режим (stress regime) по SolRet30/ATR
+				int hardRegime = Math.Abs (solRet30) > 0.10 || atrPct > 0.035 ? 2 : 1;
+
+				// Флаг утреннего NY-окна (для фильтрации сигналов)
 				bool isMorning = Windowing.IsNyMorning (openUtc, nyTz);
 
-				// alt-заглушки (пока)
+				// Alt-заглушки (оставлены для совместимости)
 				double altFrac6h = 1.0, altFrac24h = 1.0, altMedian24h = 0.02;
 				int altCount = 4;
 				bool altReliable = true;
 
-				// жёсткий режим
-				int hardRegime = Math.Abs (solRet30) > 0.10 || atrPct > 0.035 ? 2 : 1;
-
+				// Вектор фич для ML-модели
 				var feats = new List<double>
 				{
 					solRet30,
@@ -220,89 +316,116 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					dynVol,
 					funding,
 					oi / 1_000_000.0,
-                    // стресс как бинарная фича
-                    hardRegime == 2 ? 1.0 : 0.0,
-
-                    // EMA-блок
-                    (solEma50Val > 0 && solClose > 0) ? (solClose - solEma50Val) / solEma50Val : 0.0,
+					// стресс как бинарная фича
+					hardRegime == 2 ? 1.0 : 0.0,
+					// EMA-блок
+					solAboveEma50,
 					solEma50vs200,
 					btcEma50vs200
 				};
 
-				rows.Add (new DataRow
+				var row = new DataRow
 					{
+					// Время входа (UTC, 6h-окно)
 					Date = openUtc,
+
+					// Фичи и таргет-класс (path-label)
 					Features = feats.ToArray (),
-					Label = label,
+					Label = pathLabel,
+
+					// Режим/утро NY
 					RegimeDown = isDownRegime,
 					IsMorning = isMorning,
 
+					// Основные ретурны
 					SolRet30 = solRet30,
 					BtcRet30 = btcRet30,
 					SolRet1 = solRet1,
 					SolRet3 = solRet3,
 					BtcRet1 = btcRet1,
 					BtcRet3 = btcRet3,
+
+					// Макро-индикаторы
 					Fng = fng,
 					DxyChg30 = dxyChg30,
 					GoldChg30 = goldChg30,
 					BtcVs200 = btcVs200,
 					SolRsiCentered = solRsiCentered,
 					RsiSlope3 = rsiSlope3,
+
+					// Вола/MinMove
 					AtrPct = atrPct,
 					DynVol = dynVol,
 					MinMove = minMove,
+
+					// Факт по close на baseline-горизонте
 					SolFwd1 = solFwd1,
 
+					// Alt-статистика (заглушки)
 					AltFracPos6h = altFrac6h,
 					AltFracPos24h = altFrac24h,
 					AltMedian24h = altMedian24h,
 					AltCount = altCount,
 					AltReliable = altReliable,
 
-					FactMicroUp = Math.Abs (solFwd1) < minMove && solFwd1 >= minMove * 0.1,
-					FactMicroDown = Math.Abs (solFwd1) < minMove && solFwd1 <= -minMove * 0.1,
+					// Micro-факты
+					FactMicroUp = factMicroUp,
+					FactMicroDown = factMicroDown,
 
+					// Стресс-режим
 					HardRegime = hardRegime,
 
-					// EMA raw + производные
+					// Path-first метрики
+					PathFirstPassDir = firstPassDir,
+					PathFirstPassTimeUtc = firstPassTimeUtc,
+					PathReachedUpPct = pathUp,
+					PathReachedDownPct = pathDown,
+
+					// EMA-raw + производные
 					SolEma50 = solEma50Val,
 					SolEma200 = solEma200Val,
 					BtcEma50 = btcEma50Val,
 					BtcEma200 = btcEma200Val,
 					SolEma50vs200 = solEma50vs200,
 					BtcEma50vs200 = btcEma50vs200,
-					});
+					};
+
+				// Важно: сначала считаются minMove и path-метрики по текущему дню,
+				// потом строка добавляется в rows → для последующих дней она
+				// видна как история, но текущий день себя не "видит".
+				rows.Add (row);
 				}
 
 			return rows;
 			}
 
 		/// <summary>
-		/// Очень грубый месячный множитель для minMove по относительному диапазону.
+		/// Ищет 6h-свечу, временной интервал которой покрывает указанный момент времени.
+		/// Интервал считается [OpenTimeUtc; nextOpenTimeUtc) либо [OpenTimeUtc; OpenTimeUtc+6h],
+		/// если следующая свеча отсутствует.
 		/// </summary>
-		private static double ComputeMonthlyMinMoveFactor ( DateTime asOf, List<Candle6h> all, double defaultFactor )
+		private static Candle6h? Find6hCandleContainingTime ( List<Candle6h> all, DateTime targetUtc )
 			{
-			DateTime from = asOf.AddDays (-30);
-			var seg = all.Where (c => c.OpenTimeUtc >= from && c.OpenTimeUtc <= asOf).ToList ();
-			if (seg.Count < 10) return defaultFactor;
+			if (all == null || all.Count == 0)
+				return null;
 
-			double sumRange = 0.0;
-			int cnt = 0;
-			foreach (var c in seg)
+			var sorted = all.OrderBy (c => c.OpenTimeUtc).ToList ();
+			for (int i = 0; i < sorted.Count; i++)
 				{
-				double range = c.High - c.Low;
-				if (range > 0 && c.Close > 0)
-					{
-					sumRange += range / c.Close;
-					cnt++;
-					}
-				}
-			if (cnt == 0) return defaultFactor;
+				var cur = sorted[i];
+				DateTime start = cur.OpenTimeUtc;
+				DateTime end;
 
-			double monthVol = sumRange / cnt;
-			double factor = monthVol / 0.025; // 2.5% считаем "нормой"
-			return factor;
+				if (i + 1 < sorted.Count)
+					end = sorted[i + 1].OpenTimeUtc;
+				else
+					end = cur.OpenTimeUtc.AddHours (6);
+
+				if (targetUtc >= start && targetUtc < end)
+					return cur;
+				}
+
+			return null;
 			}
 		}
 	}

@@ -9,7 +9,7 @@ using System.Linq;
 namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 	{
 	/// <summary>
-	/// PnL-движок: дневной вход (TP/SL/close дня), delayed A/B, ликвидации по 1m,
+	/// PnL-движок: дневной вход (TP/SL/close), delayed A/B, ликвидации по 1m,
 	/// Cross/Isolated, бакеты капитала и вывод сверхбазы (withdrawals).
 	/// Поддерживает режимы with/without SL (для daily и delayed).
 	/// </summary>
@@ -44,13 +44,14 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			}
 
 		// ---------------------------------------------------------------------
-		// ПОДДЕРЖКА СТАРОГО ВЫЗОВА (как в твоем текущем коде)
+		// ПОДДЕРЖКА СТАРОГО ВЫЗОВА
 		// ---------------------------------------------------------------------
 		/// <summary>
-		/// Старый вариант сигнатуры (сохраняю для совместимости с текущими вызовами).
+		/// Старый вариант сигнатуры (для совместимости).
 		/// useStopLoss → управляет SL и в daily, и в delayed.
 		/// dailyStopPct → дневной SL (% от цены входа).
-		/// TP фиксирован 3% (как у тебя было).
+		/// TP фиксирован 3% (как было).
+		/// Доп. флаг useAntiDirectionOverlay → включить Anti-D overlay в PnL.
 		/// </summary>
 		public static void ComputePnL (
 			IReadOnlyList<PredictionRecord> records,
@@ -65,7 +66,8 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			out Dictionary<string, int> tradesBySource,
 			out double withdrawnTotal,
 			out List<PnlBucketSnapshot> bucketSnapshots,
-			out bool hadLiquidation )
+			out bool hadLiquidation,
+			bool useAntiDirectionOverlay = false )
 			{
 			ComputePnL (
 				records, candles1m, policy, marginMode,
@@ -74,7 +76,8 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				useDailyStopLoss: useStopLoss,
 				useDelayedIntradayStops: useStopLoss,
 				dailyTpPct: 0.03,
-				dailyStopPct: dailyStopPct <= 0 ? 0.05 : dailyStopPct
+				dailyStopPct: dailyStopPct <= 0 ? 0.05 : dailyStopPct,
+				useAntiDirectionOverlay: useAntiDirectionOverlay
 			);
 			}
 
@@ -83,10 +86,13 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 		// ---------------------------------------------------------------------
 		/// <summary>
 		/// Главный расчёт PnL.
-		/// - useDailyStopLoss: управляет дневным SL (без него — только TP или close дня).
+		/// - useDailyStopLoss: управляет дневным SL (без него — только TP или close по baseline-выходу).
 		/// - useDelayedIntradayStops: управляет respect к intraday SL в delayed-модели (SlFirst).
 		/// - dailyTpPct: дневной TP (по умолчанию 3%).
 		/// - dailyStopPct: дневной SL (по умолчанию 5%).
+		/// - useAntiDirectionOverlay: переворачивать ли направление сделки (Anti-D) по правилам SL/волы.
+		/// Важно: теперь все сделки живут в окне [entryUtc; baselineExitUtc),
+		/// где baselineExitUtc = следующее NY-утро 08:00 рабочего дня минус 2 минуты.
 		/// </summary>
 		public static void ComputePnL (
 			IReadOnlyList<PredictionRecord> records,
@@ -103,12 +109,13 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			bool useDailyStopLoss = true,
 			bool useDelayedIntradayStops = true,
 			double dailyTpPct = 0.03,
-			double dailyStopPct = 0.05 )
+			double dailyStopPct = 0.05,
+			bool useAntiDirectionOverlay = false )
 			{
 			if (candles1m == null || candles1m.Count == 0)
 				throw new InvalidOperationException ("[pnl] 1m candles are required for liquidation/TP/SL.");
 
-			// Сортированные минутки
+			// Сортированные минутки по всему историческому диапазону
 			var m1 = candles1m.OrderBy (m => m.OpenTimeUtc).ToList ();
 
 			// Журнал результатов
@@ -142,7 +149,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				double posBase = bucket.BaseCapital * positionFraction;
 				if (posBase <= 0.0) return;
 
-				// 1) Ликвидация через минутки
+				// 1) Ликвидация через минутки в пределах tradeMinutes
 				var (liqHit, liqExit) = CheckLiquidation (entryPrice, isLong, leverage, tradeMinutes);
 				bool priceLiquidated = liqHit;
 				double finalExitPrice = liqHit ? liqExit : exitPrice;
@@ -151,9 +158,14 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				finalExitPrice = CapWorseThanLiquidation (entryPrice, isLong, leverage, finalExitPrice, out bool forceLiq);
 				if (forceLiq) priceLiquidated = true;
 
+				// 1B) MAE/MFE по 1m-пути (в процентах)
+				var (mae, mfe) = ComputeMaeMfe (entryPrice, isLong, tradeMinutes);
+
 				// 2) Доходность/комиссия
-				double relMove = isLong ? (finalExitPrice - entryPrice) / entryPrice
-											 : (entryPrice - finalExitPrice) / entryPrice;
+				double relMove = isLong
+					? (finalExitPrice - entryPrice) / entryPrice
+					: (entryPrice - finalExitPrice) / entryPrice;
+
 				double notional = posBase * leverage;
 				double positionPnl = relMove * leverage * posBase;
 				double positionComm = notional * CommissionRate * 2.0;
@@ -166,7 +178,21 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				if (diedThisTrade)
 					{
 					anyLiquidation = true;
-					globalDead = true;
+
+					if (marginMode == MarginMode.Cross)
+						{
+						// Cross: смерть критичного бакета = смерть всего аккаунта
+						globalDead = true;
+						}
+					else
+						{
+						// Isolated: умирает только этот бакет; глобально останавливаемся
+						// ТОЛЬКО если все бакеты мертвы.
+						if (buckets.Values.All (b => b.IsDead))
+							{
+							globalDead = true;
+							}
+						}
 					}
 
 				// 4) Пишем в лог сделок
@@ -186,7 +212,9 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 					Commission = Math.Round (positionComm, 4),
 					EquityAfter = Math.Round (bucket.Equity, 2),
 					IsLiquidated = priceLiquidated || (marginMode == MarginMode.Isolated && bucket.Equity <= 0.0),
-					LeverageUsed = leverage
+					LeverageUsed = leverage,
+					MaxAdversePct = Math.Round (mae * 100.0, 4),
+					MaxFavorablePct = Math.Round (mfe * 100.0, 4)
 					});
 
 				if (!resultBySource.TryGetValue (source, out var cnt))
@@ -195,7 +223,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 					resultBySource[source] = cnt + 1;
 				}
 
-			// ===== Основной цикл по дням =====
+			// ===== Основной цикл по "дневным" записям PredictionRecord =====
 			foreach (var rec in records.OrderBy (r => r.DateUtc))
 				{
 				if (globalDead) break;
@@ -207,39 +235,71 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				double lev = policy.ResolveLeverage (rec);
 				if (lev <= 0.0) continue;
 
+				// Anti-D overlay: переворачиваем только фактический трейд (PnL),
+				// PredLabel / Micro остаются как есть.
+				if (useAntiDirectionOverlay && ShouldApplyAntiDirection (rec, lev))
+					{
+					bool tmp = goLong;
+					goLong = goShort;
+					goShort = tmp;
+					rec.AntiDirectionApplied = true;
+					}
+
+				// Вход в мир таргетов:
+				// entryUtc = NY 08:00 (через PredictionRecord.DateUtc),
+				// exitUtc = baseline-выход (следующее рабочее утро 08:00 - 2 минуты).
 				DateTime dayStart = rec.DateUtc;
-				DateTime dayEnd = rec.DateUtc.AddHours (24);
+				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
 
 				var dayMinutes = SliceDayMinutes (m1, dayStart, dayEnd);
 				if (dayMinutes.Count == 0)
-					throw new InvalidOperationException ($"[pnl] 1m candles missing for {rec.DateUtc:yyyy-MM-dd}");
+					throw new InvalidOperationException (
+						$"[pnl] 1m candles missing for PnL window starting {rec.DateUtc:yyyy-MM-dd}");
 
 				double entry = rec.Entry;
 
-				// ===== DAILY (TP/SL/Close) =====
+				// ===== DAILY (TP/SL/Close по baseline-окну) =====
 					{
 					double slPct = useDailyStopLoss ? dailyStopPct : 0.0;
-					var (exitPrice, exitTimeUtc) = TryHitDailyExit (entry, goLong, dailyTpPct, slPct, dayMinutes);
+					var (exitPrice, exitTimeUtc) = TryHitDailyExit (
+						entry,
+						goLong,
+						dailyTpPct,
+						slPct,
+						dayMinutes,
+						dayEnd
+					);
 
 					RegisterTrade (
-						rec.DateUtc, rec.DateUtc, exitTimeUtc,
-						"Daily", "daily", DailyPositionFraction,
-						isLong: goLong, entryPrice: entry, exitPrice: exitPrice,
-						leverage: lev, tradeMinutes: dayMinutes);
+						rec.DateUtc,         // "день" прогноза
+						rec.DateUtc,         // фактическое время входа = утро NY
+						exitTimeUtc,
+						"Daily",
+						"daily",
+						DailyPositionFraction,
+						isLong: goLong,
+						entryPrice: entry,
+						exitPrice: exitPrice,
+						leverage: lev,
+						tradeMinutes: dayMinutes
+					);
 					}
 
 				if (globalDead) break;
 
-				// ===== DELAYED (интрадей TP/SL от delayed-логики ИЛИ close дня) =====
+				// ===== DELAYED (отложенный вход + intraday результат) =====
 				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedEntryExecuted)
 					{
 					bool dLong = goLong;
 					double dEntry = rec.DelayedEntryPrice;
 					DateTime delayedEntryTime = rec.DelayedEntryExecutedAtUtc ?? rec.DateUtc;
 
-					var delayedMinutes = dayMinutes.Where (m => m.OpenTimeUtc >= delayedEntryTime).ToList ();
+					var delayedMinutes = dayMinutes
+						.Where (m => m.OpenTimeUtc >= delayedEntryTime)
+						.ToList ();
 					if (delayedMinutes.Count == 0)
-						throw new InvalidOperationException ($"[pnl] delayed 1m candles missing for {rec.DateUtc:yyyy-MM-dd}");
+						throw new InvalidOperationException (
+							$"[pnl] delayed 1m candles missing for PnL window starting {rec.DateUtc:yyyy-MM-dd}");
 
 					double dExit;
 					DateTime delayedExitTime;
@@ -248,6 +308,8 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 						{
 						double tpPctD = rec.DelayedIntradayTpPct;
 						dExit = dLong ? dEntry * (1.0 + tpPctD) : dEntry * (1.0 - tpPctD);
+						// В intraday-слое мы не знаем точную минуту TP/SL,
+						// поэтому в PnL фиксируем "момент реализации идеи" как первую минуту после входа.
 						delayedExitTime = delayedMinutes.First ().OpenTimeUtc;
 						}
 					else if (rec.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst && useDelayedIntradayStops)
@@ -258,9 +320,12 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 						}
 					else
 						{
-						// без SL или ни TP/SL — по close дня
-						dExit = delayedMinutes.Last ().Close;
-						delayedExitTime = delayedMinutes.Last ().OpenTimeUtc;
+						// Без intraday SL/TP или результат None —
+						// закрываемся по цене последней минутки в окне,
+						// но время выхода фиксируем ровно в baseline-выход (dayEnd).
+						var last = delayedMinutes.Last ();
+						dExit = last.Close;
+						delayedExitTime = dayEnd;
 						}
 
 					string src = rec.DelayedSource == "A" ? "DelayedA" : "DelayedB";
@@ -334,9 +399,21 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 		private static List<Candle1m> SliceDayMinutes ( List<Candle1m> m1, DateTime start, DateTime end )
 			=> m1.Where (m => m.OpenTimeUtc >= start && m.OpenTimeUtc < end).ToList ();
 
+		/// <summary>
+		/// Поиск дневного TP/SL внутри 1m-окна [entry; ...),
+		/// с fallback-закрытием в defaultExitUtc (baseline-выход).
+		/// </summary>
 		private static (double exitPrice, DateTime exitTime) TryHitDailyExit (
-			double entry, bool isLong, double tpPct, double slPct, List<Candle1m> dayMinutes )
+			double entry,
+			bool isLong,
+			double tpPct,
+			double slPct,
+			List<Candle1m> dayMinutes,
+			DateTime defaultExitUtc )
 			{
+			if (dayMinutes == null || dayMinutes.Count == 0)
+				throw new ArgumentException ("dayMinutes must not be empty for TryHitDailyExit.", nameof (dayMinutes));
+
 			if (isLong)
 				{
 				double tp = entry * (1.0 + tpPct);
@@ -368,9 +445,10 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 					}
 				}
 
-			// Ни TP, ни SL — закрываемся по close дня
+			// Ни TP, ни SL — закрываемся по close последней минутки,
+			// но временем выхода считаем строго defaultExitUtc (baseline-выход).
 			var last = dayMinutes.Last ();
-			return (last.Close, last.OpenTimeUtc);
+			return (last.Close, defaultExitUtc);
 			}
 
 		private static (bool hit, double liqExit) CheckLiquidation (
@@ -420,6 +498,99 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			return candidateExit;
 			}
 
+		/// <summary>
+		/// MAE/MFE по 1m-пути от Entry до конца сделки.
+		/// Возвращает доли (0.05 = 5%).
+		/// </summary>
+		private static (double mae, double mfe) ComputeMaeMfe (
+			double entryPrice,
+			bool isLong,
+			List<Candle1m> minutes )
+			{
+			if (entryPrice <= 0 || minutes == null || minutes.Count == 0)
+				return (0.0, 0.0);
+
+			double maxAdverse = 0.0;
+			double maxFavorable = 0.0;
+
+			foreach (var m in minutes)
+				{
+				if (isLong)
+					{
+					// adverse: как глубоко проваливались вниз
+					if (m.Low > 0)
+						{
+						double adv = (entryPrice - m.Low) / entryPrice;
+						if (adv > maxAdverse) maxAdverse = adv;
+						}
+					// favorable: как высоко уходили вверх
+					if (m.High > 0)
+						{
+						double fav = (m.High - entryPrice) / entryPrice;
+						if (fav > maxFavorable) maxFavorable = fav;
+						}
+					}
+				else
+					{
+					// шорт: adverse = рост вверх от entry
+					if (m.High > 0)
+						{
+						double adv = (m.High - entryPrice) / entryPrice;
+						if (adv > maxAdverse) maxAdverse = adv;
+						}
+					// favorable = падение вниз от entry
+					if (m.Low > 0)
+						{
+						double fav = (entryPrice - m.Low) / entryPrice;
+						if (fav > maxFavorable) maxFavorable = fav;
+						}
+					}
+				}
+
+			if (maxAdverse < 0) maxAdverse = 0.0;
+			if (maxFavorable < 0) maxFavorable = 0.0;
+			return (maxAdverse, maxFavorable);
+			}
+
+		/// <summary>
+		/// Решает, применять ли Anti-D для данного дня и плеча.
+		/// Использует только данные SL-слоя и волатильности, доступные в PredictionRecord.
+		/// </summary>
+		private static bool ShouldApplyAntiDirection ( PredictionRecord rec, double leverage )
+			{
+			// 1) Только non-flat дни (pred ∈ {0=DOWN, 2=UP})
+			if (rec.PredLabel != 0 && rec.PredLabel != 2)
+				return false;
+
+			// 2) Anti-D ТОЛЬКО если SL говорит "в этом дне первым будет SL" в исходном направлении.
+			// Т.е. мы доверяем SL-модели и переворачиваем идею.
+			if (!rec.SlHighDecision)
+				return false;
+
+			// 3) Грубая оценка дневной волатильности (proxy)
+			// MinMove уже в долях (0.02 = 2%)
+			double volProxy = rec.MinMove > 0.0 ? rec.MinMove : 0.02;
+
+			// Слишком тухлые или совсем безумные дни выкидываем (грубые пороги, можно будет подвинуть).
+			if (volProxy < 0.005 || volProxy > 0.12)
+				return false;
+
+			// 4) Distance-to-liq ≥ K × volProxy
+			// Расстояние до ликвы считаем по той же формуле, что и в CheckLiquidation.
+			double liqAdversePct = 1.0 / leverage - MaintenanceMarginRate;
+			if (liqAdversePct <= 0.0)
+				liqAdversePct = 1.0 / leverage * 0.9;
+
+			const double K = 2.0; // "запас" до ликвы в дневных ходах MinMove
+			if (liqAdversePct < K * volProxy)
+				return false;
+
+			// 5) TODO: сюда можно будет добавить mean-reversion гейт
+			// (AtrPct / TrendRet / RsiSlope), их протянуть в PredictionRecord.
+
+			return true;
+			}
+
 		private static void UpdateBucketEquity (
 			MarginMode marginMode,
 			BucketState bucket,
@@ -444,10 +615,16 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				else
 					{
 					newEquity = bucket.Equity + positionPnl - positionComm;
-					if (newEquity < 0) newEquity = 0.0;
+					// банкротство без явной ликвидации по цене → тоже считаем "смертью" бакета
+					if (newEquity <= 0.0)
+						{
+						newEquity = 0.0;
+						bucket.IsDead = true;
+						died = true;
+						}
 					}
 
-				// Выводим всё сверх базовой (не накапливаем капитал в бакете)
+				// выводим сверх базовой только если бакет не умер
 				if (!died && newEquity > bucket.BaseCapital)
 					{
 					double extra = newEquity - bucket.BaseCapital;

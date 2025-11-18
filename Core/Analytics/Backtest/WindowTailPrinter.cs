@@ -12,12 +12,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	/// Печатает “последний день каждого окна” по схеме блоков: берём takeDays дней, затем пропускаем skipDays.
 	/// Для каждого такого окна печатает:
 	/// - заголовок блока (№ и даты);
-	/// - шапку дня (pred/fact/micro/entry/maxH/minL/close/minMove/причина);
+	/// - шапку дня (pred/fact/micro/entry/maxH/minL/close/minMove/причина + Path-based поля);
 	/// - построчно сделки всех политик в этот день.
 	/// </summary>
 	public static class WindowTailPrinter
 		{
 		public static void PrintBlockTails (
+			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<PredictionRecord> records,
 			IEnumerable<BacktestPolicyResult> policyResults,
 			int takeDays = 20,
@@ -28,6 +29,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			var pol = (policyResults ?? Array.Empty<BacktestPolicyResult> ()).ToList ();
 			if (recs.Count == 0 || pol.Count == 0) return;
 			if (takeDays <= 0) return;
+			if (mornings == null || mornings.Count == 0) return;
+
+			// быстрая мапа дата → DataRow
+			var byDate = mornings.ToDictionary (r => r.Date, r => r);
 
 			ConsoleStyler.WriteHeader ($"=== {title}: {takeDays} → {skipDays} ===");
 
@@ -41,20 +46,23 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				if (start >= endTake) break;
 
 				var block = recs.GetRange (start, endTake - start);
-				var last = block[^1]; // последний день окна = последний из взятых записей
+				var lastRec = block[^1]; // последний день окна = последний из взятых записей
 
 				blockIdx++;
 				var blockStartDate = block.First ().DateUtc.Date;
-				var blockEndDate = last.DateUtc.Date;
+				var blockEndDate = lastRec.DateUtc.Date;
+
+				// ищем соответствующий DataRow
+				byDate.TryGetValue (lastRec.DateUtc, out var dayRow);
 
 				// Заголовок блока
-				ConsoleStyler.WriteHeader ($"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {last.DateUtc:yyyy-MM-dd} ---");
+				ConsoleStyler.WriteHeader ($"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {lastRec.DateUtc:yyyy-MM-dd} ---");
 
-				// Шапка дня
-				PrintDayHead (last);
+				// Шапка дня (включая Path-based поля, если есть DataRow)
+				PrintDayHead (dayRow, lastRec);
 
 				// Сделки всех политик за этот день
-				PrintPolicyTradesForDay (last.DateUtc, pol);
+				PrintPolicyTradesForDay (lastRec.DateUtc, pol);
 
 				// Шаг к следующему окну: пропускаем skipDays
 				i = endTake + skipDays;
@@ -65,7 +73,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 		// ===== helpers =====
 
-		private static void PrintDayHead ( PredictionRecord r )
+		private static void PrintDayHead ( DataRow? row, PredictionRecord r )
 			{
 			var t = new TextTable ();
 			t.AddHeader ("field", "value");
@@ -77,6 +85,23 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			t.AddRow ("maxH / minL", $"{r.MaxHigh24:0.0000} / {r.MinLow24:0.0000}");
 			t.AddRow ("close24", r.Close24.ToString ("0.0000"));
 			t.AddRow ("minMove", (r.MinMove * 100.0).ToString ("0.00") + "%");
+
+			// Path-based блок: если DataRow найден
+			if (row != null)
+				{
+				t.AddRow ("path dir", PathDirToStr (row.PathFirstPassDir));
+				t.AddRow (
+					"path firstPass",
+					row.PathFirstPassTimeUtc.HasValue
+						? row.PathFirstPassTimeUtc.Value.ToString ("yyyy-MM-dd HH:mm")
+						: "—"
+				);
+				t.AddRow (
+					"path up% / down%",
+					$"{row.PathReachedUpPct * 100.0:0.00}% / {row.PathReachedDownPct * 100.0:0.00}%"
+				);
+				}
+
 			t.WriteToConsole ();
 			Console.WriteLine ();
 			}
@@ -118,7 +143,19 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			Console.WriteLine ();
 			}
 
-		private static string ClassToStr ( int c )
-			=> c == 0 ? "Обвал" : (c == 1 ? "Боковик" : "Рост");
+		private static string ClassToStr ( int c ) => c switch
+			{
+				0 => "0 (down)",
+				1 => "1 (flat)",
+				2 => "2 (up)",
+				_ => c.ToString ()
+				};
+
+		private static string PathDirToStr ( int dir ) => dir switch
+			{
+				> 0 => "UP (first)",
+				< 0 => "DOWN (first)",
+				_ => "FLAT / none"
+				};
 		}
 	}

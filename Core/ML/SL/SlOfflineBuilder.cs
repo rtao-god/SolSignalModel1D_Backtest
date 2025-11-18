@@ -1,6 +1,8 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
+﻿// Core/ML/SlOfflineBuilder.cs
+using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
@@ -12,16 +14,27 @@ namespace SolSignalModel1D_Backtest.Core.ML
 	{
 	/// <summary>
 	/// Строит каузальный SL-датасет.
-	/// Лейбл: кто был первым по 1m (TP / SL).
+	/// Лейбл: кто был первым по 1m (TP / SL) в baseline-окне
+	/// entryUtc → следующее рабочее NY-утро (минус 2 минуты).
 	/// Фичи: по 1h (см. SlFeatureBuilder).
 	/// </summary>
 	public static class SlOfflineBuilder
 		{
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+
+		/// <param name="rows">Дневные строки (RowBuilder).</param>
+		/// <param name="sol1h">Вся 1h-история SOL (для фичей).</param>
+		/// <param name="sol1m">Вся 1m-история SOL (для path-based факта).</param>
+		/// <param name="sol6hDict">6h-словарь SOL (для entry).</param>
+		/// <param name="tpPct">TP в долях (0.03 = 3%).</param>
+		/// <param name="slPct">SL в долях (0.05 = 5%).</param>
 		public static List<SlHitSample> Build (
 			List<DataRow> rows,
 			IReadOnlyList<Candle1h>? sol1h,
 			IReadOnlyList<Candle1m>? sol1m,
-			Dictionary<DateTime, Candle6h> sol6hDict )
+			Dictionary<DateTime, Candle6h> sol6hDict,
+			double tpPct = 0.03,
+			double slPct = 0.05 )
 			{
 			var result = new List<SlHitSample> (rows.Count * 2);
 
@@ -33,62 +46,63 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			if (mornings.Count == 0)
 				return result;
 
+			// Минутки отсортируем один раз
+			var all1m = sol1m != null
+				? sol1m.OrderBy (m => m.OpenTimeUtc).ToList ()
+				: new List<Candle1m> ();
+
+			// Общая NY-таймзона для baseline-выхода (как в RowBuilder/Windowing).
 			foreach (var r in mornings)
 				{
+				// entry = close утренней 6h-свечи
 				if (!sol6hDict.TryGetValue (r.Date, out var c6))
 					continue;
+
 				double entry = c6.Close;
 				if (entry <= 0) continue;
 
+				// MinMove остаётся в фичах как есть
 				double dayMinMove = r.MinMove;
 				if (dayMinMove <= 0) dayMinMove = 0.02;
 
-				// собираем минутки на день
-				var day1m = sol1m != null
-					? sol1m.Where (m => m.OpenTimeUtc >= r.Date && m.OpenTimeUtc < r.Date.AddHours (24))
-						   .OrderBy (m => m.OpenTimeUtc)
-						   .ToList ()
-					: new List<Candle1m> ();
+				DateTime entryUtc = r.Date;
 
-				// а) гипотетический лонг
+				// === базовый момент выхода: следующее рабочее NY-утро (минус 2 минуты) ===
+				DateTime exitUtc;
+				try
 					{
-					HourlyTradeResult labelRes;
+					exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: NyTz);
+					}
+				catch
+					{
+					// если не удаётся корректно посчитать exit (например, нет свечей) — пропускаем день
+					continue;
+					}
 
-					if (day1m.Count > 0)
-						{
-						var outcome = MinuteTradeEvaluator.Evaluate (
-							day1m,
-							r.Date,
-							goLong: true,
-							goShort: false,
-							entryPrice: entry,
-							dayMinMove: dayMinMove,
-							strongSignal: true
-						);
-						labelRes = outcome.Result;
-						}
-					else if (sol1h != null && sol1h.Count > 0)
-						{
-						var outcome = HourlyTradeEvaluator.EvaluateOne (
-							sol1h,
-							r.Date,
-							goLong: true,
-							goShort: false,
-							entryPrice: entry,
-							dayMinMove: dayMinMove,
-							strongSignal: true
-						);
-						labelRes = outcome.Result;
-						}
-					else
-						{
-						labelRes = HourlyTradeResult.None;
-						}
+				if (exitUtc <= entryUtc)
+					continue;
+
+				// 1m окно на baseline-горизонт [entryUtc; exitUtc)
+				var day1m = all1m
+					.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
+					.ToList ();
+
+				if (day1m.Count == 0)
+					continue;
+
+				// ---- а) гипотетический лонг ----
+					{
+					var labelRes = EvalPath1m (
+						day1m: day1m,
+						goLong: true,
+						entry: entry,
+						tpPct: tpPct,
+						slPct: slPct);
 
 					if (labelRes == HourlyTradeResult.SlFirst || labelRes == HourlyTradeResult.TpFirst)
 						{
 						var feats = SlFeatureBuilder.Build (
-							r.Date,
+							entryUtc: entryUtc,
 							goLong: true,
 							strongSignal: true,
 							dayMinMove: dayMinMove,
@@ -98,52 +112,28 @@ namespace SolSignalModel1D_Backtest.Core.ML
 
 						result.Add (new SlHitSample
 							{
+							// true  = сначала был SL
+							// false = сначала был TP
 							Label = labelRes == HourlyTradeResult.SlFirst,
 							Features = Pad (feats),
-							EntryUtc = r.Date
+							EntryUtc = entryUtc
 							});
 						}
 					}
 
-				// б) гипотетический шорт
+				// ---- б) гипотетический шорт ----
 					{
-					HourlyTradeResult labelRes;
-
-					if (day1m.Count > 0)
-						{
-						var outcome = MinuteTradeEvaluator.Evaluate (
-							day1m,
-							r.Date,
-							goLong: false,
-							goShort: true,
-							entryPrice: entry,
-							dayMinMove: dayMinMove,
-							strongSignal: true
-						);
-						labelRes = outcome.Result;
-						}
-					else if (sol1h != null && sol1h.Count > 0)
-						{
-						var outcome = HourlyTradeEvaluator.EvaluateOne (
-							sol1h,
-							r.Date,
-							goLong: false,
-							goShort: true,
-							entryPrice: entry,
-							dayMinMove: dayMinMove,
-							strongSignal: true
-						);
-						labelRes = outcome.Result;
-						}
-					else
-						{
-						labelRes = HourlyTradeResult.None;
-						}
+					var labelRes = EvalPath1m (
+						day1m: day1m,
+						goLong: false,
+						entry: entry,
+						tpPct: tpPct,
+						slPct: slPct);
 
 					if (labelRes == HourlyTradeResult.SlFirst || labelRes == HourlyTradeResult.TpFirst)
 						{
 						var feats = SlFeatureBuilder.Build (
-							r.Date,
+							entryUtc: entryUtc,
 							goLong: false,
 							strongSignal: true,
 							dayMinMove: dayMinMove,
@@ -155,14 +145,75 @@ namespace SolSignalModel1D_Backtest.Core.ML
 							{
 							Label = labelRes == HourlyTradeResult.SlFirst,
 							Features = Pad (feats),
-							EntryUtc = r.Date
+							EntryUtc = entryUtc
 							});
 						}
 					}
 				}
 
-			Console.WriteLine ($"[sl-offline] built {result.Count} SL-samples (1m labels, 1h features)");
+			Console.WriteLine ($"[sl-offline] built {result.Count} SL-samples (1m path labels, 1h features, tp={tpPct:0.###}, sl={slPct:0.###})");
 			return result;
+			}
+
+		/// <summary>
+		/// Path-based факт по 1m: кто был первым — TP или SL.
+		/// Логика строго симметрична PnL:
+		/// - long: TP = High ≥ entry*(1+TP%), SL = Low ≤ entry*(1−SL%)
+		/// - short: TP = Low ≤ entry*(1−TP%), SL = High ≥ entry*(1+SL%)
+		/// Если в одной минуте сработали оба — считаем, что первым был SL (консервативно).
+		/// </summary>
+		private static HourlyTradeResult EvalPath1m (
+			List<Candle1m> day1m,
+			bool goLong,
+			double entry,
+			double tpPct,
+			double slPct )
+			{
+			if (day1m == null || day1m.Count == 0) return HourlyTradeResult.None;
+			if (entry <= 0) return HourlyTradeResult.None;
+			if (tpPct <= 0 && slPct <= 0) return HourlyTradeResult.None;
+
+			if (goLong)
+				{
+				double tp = entry * (1.0 + Math.Max (tpPct, 0.0));
+				double sl = slPct > 0 ? entry * (1.0 - slPct) : double.NaN;
+
+				foreach (var m in day1m)
+					{
+					bool hitTp = tpPct > 0 && m.High >= tp;
+					bool hitSl = slPct > 0 && m.Low <= sl;
+
+					if (hitTp || hitSl)
+						{
+						// Если в одной минуте могли случиться оба — считаем, что SL был первым
+						if (hitTp && hitSl)
+							return HourlyTradeResult.SlFirst;
+
+						return hitSl ? HourlyTradeResult.SlFirst : HourlyTradeResult.TpFirst;
+						}
+					}
+				}
+			else
+				{
+				double tp = entry * (1.0 - Math.Max (tpPct, 0.0));
+				double sl = slPct > 0 ? entry * (1.0 + slPct) : double.NaN;
+
+				foreach (var m in day1m)
+					{
+					bool hitTp = tpPct > 0 && m.Low <= tp;
+					bool hitSl = slPct > 0 && m.High >= sl;
+
+					if (hitTp || hitSl)
+						{
+						if (hitTp && hitSl)
+							return HourlyTradeResult.SlFirst;
+
+						return hitSl ? HourlyTradeResult.SlFirst : HourlyTradeResult.TpFirst;
+						}
+					}
+				}
+
+			return HourlyTradeResult.None;
 			}
 
 		private static float[] Pad ( float[] src )

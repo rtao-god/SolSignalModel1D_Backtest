@@ -48,7 +48,9 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 		private const double WeakSlFloor = 0.008;
 
 		/// <summary>
-		/// Простой “одиночный” расчёт: что случится в следующие 24 часа для заданного входа.
+		/// Простой “одиночный” расчёт: что случится до базового выхода t_exit
+		/// (NY-утро следующего рабочего дня, минус 2 минуты) для заданного входа.
+		/// Окно: [entryUtc; t_exit), где t_exit считается через Windowing.ComputeBaselineExitUtc.
 		/// </summary>
 		public static HourlyTradeOutcome EvaluateOne (
 			IReadOnlyList<Candle1h> candles1h,
@@ -57,7 +59,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			bool goShort,
 			double entryPrice,
 			double dayMinMove,
-			bool strongSignal )
+			bool strongSignal,
+			TimeZoneInfo nyTz )
 			{
 			var outcome = new HourlyTradeOutcome
 				{
@@ -78,7 +81,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			if (dayMinMove < MinDayTradeable)
 				return outcome;
 
-			DateTime endUtc = entryUtc.AddHours (24);
+			// Новый горизонт: до t_exit вместо жёстких +24 часа
+			DateTime endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 
 			var dayBars = candles1h
 				.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
@@ -161,17 +165,19 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 					}
 				}
 
-			// ни TP ни SL за 24h
+			// ни TP ни SL до t_exit
 			outcome.Result = HourlyTradeResult.None;
 			return outcome;
 			}
 
 		/// <summary>
-		/// прогон по всем сделкам
+		/// Прогон по всем сделкам.
+		/// Для каждой записи берётся окно [DateUtc; t_exit), где t_exit = ComputeBaselineExitUtc(DateUtc, nyTz).
 		/// </summary>
 		public static HourlyTpSlReport Evaluate (
 			IReadOnlyList<PredictionRecord> records,
-			IReadOnlyList<Candle1h> candles1h )
+			IReadOnlyList<Candle1h> candles1h,
+			TimeZoneInfo nyTz )
 			{
 			var report = new HourlyTpSlReport ();
 
@@ -198,7 +204,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 					continue;
 
 				DateTime start = rec.DateUtc;
-				DateTime end = rec.DateUtc.AddHours (24);
+				// Новый baseline-горизонт вместо +24h
+				DateTime end = Windowing.ComputeBaselineExitUtc (start, nyTz);
 
 				var dayBars = hours.Where (h => h.OpenTimeUtc >= start && h.OpenTimeUtc < end).ToList ();
 				if (dayBars.Count == 0)

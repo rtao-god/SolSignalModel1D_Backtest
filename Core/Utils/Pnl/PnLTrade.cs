@@ -42,7 +42,22 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 		/// <summary>Фактическое плечо.</summary>
 		public double LeverageUsed { get; set; }
 
+		/// <summary>Источник сигнала: Daily / DelayedA / DelayedB.</summary>
 		public string Source { get; set; } = "";   // Daily / DelayedA / DelayedB
+
+		/// <summary>Корзина: daily / intraday / delayed.</summary>
 		public string Bucket { get; set; } = "";   // daily / intraday / delayed
+
+		/// <summary>
+		/// Max adverse excursion по 1m-пути, в процентах от Entry (положительное число).
+		/// Для лонга = max ( (Entry - Low) / Entry ), для шорта = max( (High - Entry) / Entry ).
+		/// </summary>
+		public double MaxAdversePct { get; set; }
+
+		/// <summary>
+		/// Max favorable excursion по 1m-пути, в процентах от Entry (положительное число).
+		/// Для лонга = max ( (High - Entry) / Entry ), для шорта = max( (Entry - Low) / Entry ).
+		/// </summary>
+		public double MaxFavorablePct { get; set; }
 		}
 	}

@@ -1,20 +1,23 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
+using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
 	/// <summary>
-	/// Микро-слой: 2 таблицы.
+	/// Микро-слой: 2 блока.
 	/// 1) Только по предсказанным БОКОВИКАМ (pred=1): microUp/microDown vs факты.
-	/// 2) Для НЕ-боковиков (pred∈{0,2}): обычная направленная точность (без микро-флагов).
+	///    + цветной summary «слова» с общей точностью.
+	/// 2) Для НЕ-боковиков (pred∈{0,2}): обычная направленная точность (без микро-флагов)
+	///    + цветной summary по accuracy.
 	/// </summary>
 	public static class MicroStatsPrinter
 		{
 		public static void Print ( IReadOnlyList<DataRow> mornings, IReadOnlyList<PredictionRecord> records )
 			{
+			// mornings пока не используем, оставляем для совместимости сигнатуры
 			PrintFlatOnlyMicro (records);
 			Console.WriteLine ();
 			PrintNonFlatDirection (records);
@@ -59,6 +62,37 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			t.AddRow ("  └ miss", microDownMiss.ToString ());
 			t.AddRow ("no micro predicted (flat)", microNone.ToString ());
 			t.WriteToConsole ();
+
+			// === Цветной строчный summary ===
+
+			int totalDirPred = microUpPred + microDownPred;
+			int totalDirHit = microUpHit + microDownHit;
+
+			if (totalDirPred == 0)
+				{
+				WriteColoredLine (ConsoleColor.DarkGray,
+					"Micro flat-only: нет ни одного micro-сигнала на flat-днях");
+				return;
+				}
+
+			double accUp = microUpPred > 0
+				? (double) microUpHit / microUpPred * 100.0
+				: 0.0;
+
+			double accDown = microDownPred > 0
+				? (double) microDownHit / microDownPred * 100.0
+				: 0.0;
+
+			double accAll = (double) totalDirHit / totalDirPred * 100.0;
+
+			string summary =
+				$"Micro flat-only: " +
+				$"UP acc = {accUp:0.0}% ({microUpHit}/{microUpPred}), " +
+				$"DOWN acc = {accDown:0.0}% ({microDownHit}/{microDownPred}), " +
+				$"overall = {accAll:0.0}% ({totalDirHit}/{totalDirPred})";
+
+			var color = accAll >= 50.0 ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+			WriteColoredLine (color, summary);
 			}
 
 		// ----- 2) Для НЕ-боковиков: направленная точность -----
@@ -68,7 +102,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			// и сравниваем направление с фактом на 0/2.
 			var nonFlat = records.Where (r => r.PredLabel == 0 || r.PredLabel == 2).ToList ();
 			int total = nonFlat.Count;
-			int correct = nonFlat.Count (r => (r.TrueLabel == 0 && r.PredLabel == 0) || (r.TrueLabel == 2 && r.PredLabel == 2));
+			int correct = nonFlat.Count (r =>
+				(r.TrueLabel == 0 && r.PredLabel == 0) ||
+				(r.TrueLabel == 2 && r.PredLabel == 2));
 
 			// Разложим по типам для наглядности
 			int predUp_factUp = nonFlat.Count (r => r.PredLabel == 2 && r.TrueLabel == 2);
@@ -87,6 +123,29 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			t.AddRow ("pred DOWN & fact DOWN", predDown_factDown.ToString ());
 			t.AddRow ("pred DOWN & fact UP", predDown_factUp.ToString ());
 			t.WriteToConsole ();
+
+			// === Цветной строчный summary ===
+
+			if (total == 0)
+				{
+				WriteColoredLine (ConsoleColor.DarkGray,
+					"Non-flat direction: нет ни одного предсказания pred ∈ {down, up}");
+				return;
+				}
+
+			double acc = (double) correct / total * 100.0;
+			string summary = $"Non-flat direction: acc = {acc:0.0}% ({correct}/{total})";
+
+			var colorDir = acc >= 50.0 ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+			WriteColoredLine (colorDir, summary);
+			}
+
+		private static void WriteColoredLine ( ConsoleColor color, string text )
+			{
+			var prev = Console.ForegroundColor;
+			Console.ForegroundColor = color;
+			Console.WriteLine (text);
+			Console.ForegroundColor = prev;
 			}
 		}
 	}

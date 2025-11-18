@@ -5,15 +5,10 @@ using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Trading;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
-	/// <summary>
-	/// “Тонкий” слой: порядок вызовов + печать отчётов.
-	/// Датасеты ему передают извне (Program/Runner).
-	/// </summary>
 	public sealed class RollingLoop
 		{
 		public sealed class PolicySpec
@@ -23,6 +18,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			public MarginMode Margin { get; init; }
 			}
 
+		// =====================================================================
+		// MAIN ENTRY
+		// =====================================================================
 		public void Run (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<PredictionRecord> records,
@@ -31,37 +29,90 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			double dailyStopPct = 0.05,
 			double dailyTpPct = 0.03 )
 			{
-			// 1) Модельные метрики (без микро/Delayed)
-			BacktestModelStatsPrinter.Print (records);
-
-			// 2) МИКРО: flat-only + non-flat direction
+			// 1) МИКРО-статистика
 			MicroStatsPrinter.Print (mornings, records);
 
-			// 3) PnL с/без SL
-			var withSl = SimulateAllPolicies (policies, records, candles1m, useStopLoss: true, dailyStopPct, dailyTpPct);
-			var noSl = SimulateAllPolicies (policies, records, candles1m, useStopLoss: false, dailyStopPct, dailyTpPct);
+			// 2) Обычные прогонки WITH SL / NO SL
+			var withSlBase = SimulateAllPolicies (
+				policies, records, candles1m,
+				useStopLoss: true,
+				dailyStopPct,
+				dailyTpPct,
+				useAnti: false
+			);
 
-			// 4) Сравнение политик (две строки на каждую: with/without SL)
-			PolicySlComparisonPrinter.Print (withSl, noSl);
+			var noSlBase = SimulateAllPolicies (
+				policies, records, candles1m,
+				useStopLoss: false,
+				dailyStopPct,
+				dailyTpPct,
+				useAnti: false
+			);
 
-			// 5) Детализация по политикам (WITH SL)
-			PolicyBreakdownPrinter.PrintSummary (withSl, "Policy summary (WITH SL)");
-			PolicyBreakdownPrinter.PrintMonthlySkew (withSl, 12);
+			// 3) Сравнение политик по SL
+			PolicySlComparisonPrinter.Print (withSlBase, noSlBase);
 
-			// 6) Delayed A/B — единый отчёт (counts + PnL%)
+			// 3B) Расширенный SL отчёт
+			SlPnlReportPrinter.PrintMatchedDeltaAndPnl (records, withSlBase, noSlBase);
+
+			// 4) Policy summary (WITH SL)
+			PolicyBreakdownPrinter.PrintSummary (withSlBase, "Policy summary (WITH SL)");
+			PolicyBreakdownPrinter.PrintMonthlySkew (withSlBase, 12);
+
+			PolicyRatiosPrinter.Print (withSlBase, "Policy ratios (WITH SL)");
+			PolicyRatiosPrinter.Print (noSlBase, "Policy ratios (NO SL)");
+
+			// 5) Delayed A/B
 			DelayedStatsPrinter.Print (records);
 
-			// 7) «Последний день каждого окна»
-			WindowTailPrinter.PrintBlockTails (records, withSl, takeDays: 20, skipDays: 30);
+			// 6) Tails
+			WindowTailPrinter.PrintBlockTails (
+				mornings,
+				records,
+				withSlBase,
+				takeDays: 20,
+				skipDays: 30,
+				title: "Window tails (WITH SL)");
+
+			// =====================================================================
+			// 7) ANTI-DIRECTION OVERLAY (base/anti × with SL / no SL)
+			// =====================================================================
+
+			var withSlAnti = SimulateAllPolicies (
+				policies, records, candles1m,
+				useStopLoss: true,
+				dailyStopPct,
+				dailyTpPct,
+				useAnti: true
+			);
+
+			var noSlAnti = SimulateAllPolicies (
+				policies, records, candles1m,
+				useStopLoss: false,
+				dailyStopPct,
+				dailyTpPct,
+				useAnti: true
+			);
+
+			AntiDirectionComparisonPrinter.Print (
+				withSlBase,
+				withSlAnti,
+				noSlBase,
+				noSlAnti
+			);
 			}
 
+		// =====================================================================
+		// Бэктест для всех политик (с базовым или anti-direction режимом)
+		// =====================================================================
 		private static List<BacktestPolicyResult> SimulateAllPolicies (
 			IReadOnlyList<PolicySpec> policies,
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			bool useStopLoss,
 			double dailyStopPct,
-			double dailyTpPct )
+			double dailyTpPct,
+			bool useAnti = false )
 			{
 			var results = new List<BacktestPolicyResult> (policies.Count);
 
@@ -82,7 +133,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					out var tradesBySource,
 					out var withdrawnTotal,
 					out var bucketSnapshots,
-					out var hadLiquidation);
+					out var hadLiquidation,
+					useAntiDirectionOverlay: useAnti // <── ДОБАВЛЕНО
+				);
 
 				results.Add (new BacktestPolicyResult
 					{
@@ -92,7 +145,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					TotalPnlPct = totalPnlPct,
 					MaxDdPct = maxDdPct,
 					WithdrawnTotal = withdrawnTotal,
-					HadLiquidation = hadLiquidation
+					HadLiquidation = hadLiquidation,
+					TradesBySource = tradesBySource,
+					BucketSnapshots = bucketSnapshots
 					});
 				}
 

@@ -65,5 +65,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 		/// <summary>Онлайн-решение SL: true = высокий риск, false = низкий.</summary>
 		public bool SlHighDecision { get; set; }
+
+		// ===== Anti-direction (PnL overlay) =====
+		/// <summary>
+		/// Флаг, что в PnL для этого дня направление сделки было перевёрнуто (Anti-D).
+		/// Классификация при этом остаётся прежней (PredLabel/Micro).
+		/// </summary>
+		public bool AntiDirectionApplied { get; set; }
 		}
 	}

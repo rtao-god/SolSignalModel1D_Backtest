@@ -14,7 +14,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			var sol = CandleSeriesReader.ReadAll6h (solUsdt);
 			var btc = CandleSeriesReader.ReadAll6h (btcUsdt);
 			if (sol.Count == 0 || btc.Count == 0)
-				throw new InvalidOperationException ($"[cross] need 6h SOLUSDT & BTCUSDT first (in {Core.Infra.PathConfig.CandlesDir}).");
+				throw new InvalidOperationException ($"[cross] need 6h SOLUSDT & BTCUSDT first (in {Infra.PathConfig.CandlesDir}).");
 
 			var bIdx = btc.ToDictionary (x => x.OpenTimeUtc);
 			var outLines = new List<CandleNdjsonStore.CandleLine> (sol.Count);

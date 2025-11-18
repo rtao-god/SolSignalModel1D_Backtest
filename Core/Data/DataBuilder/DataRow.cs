@@ -31,6 +31,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 		public double SolFwd1 { get; set; }
 
+		// Path-based факт за 24h (на основе 1m)
+		// Dir: -1 = down, 0 = flat/нет касания, +1 = up
+		public int PathFirstPassDir { get; set; }
+		public DateTime? PathFirstPassTimeUtc { get; set; }
+		/// <summary>Максимальное достижение вверх от entry в долях (0.01 = +1%).</summary>
+		public double PathReachedUpPct { get; set; }
+		/// <summary>Максимальное достижение вниз от entry в долях (0.01 = -1%).</summary>
+		public double PathReachedDownPct { get; set; }
+
 		// alt-заглушки
 		public double AltFracPos6h { get; set; }
 		public double AltFracPos24h { get; set; }
@@ -50,7 +59,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public double FiboUpRel { get; set; }
 		public double FiboDownRel { get; set; }
 
-		// фичи трендовости (как были)
+		// фичи трендовости
 		public double TrendRet24h { get; set; }
 		public double TrendVol7d { get; set; }
 		public double VolShiftRatio { get; set; }

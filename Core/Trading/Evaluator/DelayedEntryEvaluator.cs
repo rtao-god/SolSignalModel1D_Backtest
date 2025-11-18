@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
@@ -8,6 +9,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 	/// <summary>
 	/// Логика отложенного (улучшенного) входа в тот же самый день.
 	/// Не трогает ML, не трогает базовый HourlyTradeEvaluator.
+	/// baseline-окно: [dayStartUtc; baselineExitUtc).
 	/// </summary>
 	public static class DelayedEntryEvaluator
 		{
@@ -23,7 +25,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 		private const double WeakSlFloor = 0.008;
 
 		/// <summary>
-		/// Главный метод: попытаться войти лучше, чем в 12:00.
+		/// Главный метод: попытаться войти лучше, чем в 12:00,
+		/// живя в baseline-окне [dayStartUtc; baselineExitUtc).
 		/// </summary>
 		public static DelayedEntryResult Evaluate (
 			IReadOnlyList<Candle1h> candles1h,
@@ -53,8 +56,9 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			if (dayMinMove < MinDayTradeable)
 				return res;
 
-			// соберём 24 часа вперёд
-			DateTime endUtc = dayStartUtc.AddHours (24);
+			// baseline-окно для delayed: то же, что и для дневных таргетов/PnL
+			DateTime endUtc = Windowing.ComputeBaselineExitUtc (dayStartUtc);
+
 			var dayBars = candles1h
 				.Where (c => c.OpenTimeUtc >= dayStartUtc && c.OpenTimeUtc < endUtc)
 				.OrderBy (c => c.OpenTimeUtc)
@@ -134,7 +138,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 					}
 				}
 
-			// ничего не сработало — значит, intraday-результат None
+			// ничего не сработало — intraday-результат None
 			res.Result = DelayedIntradayResult.None;
 			return res;
 			}

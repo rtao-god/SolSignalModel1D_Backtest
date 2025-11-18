@@ -1,20 +1,16 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 
-namespace SolSignalModel1D_Backtest.Core.ML
+namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Builders
 	{
-	/// <summary>
-	/// Оффлайн-строитель для Model B (small improvement).
-	/// Строит только на реально проблемных днях (base=SL-first),
-	/// но пробует несколько мелких шагов, чтобы раздуть датасет.
-	/// </summary>
 	public static class SmallImprovementOfflineBuilder
 		{
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 		private static readonly double[] ShallowFactors = new[] { 0.12, 0.18, 0.24 };
 		private const double ShallowMaxDelayHours = 2.0;
 
@@ -24,6 +20,8 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
 			var res = new List<SmallImprovementSample> (rows.Count * 4);
+			if (rows == null || rows.Count == 0 || sol1h == null || sol1h.Count == 0)
+				return res;
 
 			foreach (var r in rows)
 				{
@@ -34,17 +32,20 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				double dayMinMove = r.MinMove;
 				if (dayMinMove <= 0) dayMinMove = 0.02;
 
-				DateTime end = r.Date.AddHours (24);
+				DateTime entryUtc = r.Date;
+				DateTime endUtc;
+				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
+				catch { endUtc = entryUtc.AddHours (24); }
+
 				var dayHours = sol1h
-					.Where (h => h.OpenTimeUtc >= r.Date && h.OpenTimeUtc < end)
+					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
 					.OrderBy (h => h.OpenTimeUtc)
 					.ToList ();
 				if (dayHours.Count == 0)
 					continue;
 
-				// как и для A — делаем и long и short
-				BuildForDir (res, r, dayHours, entry, dayMinMove, goLong: true);
-				BuildForDir (res, r, dayHours, entry, dayMinMove, goLong: false);
+				BuildForDir (res, r, dayHours, sol1h, entry, dayMinMove, true, NyTz);
+				BuildForDir (res, r, dayHours, sol1h, entry, dayMinMove, false, NyTz);
 				}
 
 			return res;
@@ -54,72 +55,44 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			List<SmallImprovementSample> sink,
 			DataRow r,
 			List<Candle1h> dayHours,
+			IReadOnlyList<Candle1h> allHours,
 			double entryPrice,
 			double dayMinMove,
-			bool goLong )
+			bool goLong,
+			TimeZoneInfo nyTz )
 			{
 			bool goShort = !goLong;
 			bool strong = true;
 
-			// базовый результат в 12:00
 			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				dayHours,
-				r.Date,
-				goLong,
-				goShort,
-				entryPrice,
-				dayMinMove,
-				strong
-			);
+				dayHours, r.Date, goLong, goShort, entryPrice, dayMinMove, strong, nyTz);
 
-			// нас интересуют только реально плохие/опасные
 			if (baseOutcome.Result != HourlyTradeResult.SlFirst)
 				return;
 
 			foreach (var f in ShallowFactors)
 				{
 				var delayed = DelayedEntryEvaluator.Evaluate (
-					dayHours,
-					r.Date,
-					goLong,
-					goShort,
-					entryPrice,
-					dayMinMove,
-					strong,
-					f,
-					ShallowMaxDelayHours
-				);
+					dayHours, r.Date, goLong, goShort, entryPrice, dayMinMove, strong, f, ShallowMaxDelayHours);
 
 				bool label = false;
 
 				if (delayed.Executed)
 					{
-					// цель B: стало НЕ хуже, чем было
 					int baseRank = RankHourly (baseOutcome.Result);
 					int delayedRank = RankDelayed (delayed.Result);
 
 					if (delayedRank >= baseRank)
-						{
 						label = true;
-						}
 					else if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
 							 delayed.Result == DelayedIntradayResult.SlFirst &&
 							 delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
 							 delayed.SlPct < baseOutcome.SlPct)
-						{
-						// оба SL, но delayed меньше
 						label = true;
-						}
 					}
 
 				var feats = TargetLevelFeatureBuilder.Build (
-					r.Date,
-					goLong,
-					strong,
-					dayMinMove,
-					entryPrice,
-					dayHours
-				);
+					r.Date, goLong, strong, dayMinMove, entryPrice, allHours);
 
 				sink.Add (new SmallImprovementSample
 					{
@@ -130,28 +103,22 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				}
 			}
 
-		private static int RankHourly ( HourlyTradeResult res )
+		private static int RankHourly ( HourlyTradeResult res ) => res switch
 			{
-			return res switch
-				{
-					HourlyTradeResult.TpFirst => 3,
-					HourlyTradeResult.None => 2,
-					HourlyTradeResult.Ambiguous => 2,
-					HourlyTradeResult.SlFirst => 0,
-					_ => 0
-					};
-			}
+				HourlyTradeResult.TpFirst => 3,
+				HourlyTradeResult.None => 2,
+				HourlyTradeResult.Ambiguous => 2,
+				HourlyTradeResult.SlFirst => 0,
+				_ => 0
+				};
 
-		private static int RankDelayed ( DelayedIntradayResult res )
+		private static int RankDelayed ( DelayedIntradayResult res ) => res switch
 			{
-			return res switch
-				{
-					DelayedIntradayResult.TpFirst => 3,
-					DelayedIntradayResult.None => 2,
-					DelayedIntradayResult.Ambiguous => 2,
-					DelayedIntradayResult.SlFirst => 0,
-					_ => 0
-					};
-			}
+				DelayedIntradayResult.TpFirst => 3,
+				DelayedIntradayResult.None => 2,
+				DelayedIntradayResult.Ambiguous => 2,
+				DelayedIntradayResult.SlFirst => 0,
+				_ => 0
+				};
 		}
 	}

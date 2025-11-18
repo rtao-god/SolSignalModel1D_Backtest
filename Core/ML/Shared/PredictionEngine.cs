@@ -117,7 +117,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 
 					if (wantsUp)
 						{
-						// Фон. фильтр по BTC (как было)
+						// Фон. фильтр по BTC
 						bool btcEmaDown = r.BtcEma50vs200 < -0.002;
 						bool btcShortRed = r.BtcRet1 < 0 && r.BtcRet30 < 0;
 						if (btcEmaDown && btcShortRed)

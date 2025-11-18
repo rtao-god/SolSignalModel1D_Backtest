@@ -1,25 +1,18 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Delayed;
-using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
+using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SolSignalModel1D_Backtest.Core.ML
+namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Builders
 	{
-	/// <summary>
-	/// Строит оффлайновый датасет для таргет-слоя (A/B) симметрично:
-	/// на каждый день делаем два сценария — гипотетический long и гипотетический short.
-	/// Это убирает зависимость от фактического дневного label и делает датасет достаточно толстым.
-	/// </summary>
 	public static class TargetLevelOfflineBuilder
 		{
-		// те же параметры, что и в DayExecutor
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 		private const double DeepDelayFactor = 0.35;
 		private const double DeepMaxDelayHours = 4.0;
-
 		private const double ShallowDelayFactor = 0.15;
 		private const double ShallowMaxDelayHours = 2.0;
 
@@ -29,10 +22,11 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
 			var result = new List<TargetLevelSample> (rows.Count * 2);
+			if (rows == null || rows.Count == 0 || sol1h == null || sol1h.Count == 0)
+				return result;
 
 			foreach (var r in rows)
 				{
-				// нужна 6h-свеча на момент дня
 				if (!sol6hDict.TryGetValue (r.Date, out var dayCandle))
 					continue;
 
@@ -40,18 +34,20 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				double dayMinMove = r.MinMove;
 				if (dayMinMove <= 0) dayMinMove = 0.02;
 
-				// 24 часа 1h
-				DateTime dayEnd = r.Date.AddHours (24);
+				DateTime entryUtc = r.Date;
+				DateTime endUtc;
+				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
+				catch { endUtc = entryUtc.AddHours (24); }
+
 				var dayHours = sol1h
-					.Where (h => h.OpenTimeUtc >= r.Date && h.OpenTimeUtc < dayEnd)
+					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
 					.OrderBy (h => h.OpenTimeUtc)
 					.ToList ();
 				if (dayHours.Count == 0)
 					continue;
 
-				// делаем два кейса: лонг и шорт
-				BuildForDir (result, r, dayHours, entryPrice, dayMinMove, goLong: true);
-				BuildForDir (result, r, dayHours, entryPrice, dayMinMove, goLong: false);
+				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, true, NyTz);
+				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, false, NyTz);
 				}
 
 			return result;
@@ -61,79 +57,31 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			List<TargetLevelSample> sink,
 			DataRow r,
 			List<Candle1h> dayHours,
+			IReadOnlyList<Candle1h> allHours,
 			double entryPrice,
 			double dayMinMove,
-			bool goLong )
+			bool goLong,
+			TimeZoneInfo nyTz )
 			{
-			bool strongSignal = true; // оффлайн: считаем, что если уж строим отложку, то день "сигнальный"
+			bool strongSignal = true;
 
-			// 1) базовый результат
 			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				dayHours,
-				r.Date,
-				goLong,
-				!goLong,
-				entryPrice,
-				dayMinMove,
-				strongSignal
-			);
+				dayHours, r.Date, goLong, !goLong, entryPrice, dayMinMove, strongSignal, nyTz);
 
-			// 2) deep delayed (A)
 			var deepDelayed = DelayedEntryEvaluator.Evaluate (
-				dayHours,
-				r.Date,
-				goLong,
-				!goLong,
-				entryPrice,
-				dayMinMove,
-				strongSignal,
-				DeepDelayFactor,
-				DeepMaxDelayHours
-			);
+				dayHours, r.Date, goLong, !goLong, entryPrice, dayMinMove, strongSignal, DeepDelayFactor, DeepMaxDelayHours);
 
-			// 3) shallow delayed (B)
 			var shDelayed = DelayedEntryEvaluator.Evaluate (
-				dayHours,
-				r.Date,
-				goLong,
-				!goLong,
-				entryPrice,
-				dayMinMove,
-				strongSignal,
-				ShallowDelayFactor,
-				ShallowMaxDelayHours
-			);
+				dayHours, r.Date, goLong, !goLong, entryPrice, dayMinMove, strongSignal, ShallowDelayFactor, ShallowMaxDelayHours);
 
-			// === решение по лейблу ===
 			int label = 0;
+			if (deepDelayed.Executed && IsDeepImprovement (baseOutcome, deepDelayed))
+				label = 2;
+			else if (shDelayed.Executed && IsShallowNotWorse (baseOutcome, shDelayed))
+				label = 1;
 
-			// сначала проверяем deep
-			if (deepDelayed.Executed)
-				{
-				if (IsDeepImprovement (baseOutcome, deepDelayed))
-					{
-					label = 2;
-					}
-				}
-
-			// если deep не дал улучшения — пробуем shallow
-			if (label == 0 && shDelayed.Executed)
-				{
-				if (IsShallowNotWorse (baseOutcome, shDelayed))
-					{
-					label = 1;
-					}
-				}
-
-			// фичи — такие же, как в онлайне
 			var feats = TargetLevelFeatureBuilder.Build (
-				r.Date,
-				goLong,
-				strongSignal,
-				dayMinMove,
-				entryPrice,
-				dayHours
-			);
+				r.Date, goLong, strongSignal, dayMinMove, entryPrice, allHours);
 
 			sink.Add (new TargetLevelSample
 				{
@@ -143,90 +91,61 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				});
 			}
 
-		/// <summary>
-		/// Для A: улучшением считаем случаи "deep исполнился и сделал не хуже, а чаще — лучше, чем базовый вход".
-		/// </summary>
 		private static bool IsDeepImprovement ( HourlyTradeOutcome baseOutcome, DelayedEntryResult delayed )
 			{
-			// 1) базовый был SL/None, delayed дал TP → однозначное улучшение
 			if ((baseOutcome.Result == HourlyTradeResult.SlFirst || baseOutcome.Result == HourlyTradeResult.None) &&
 				delayed.Result == DelayedIntradayResult.TpFirst)
-				{
 				return true;
-				}
 
-			// 2) и там, и там TP → тоже ок, deep не хуже
 			if (baseOutcome.Result == HourlyTradeResult.TpFirst &&
 				delayed.Result == DelayedIntradayResult.TpFirst)
-				{
 				return true;
-				}
 
-			// 3) оба SL, но delayed SL меньше → тоже можно считать улучшением
 			if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
 				delayed.Result == DelayedIntradayResult.SlFirst &&
 				delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
 				delayed.SlPct < baseOutcome.SlPct)
-				{
 				return true;
-				}
 
 			return false;
 			}
 
-		/// <summary>
-		/// Для B: допускаем "не хуже".
-		/// </summary>
 		private static bool IsShallowNotWorse ( HourlyTradeOutcome baseOutcome, DelayedEntryResult delayed )
 			{
 			int baseRank = RankHourly (baseOutcome.Result);
 			int delayedRank = RankDelayed (delayed.Result);
 
-			// delayed должен быть хотя бы не хуже
-			if (delayedRank < baseRank)
-				return false;
+			if (delayedRank < baseRank) return false;
 
-			// если оба SL, как и для A, можно посмотреть на размер
 			if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
 				delayed.Result == DelayedIntradayResult.SlFirst &&
 				delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
 				delayed.SlPct < baseOutcome.SlPct)
-				{
 				return true;
-				}
 
-			// если delayed None, а base SL — уже не хуже
 			if (delayed.Result == DelayedIntradayResult.None &&
 				baseOutcome.Result == HourlyTradeResult.SlFirst)
-				{
 				return true;
-				}
 
 			return delayedRank >= baseRank;
 			}
 
-		private static int RankHourly ( HourlyTradeResult res )
+		private static int RankHourly ( HourlyTradeResult res ) => res switch
 			{
-			return res switch
-				{
-					HourlyTradeResult.TpFirst => 3,
-					HourlyTradeResult.None => 2,
-					HourlyTradeResult.Ambiguous => 2,
-					HourlyTradeResult.SlFirst => 0,
-					_ => 0
-					};
-			}
+				HourlyTradeResult.TpFirst => 3,
+				HourlyTradeResult.None => 2,
+				HourlyTradeResult.Ambiguous => 2,
+				HourlyTradeResult.SlFirst => 0,
+				_ => 0
+				};
 
-		private static int RankDelayed ( DelayedIntradayResult res )
+		private static int RankDelayed ( DelayedIntradayResult res ) => res switch
 			{
-			return res switch
-				{
-					DelayedIntradayResult.TpFirst => 3,
-					DelayedIntradayResult.None => 2,
-					DelayedIntradayResult.Ambiguous => 2,
-					DelayedIntradayResult.SlFirst => 0,
-					_ => 0
-					};
-			}
+				DelayedIntradayResult.TpFirst => 3,
+				DelayedIntradayResult.None => 2,
+				DelayedIntradayResult.Ambiguous => 2,
+				DelayedIntradayResult.SlFirst => 0,
+				_ => 0
+				};
 		}
 	}

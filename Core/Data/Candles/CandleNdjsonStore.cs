@@ -66,7 +66,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				}
 			}
 
-		/// <summary>Чтение диапазона свечей (универсально для любого TF-файла).</summary>
+		/// <summary>
+		/// Чтение диапазона свечей (универсально для любого TF-файла).
+		/// </summary>
 		public List<CandleLine> ReadRange ( DateTime startUtc, DateTime endUtc )
 			{
 			var res = new List<CandleLine> ();

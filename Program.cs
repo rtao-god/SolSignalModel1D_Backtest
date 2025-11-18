@@ -1,10 +1,14 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
+﻿using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
@@ -16,15 +20,58 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using DelayedIntradayResult = SolSignalModel1D_Backtest.Core.Trading.Evaluator.DelayedIntradayResult;
 
 namespace SolSignalModel1D_Backtest
 	{
 	internal class Program
 		{
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+
+		/// <summary>
+		/// Результат построения дневных строк:
+		/// все строки (6h-окна) и подмножество утренних (NY morning).
+		/// </summary>
+		private sealed class DailyRowsBundle
+			{
+			public List<DataRow> AllRows { get; init; } = new List<DataRow> ();
+			public List<DataRow> Mornings { get; init; } = new List<DataRow> ();
+			}
+
 		public static async Task Main ( string[] args )
 			{
 			Console.WriteLine ($"[paths] CandlesDir    = {PathConfig.CandlesDir}");
 			Console.WriteLine ($"[paths] IndicatorsDir = {PathConfig.IndicatorsDir}");
+
+			// --- обновляем свечи ---
+			using var http = new HttpClient ();
+
+			var solUpdater = new CandleDailyUpdater (
+				http,
+				"SOLUSDT",
+				PathConfig.CandlesDir,
+				catchupDays: 3
+			);
+
+			var btcUpdater = new CandleDailyUpdater (
+				http,
+				"BTCUSDT",
+				PathConfig.CandlesDir,
+				catchupDays: 3
+			);
+
+			var paxgUpdater = new CandleDailyUpdater (
+				http,
+				"PAXGUSDT",
+				PathConfig.CandlesDir,
+				catchupDays: 3
+			);
+
+			Console.WriteLine ("[update] Updating SOL/BTC/PAXG candles...");
+			await solUpdater.UpdateAllAsync ();
+			await btcUpdater.UpdateAllAsync ();
+			await paxgUpdater.UpdateAllAsync ();
+			Console.WriteLine ("[update] Candle update done.");
 
 			// Символы без слэшей, чтобы совпадали с именами файлов в cache/candles/
 			var solSym = "SOLUSDT";
@@ -34,7 +81,7 @@ namespace SolSignalModel1D_Backtest
 			// Обеспечиваем наличие 6h (ресэмплинг из 1h/1m при надобности)
 			CandleResampler.Ensure6hAvailable (solSym);
 			CandleResampler.Ensure6hAvailable (btcSym);
-			CandleResampler.Ensure6hAvailable (paxgSym); 
+			CandleResampler.Ensure6hAvailable (paxgSym);
 
 			// Читаем 6h
 			var solAll6h = ReadAll6h (solSym);
@@ -46,43 +93,75 @@ namespace SolSignalModel1D_Backtest
 
 			Console.WriteLine ($"[6h] SOL={solAll6h.Count}, BTC={btcAll6h.Count}, PAXG={paxgAll6h.Count}");
 
+			// 1h SOL — нужен для SL-фич (контекст 6h → три 2h-блока + хвост 1h)
+			var solAll1h = ReadAll1h (solSym);
+			Console.WriteLine ($"[1h] SOL count = {solAll1h.Count}");
+
+			// Минутки SOL: нужны и для Path-based меток, и для Delayed A, и для SL-датасета
+			var sol1m = ReadAll1m (solSym);
+			Console.WriteLine ($"[1m] SOL count = {sol1m.Count}");
+			if (sol1m.Count == 0)
+				throw new InvalidOperationException ("[init] Нет 1m свечей SOLUSDT в cache/candles.");
+
 			// Диапазон
 			var lastUtc = solAll6h.Max (c => c.OpenTimeUtc);
 			var fromUtc = lastUtc.Date.AddDays (-540);
 			var toUtc = lastUtc.Date;
 
 			// Индикаторы (обновление + проверка покрытия)
-			using var http = new HttpClient ();
 			var indicators = new IndicatorsDailyUpdater (http);
 			await indicators.UpdateAllAsync (fromUtc.AddDays (-90), toUtc, IndicatorsDailyUpdater.FillMode.NeutralFill);
 			indicators.EnsureCoverageOrFail (fromUtc.AddDays (-90), toUtc);
 
 			// === ДНЕВНЫЕ СТРОКИ ===
-			var mornings = await BuildDailyRowsAsync (
+			var rowsBundle = await BuildDailyRowsAsync (
 				indicators, fromUtc, toUtc,
-				solAll6h, btcAll6h, paxgAll6h
+				solAll6h, btcAll6h, paxgAll6h,
+				sol1m
 			);
+
+			var allRows = rowsBundle.AllRows;
+			var mornings = rowsBundle.Mornings;
 
 			Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
 			if (mornings.Count == 0)
 				throw new InvalidOperationException ("[rows] После фильтров нет утренних точек.");
 
-			// Модель (fallback)
+			// Модель (пока fallback: PredictionEngine даёт reason=fallback, а дальше — эвристика)
 			var engine = CreatePredictionEngineOrFallback ();
 
-			// PredictionRecord[] + forward (из 6h), + эвристика при fallback
+			// PredictionRecord[] + forward (из 6h) + эвристика при fallback
 			var records = await LoadPredictionRecordsAsync (mornings, solAll6h, engine);
 			Console.WriteLine ($"[records] built = {records.Count}");
 
-			// Минутки SOL для PnL
-			var sol1m = ReadAll1m (solSym);
-			Console.WriteLine ($"[1m] SOL count = {sol1m.Count}");
-			if (sol1m.Count == 0)
-				throw new InvalidOperationException ("[init] Нет 1m свечей SOLUSDT в cache/candles.");
+			// Например, хотим считать стратегию при марже 200 USDT.
+			// Можно вынести в конфиг/CLI, здесь — просто константа.
+			double walletBalanceUsd = 200.0;
 
-			PopulateDelayedA (records, sol1m, dipFrac: 0.005, tpPct: 0.010, slPct: 0.010);
+			CurrentPredictionPrinter.Print (records, solAll6h, walletBalanceUsd);
 
-			// Политики (не режу: const 2/3/5/10/15/50 × Cross/Isolated + риск-политики)
+			// === SL-модель: оффлайн-тренировка + проставление SlProb/SlHighDecision ===
+			TrainAndApplySlModelOffline (
+				allRows: allRows,
+				records: records,
+				sol1h: solAll1h,
+				sol1m: sol1m,
+				solAll6h: solAll6h
+			);
+
+			// Delayed A по минуткам 
+			PopulateDelayedA (
+				records: records,
+				allRows: allRows,
+				sol1h: solAll1h,
+				solAll6h: solAll6h,
+				sol1m: sol1m,
+				dipFrac: 0.005,
+				tpPct: 0.010,
+				slPct: 0.010
+			);
+
+			// Политики (const 2/3/5/10/15/50 × Cross/Isolated + риск-политики)
 			var policies = BuildPolicies ();
 			Console.WriteLine ($"[policies] total = {policies.Count}");
 
@@ -97,6 +176,101 @@ namespace SolSignalModel1D_Backtest
 			);
 			}
 
+		// ---------------- SL-модель: оффлайн-тренировка + применение ----------------
+
+		/// <summary>
+		/// Тренируем SL-модель на каузальном оффлайн-датасете (SlOfflineBuilder)
+		/// и проставляем SlProb / SlHighDecision в PredictionRecord.
+		/// </summary>
+		private static void TrainAndApplySlModelOffline (
+			List<DataRow> allRows,
+			IList<PredictionRecord> records,
+			IReadOnlyList<Candle1h> sol1h,
+			IReadOnlyList<Candle1m> sol1m,
+			IReadOnlyList<Candle6h> solAll6h )
+			{
+			if (allRows == null || allRows.Count == 0)
+				{
+				Console.WriteLine ("[sl-offline] no rows, skip SL-model.");
+				return;
+				}
+
+			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
+			var sol1hOrNull = sol1h != null && sol1h.Count > 0 ? sol1h : null;
+
+			// Строим SL-датасет: для каждого утреннего дня — гипотетический long/short, кто был первым: SL или TP
+			var slSamples = SlOfflineBuilder.Build (
+				rows: allRows,
+				sol1h: sol1hOrNull,
+				sol1m: sol1m,
+				sol6hDict: sol6hDict
+			);
+
+			Console.WriteLine ($"[sl-offline] built samples = {slSamples.Count}");
+			if (slSamples.Count < 20)
+				{
+				Console.WriteLine ("[sl-offline] too few samples, skip SL-model.");
+				return;
+				}
+
+			// Оффлайн-тренировка (без онлайн-доучивания)
+			var trainer = new SlFirstTrainer ();
+			var asOf = allRows.Max (r => r.Date);
+			var slModel = trainer.Train (slSamples, asOf);
+			var slEngine = trainer.CreateEngine (slModel);
+
+			// Порог "HIGH" риска (positive класс = SL-first)
+			const float SlRiskThreshold = 0.55f;
+
+			// Быстрая мапа DataRow по дате
+			var rowByDate = allRows.ToDictionary (r => r.Date, r => r);
+
+			int scored = 0;
+
+			foreach (var rec in records)
+				{
+				if (!rowByDate.TryGetValue (rec.DateUtc, out var row))
+					continue;
+
+				// Направление по дневной модели
+				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
+				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+				if (!goLong && !goShort)
+					continue;
+
+				bool strong = rec.PredLabel == 2 || rec.PredLabel == 0;
+				double dayMinMove = rec.MinMove > 0 ? rec.MinMove : 0.02;
+				double entryPrice = rec.Entry;
+				if (entryPrice <= 0) continue;
+
+				// Фичи для SL-модели (6h-контекст через 2h-блоки + хвост 1h)
+				var slFeats = SlFeatureBuilder.Build (
+					entryUtc: rec.DateUtc,
+					goLong: goLong,
+					strongSignal: strong,
+					dayMinMove: dayMinMove,
+					entryPrice: entryPrice,
+					candles1h: sol1hOrNull
+				);
+
+				var slPred = slEngine.Predict (new SlHitSample
+					{
+					Label = false,          // в рантайме не используется
+					Features = slFeats,
+					EntryUtc = rec.DateUtc
+					});
+
+				double p = slPred.Probability;
+				bool predHigh = slPred.PredictedLabel && p >= SlRiskThreshold;
+
+				rec.SlProb = p;
+				rec.SlHighDecision = predHigh;
+				scored++;
+				}
+
+			Console.WriteLine ($"[sl-runtime] scored days = {scored}/{records.Count}");
+			}
+
 		// ---------------- helpers ----------------
 
 		private static List<RollingLoop.PolicySpec> BuildPolicies ()
@@ -105,8 +279,6 @@ namespace SolSignalModel1D_Backtest
 
 			void AddConst ( double lev )
 				{
-				// Если у тебя класс называется иначе (например, ConstLeveragePolicy),
-				// просто замени на него в двух местах ниже.
 				var name = $"const_{lev:0.#}x";
 				var policy = new LeveragePolicies.ConstPolicy (name, lev);
 				list.Add (new RollingLoop.PolicySpec { Name = $"{name} Cross", Policy = policy, Margin = MarginMode.Cross });
@@ -150,6 +322,22 @@ namespace SolSignalModel1D_Backtest
 				}).OrderBy (c => c.OpenTimeUtc).ToList ();
 			}
 
+		private static List<Candle1h> ReadAll1h ( string symbol )
+			{
+			var path = CandlePaths.File (symbol, "1h");
+			if (!File.Exists (path)) return new List<Candle1h> ();
+			var store = new CandleNdjsonStore (path);
+			var lines = store.ReadRange (DateTime.MinValue, DateTime.MaxValue);
+			return lines.Select (l => new Candle1h
+				{
+				OpenTimeUtc = l.OpenTimeUtc,
+				Open = l.Open,
+				High = l.High,
+				Low = l.Low,
+				Close = l.Close
+				}).OrderBy (c => c.OpenTimeUtc).ToList ();
+			}
+
 		private static List<Candle1m> ReadAll1m ( string symbol )
 			{
 			var path = CandlePaths.File (symbol, "1m");
@@ -166,12 +354,13 @@ namespace SolSignalModel1D_Backtest
 				}).OrderBy (c => c.OpenTimeUtc).ToList ();
 			}
 
-		private static async Task<List<DataRow>> BuildDailyRowsAsync (
+		private static async Task<DailyRowsBundle> BuildDailyRowsAsync (
 			IndicatorsDailyUpdater indicatorsUpdater,
 			DateTime fromUtc, DateTime toUtc,
 			List<Candle6h> solAll6h,
 			List<Candle6h> btcAll6h,
-			List<Candle6h> paxgAll6h )
+			List<Candle6h> paxgAll6h,
+			List<Candle1m> sol1m )
 			{
 			var histFrom = fromUtc.AddDays (-90);
 
@@ -198,13 +387,15 @@ namespace SolSignalModel1D_Backtest
 			var dxyDict = indicatorsUpdater.LoadDxyDict (histFrom.Date, toUtc.Date);
 			indicatorsUpdater.EnsureCoverageOrFail (histFrom.Date, toUtc.Date);
 
-			var nyTz = GetNyTimeZone ();
+			var nyTz = TimeZones.NewYork;
 
+			// Все 6h-строки (для SL-датасета и path-based labels)
 			var rows = RowBuilder.BuildRowsDaily (
 				solWinTrain: solWinTrain,
 				btcWinTrain: btcWinTrain,
 				paxgWinTrain: paxgWinTrain,
 				solAll6h: solAll6h,
+				solAll1m: sol1m,
 				fngHistory: fngDict,
 				dxySeries: dxyDict,
 				extraDaily: null,
@@ -220,7 +411,15 @@ namespace SolSignalModel1D_Backtest
 				.ToList ();
 
 			Console.WriteLine ($"[rows] mornings after filter = {mornings.Count}");
-			return await Task.FromResult (mornings);
+
+			var lastSolTime = solWinTrain.Max (c => c.OpenTimeUtc);
+			Console.WriteLine ($"[rows] last SOL 6h = {lastSolTime:O}");
+
+			return await Task.FromResult (new DailyRowsBundle
+				{
+				AllRows = rows,
+				Mornings = mornings
+				});
 			}
 
 		private static void DumpNyHourHistogram ( List<DataRow> rows, TimeZoneInfo nyTz )
@@ -242,17 +441,16 @@ namespace SolSignalModel1D_Backtest
 			IReadOnlyList<Candle6h> solAll6h,
 			PredictionEngine engine )
 			{
-			var dict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
-			var list = new List<PredictionRecord> (mornings.Count);
-
+			// Prepare sorted 6h list for forward range calculations
+			var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList ();
 			int usedHeuristic = 0;
+			var list = new List<PredictionRecord> (mornings.Count);
+			var nyTz = TimeZones.NewYork;;
 
 			foreach (var r in mornings)
 				{
 				var pr = engine.Predict (r);
 
-				// Если у нас fallback (моделей нет) — применяем эвристику,
-				// чтобы не было "всегда flat" и чтобы работал PnL.
 				int cls = pr.Class;
 				bool microUp = pr.Micro.ConsiderUp;
 				bool microDn = pr.Micro.ConsiderDown;
@@ -268,7 +466,51 @@ namespace SolSignalModel1D_Backtest
 					usedHeuristic++;
 					}
 
-				var (entry, maxHigh, minLow, fwdClose) = ComputeForwardFrom6h (dict, r.Date);
+				// Вычисляем показатели по forward-окну (до базового выхода t_exit)
+				DateTime entryUtc = r.Date;
+				DateTime exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+
+				int entryIdx = sorted6h.FindIndex (c => c.OpenTimeUtc == entryUtc);
+				if (entryIdx < 0)
+					throw new InvalidOperationException ($"[forward] entry candle {entryUtc:O} not found in 6h series");
+
+				int exitIdx = -1;
+				for (int i = entryIdx; i < sorted6h.Count; i++)
+					{
+					var start = sorted6h[i].OpenTimeUtc;
+					DateTime end = (i + 1 < sorted6h.Count)
+						? sorted6h[i + 1].OpenTimeUtc
+						: start.AddHours (6);
+					if (exitUtc >= start && exitUtc <= end)
+						{
+						exitIdx = i;
+						break;
+						}
+					}
+				if (exitIdx < 0)
+					{
+					Console.WriteLine ($"[forward] no 6h candle covering baseline exit {exitUtc:O} (entry {entryUtc:O})");
+					throw new InvalidOperationException ($"[forward] no 6h candle covering baseline exit {exitUtc:O}");
+					}
+				if (exitIdx <= entryIdx)
+					{
+					throw new InvalidOperationException ($"[forward] exitIdx {exitIdx} <= entryIdx {entryIdx}");
+					}
+
+				double entryPrice = sorted6h[entryIdx].Close;
+				double maxHigh = double.MinValue;
+				double minLow = double.MaxValue;
+				for (int j = entryIdx + 1; j <= exitIdx; j++)
+					{
+					var c = sorted6h[j];
+					if (c.High > maxHigh) maxHigh = c.High;
+					if (c.Low < minLow) minLow = c.Low;
+					}
+				if (maxHigh == double.MinValue || minLow == double.MaxValue)
+					{
+					throw new InvalidOperationException ($"[forward] no candles between entry {entryUtc:O} and exit {exitUtc:O}");
+					}
+				double fwdClose = sorted6h[exitIdx].Close;
 
 				list.Add (new PredictionRecord
 					{
@@ -281,7 +523,7 @@ namespace SolSignalModel1D_Backtest
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown,
 
-					Entry = entry,
+					Entry = entryPrice,
 					MaxHigh24 = maxHigh,
 					MinLow24 = minLow,
 					Close24 = fwdClose,
@@ -311,38 +553,27 @@ namespace SolSignalModel1D_Backtest
 			return await Task.FromResult (list);
 			}
 
-		/// <summary>
-		/// Простая эвристика на фичах ряда, когда ML недоступен:
-		/// - решаем move vs flat и направление,
-		/// - если flat, даём micro (наклон), чтобы PnL мог торговать.
-		/// </summary>
 		private static (int Class, bool MicroUp, bool MicroDown, string Reason) HeuristicPredict ( DataRow r )
 			{
-			// Счета “за” вверх/вниз.
 			double up = 0, dn = 0;
 
-			// Тренд по EMA 50/200 (SOL и BTC)
 			if (r.SolEma50vs200 > 0.005) up += 1.2;
 			if (r.SolEma50vs200 < -0.005) dn += 1.2;
 			if (r.BtcEma50vs200 > 0.0) up += 0.6;
 			if (r.BtcEma50vs200 < 0.0) dn += 0.6;
 
-			// Короткие ретёрны
 			if (r.SolRet3 > 0) up += 0.7; else if (r.SolRet3 < 0) dn += 0.7;
 			if (r.SolRet1 > 0) up += 0.4; else if (r.SolRet1 < 0) dn += 0.4;
 
-			// RSI (центрирован)
 			if (r.SolRsiCentered > +4) up += 0.7;
 			if (r.SolRsiCentered < -4) dn += 0.7;
 
-			// Фон BTC и DXY/Gold как слабые факторы
 			if (r.BtcRet30 > 0) up += 0.3; else if (r.BtcRet30 < 0) dn += 0.3;
-			if (r.DxyChg30 > 0.01) dn += 0.2; // сильный доллар чаще давит
-			if (r.GoldChg30 > 0.01) dn += 0.1; // “risk-off” прокси
+			if (r.DxyChg30 > 0.01) dn += 0.2;
+			if (r.GoldChg30 > 0.01) dn += 0.1;
 
-			// Решение: движение или flat
 			double gap = Math.Abs (up - dn);
-			bool move = (up >= 1.8 || dn >= 1.8) && gap >= 0.6; // надо и сила, и разделимость
+			bool move = (up >= 1.8 || dn >= 1.8) && gap >= 0.6;
 
 			if (move)
 				{
@@ -350,11 +581,9 @@ namespace SolSignalModel1D_Backtest
 				}
 			else
 				{
-				// flat, но даём наклон для торговли micro
 				bool microUp = up > dn + 0.3;
 				bool microDn = dn > up + 0.3;
 
-				// если явного наклона нет — попробуем по наклону RSI
 				if (!microUp && !microDn)
 					{
 					if (r.RsiSlope3 > +8) microUp = true;
@@ -363,37 +592,6 @@ namespace SolSignalModel1D_Backtest
 
 				return (1, microUp, microDn, $"flat: u={up:0.00} d={dn:0.00} rsiSlope={r.RsiSlope3:0.0}");
 				}
-			}
-
-		/// <summary>Берём 4 следующих 6h свечи [t, t+24h)</summary>
-		private static (double entry, double maxHigh, double minLow, double fwdClose)
-			ComputeForwardFrom6h ( Dictionary<DateTime, Candle6h> sol6h, DateTime t )
-			{
-			if (!sol6h.TryGetValue (t, out var c0))
-				throw new InvalidOperationException ($"[forward] нет 6h свечи @ {t:o}");
-
-			var t1 = t.AddHours (6);
-			var t2 = t.AddHours (12);
-			var t3 = t.AddHours (18);
-			var t4 = t.AddHours (24);
-
-			if (!sol6h.TryGetValue (t1, out var c1) ||
-				!sol6h.TryGetValue (t2, out var c2) ||
-				!sol6h.TryGetValue (t3, out var c3) ||
-				!sol6h.TryGetValue (t4, out var c4))
-				throw new InvalidOperationException ($"[forward] неполные 24h окна от {t:o}");
-
-			double entry = c0.Close;
-			double maxH = new[] { c1.High, c2.High, c3.High, c4.High }.Max ();
-			double minL = new[] { c1.Low, c2.Low, c3.Low, c4.Low }.Min ();
-			double fwdClose = c4.Close;
-			return (entry, maxH, minL, fwdClose);
-			}
-
-		private static TimeZoneInfo GetNyTimeZone ()
-			{
-			try { return TimeZoneInfo.FindSystemTimeZoneById ("America/New_York"); }
-			catch { return TimeZoneInfo.FindSystemTimeZoneById ("Eastern Standard Time"); }
 			}
 
 		private static PredictionEngine CreatePredictionEngineOrFallback ()
@@ -410,74 +608,243 @@ namespace SolSignalModel1D_Backtest
 			}
 
 		private static void PopulateDelayedA (
-		   IList<PredictionRecord> records,
-		   IReadOnlyList<Candle1m> sol1m,
-		   double dipFrac = 0.005,   // 0.5% откат для входа
-		   double tpPct = 0.010,   // 1.0% TP
-		   double slPct = 0.010 )   // 1.0% SL
+			IList<PredictionRecord> records,
+			List<DataRow> allRows,
+			IReadOnlyList<Candle1h> sol1h,
+			IReadOnlyList<Candle6h> solAll6h,
+			IReadOnlyList<Candle1m> sol1m,
+			double dipFrac = 0.005,   // 0.5% откат для входа
+			double tpPct = 0.010,     // базовый 1.0% TP
+			double slPct = 0.010 )    // базовый 1.0% SL
 			{
-			if (records == null || records.Count == 0) return;
-			var m1 = sol1m.OrderBy (m => m.OpenTimeUtc).ToList ();
+			if (records == null || records.Count == 0)
+				return;
 
-			foreach (var r in records)
+			if (sol1m == null || sol1m.Count == 0)
+				throw new InvalidOperationException ("[PopulateDelayedA] Отсутствуют 1m свечи SOLUSDT для моделирования отложенных входов.");
+
+			if (allRows == null || allRows.Count == 0)
 				{
-				r.DelayedSource = "A";
-				r.DelayedEntryAsked = true;
-				r.DelayedEntryUsed = true;
+				Console.WriteLine ("[PopulateDelayedA] нет allRows — пропускаем модель A.");
+				return;
+				}
 
-				bool wantLong = r.PredLabel == 2 || (r.PredLabel == 1 && r.PredMicroUp);
-				bool wantShort = r.PredLabel == 0 || (r.PredLabel == 1 && r.PredMicroDown);
-				if (!wantLong && !wantShort) { r.DelayedEntryUsed = false; continue; }
+			if (sol1h == null || sol1h.Count == 0)
+				{
+				Console.WriteLine ("[PopulateDelayedA] нет sol1h — пропускаем модель A.");
+				return;
+				}
 
-				DateTime from = r.DateUtc;
-				DateTime to = r.DateUtc.AddHours (24);
-				var dayMins = m1.Where (m => m.OpenTimeUtc >= from && m.OpenTimeUtc < to).ToList ();
-				if (dayMins.Count == 0) { r.DelayedEntryUsed = false; continue; }
+			if (solAll6h == null || solAll6h.Count == 0)
+				{
+				Console.WriteLine ("[PopulateDelayedA] нет solAll6h — пропускаем модель A.");
+				return;
+				}
 
-				double trigger = wantLong ? r.Entry * (1.0 - dipFrac) : r.Entry * (1.0 + dipFrac);
-				Candle1m? trig = null;
+			// Словарь 6h для оффлайн-датасета модели A
+			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
 
-				foreach (var m in dayMins)
+			// *** Оффлайн-датасет для модели A (deep pullback) ***
+			List<PullbackContinuationSample> pullbackSamples = PullbackContinuationOfflineBuilder.Build (
+				rows: allRows,
+				sol1h: sol1h,
+				sol6hDict: sol6hDict
+			);
+
+			Console.WriteLine ($"[PopulateDelayedA] built pullbackSamples = {pullbackSamples.Count}");
+
+			if (pullbackSamples.Count == 0)
+				{
+				Console.WriteLine ("[PopulateDelayedA] Нет выборки для обучения модели A – пропускаем.");
+				return;
+				}
+
+			// Обучаем модель A на всей выборке (каузально: asOf = последняя дата + 1 день)
+			var pullbackTrainer = new PullbackContinuationTrainer ();
+			DateTime asOfDate = allRows.Max (r => r.Date).AddDays (1);
+			var pullbackModel = pullbackTrainer.Train (pullbackSamples, asOfDate);
+			var pullbackEngine = pullbackTrainer.CreateEngine (pullbackModel);
+
+			// *** Итерируем по каждому дню и решаем, использовать ли отложенный вход A. ***
+			foreach (var rec in records)
+				{
+				// Направление дневной сделки
+				bool wantLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
+				bool wantShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+
+				if (!wantLong && !wantShort)
 					{
-					if (wantLong && m.Low <= trigger) { trig = m; break; }
-					if (wantShort && m.High >= trigger) { trig = m; break; }
-					}
-
-				if (trig == null)
-					{
-					r.DelayedEntryExecuted = false;
-					r.DelayedWhyNot = "no trigger";
+					rec.DelayedEntryUsed = false;
 					continue;
 					}
 
-				r.DelayedEntryExecuted = true;
-				r.DelayedEntryExecutedAtUtc = trig.OpenTimeUtc;
-				r.DelayedEntryPrice = wantLong ? trigger : trigger;
-				r.DelayedIntradayTpPct = tpPct;
-				r.DelayedIntradaySlPct = slPct;
-
-				double tp = wantLong ? r.DelayedEntryPrice * (1.0 + tpPct)
-									 : r.DelayedEntryPrice * (1.0 - tpPct);
-				double sl = wantLong ? r.DelayedEntryPrice * (1.0 - slPct)
-									 : r.DelayedEntryPrice * (1.0 + slPct);
-
-				int res = 0; // 0 => ни TP, ни SL: закроем по close дня
-				foreach (var m in dayMins.Where (x => x.OpenTimeUtc >= trig.OpenTimeUtc))
+				// 1. Гейт по SL-модели: используем A только если SL-модель считает день рискованным
+				if (!rec.SlHighDecision)
 					{
-					bool hitTp = wantLong ? m.High >= tp : m.Low <= tp;
-					bool hitSl = wantLong ? m.Low <= sl : m.High >= sl;
+					rec.DelayedEntryUsed = false;
+					continue;
+					}
+
+				// dayStart = NY-утро (через PredictionRecord.DateUtc)
+				DateTime dayStart = rec.DateUtc;
+
+				// t_exit (baseline) = следующее рабочее NY-утро 08:00 (минус 2 минуты) в UTC.
+				// Всё, что связано с delayed A, живёт в окне [dayStart; dayEnd).
+				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
+
+				bool strongSignal = (rec.PredLabel == 2 || rec.PredLabel == 0);
+				double dayMinMove = rec.MinMove > 0 ? rec.MinMove : 0.02;
+
+				// 1h внутри baseline-окна — для фич модели A
+				var dayHours = sol1h
+					.Where (h => h.OpenTimeUtc >= dayStart && h.OpenTimeUtc < dayEnd)
+					.OrderBy (h => h.OpenTimeUtc)
+					.ToList ();
+
+				if (dayHours.Count == 0)
+					{
+					rec.DelayedEntryUsed = false;
+					rec.DelayedWhyNot = "no 1h candles";
+					continue;
+					}
+
+				// Фичи модели A: смотрим на тот же baseline-интервал, что и реальные таргеты/деньги
+				var features = TargetLevelFeatureBuilder.Build (
+					dayStart,        // дата/время входа (начало baseline-окна)
+					wantLong,        // направление
+					strongSignal,    // сильный ли сигнал
+					dayMinMove,      // MinMove дня
+					rec.Entry,       // дневная цена входа
+					dayHours         // 1h-свечи baseline-интервала
+				);
+
+				var pullbackSample = new PullbackContinuationSample
+					{
+					Features = features,
+					Label = false,      // в рантайме не используется
+					EntryUtc = dayStart
+					};
+
+				var predA = pullbackEngine.Predict (pullbackSample);
+
+				// 2. Гейт по модели A: она должна сказать "да, откат имеет смысл" с достаточной уверенностью
+				if (!predA.PredictedLabel || predA.Probability < 0.70f)
+					{
+					rec.DelayedEntryUsed = false;
+					continue;
+					}
+
+				// 3. Если дошли сюда — A сказала "да", SL сказал "рискованно" — пробуем отложенный вход.
+				rec.DelayedSource = "A";
+				rec.DelayedEntryAsked = true;
+				rec.DelayedEntryUsed = true;
+
+				// Минутки внутри baseline-окна
+				var dayMinutes = sol1m
+					.Where (m => m.OpenTimeUtc >= dayStart && m.OpenTimeUtc < dayEnd)
+					.OrderBy (m => m.OpenTimeUtc)
+					.ToList ();
+
+				if (dayMinutes.Count == 0)
+					{
+					rec.DelayedEntryUsed = false;
+					rec.DelayedWhyNot = "no 1m candles";
+					continue;
+					}
+
+				// Цена триггера (глубина отката = dipFrac от цены входа)
+				double triggerPrice = wantLong
+					? rec.Entry * (1.0 - dipFrac)
+					: rec.Entry * (1.0 + dipFrac);
+
+				// Максимальная задержка — maxDelayHours от dayStart (обычно 4 часа)
+				DateTime maxDelayTime = dayStart.AddHours (4);
+				Candle1m? fillBar = null;
+
+				foreach (var m in dayMinutes)
+					{
+					if (m.OpenTimeUtc > maxDelayTime)
+						break;
+
+					if (wantLong && m.Low <= triggerPrice)
+						{
+						fillBar = m;
+						break;
+						}
+
+					if (wantShort && m.High >= triggerPrice)
+						{
+						fillBar = m;
+						break;
+						}
+					}
+
+				if (fillBar == null)
+					{
+					// цена отката не достигнута — вход не исполнился
+					rec.DelayedEntryExecuted = false;
+					rec.DelayedWhyNot = "no trigger";
+					continue;
+					}
+
+				// Фиксируем факт исполнения
+				rec.DelayedEntryExecuted = true;
+				rec.DelayedEntryExecutedAtUtc = fillBar.OpenTimeUtc;
+				rec.DelayedEntryPrice = triggerPrice;
+
+				// Привязка TP/SL к MinMove
+				double effectiveTpPct = tpPct;
+				double effectiveSlPct = slPct;
+
+				if (rec.MinMove > 0.0)
+					{
+					double linkedTp = rec.MinMove * 1.2; // коэффициент 1.2 от MinMove для TP
+					if (linkedTp > effectiveTpPct)
+						effectiveTpPct = linkedTp;
+					}
+
+				rec.DelayedIntradayTpPct = effectiveTpPct;
+				rec.DelayedIntradaySlPct = effectiveSlPct;
+
+				// Уровни TP/SL от цены фактического исполнения
+				double tpLevel = wantLong
+					? rec.DelayedEntryPrice * (1.0 + effectiveTpPct)
+					: rec.DelayedEntryPrice * (1.0 - effectiveTpPct);
+
+				double slLevel = wantLong
+					? rec.DelayedEntryPrice * (1.0 - effectiveSlPct)
+					: rec.DelayedEntryPrice * (1.0 + effectiveSlPct);
+
+				// Определяем, что сработало первым, в окне [ExecutedAt; dayEnd)
+				rec.DelayedIntradayResult = (int) DelayedIntradayResult.None;
+
+				foreach (var m in dayMinutes)
+					{
+					if (m.OpenTimeUtc < rec.DelayedEntryExecutedAtUtc)
+						continue;
+
+					bool hitTp = wantLong ? (m.High >= tpLevel) : (m.Low <= tpLevel);
+					bool hitSl = wantLong ? (m.Low <= slLevel) : (m.High >= slLevel);
 
 					if (hitTp && hitSl)
 						{
-						// считаем TP приоритетным, если оба могли случиться в одной минуте
-						res = (int) DelayedIntradayResult.TpFirst;
+						rec.DelayedIntradayResult = (int) DelayedIntradayResult.Ambiguous;
 						break;
 						}
-					if (hitTp) { res = (int) DelayedIntradayResult.TpFirst; break; }
-					if (hitSl) { res = (int) DelayedIntradayResult.SlFirst; break; }
+
+					if (hitTp)
+						{
+						rec.DelayedIntradayResult = (int) DelayedIntradayResult.TpFirst;
+						break;
+						}
+
+					if (hitSl)
+						{
+						rec.DelayedIntradayResult = (int) DelayedIntradayResult.SlFirst;
+						break;
+						}
 					}
-				r.DelayedIntradayResult = res;
 				}
 			}
-			}
+		}
 	}

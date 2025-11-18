@@ -9,7 +9,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
 	/// <summary>
 	/// Топ-1 лучшая/худшая сделка для каждой политики, в таблице.
-	/// Формат столбцов максимально приближен к твоему старому выводу.
 	/// </summary>
 	public static class PolicyTopTradesPrinter
 		{
