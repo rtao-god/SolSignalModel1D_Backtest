@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			if (noSlResults == null) throw new ArgumentNullException (nameof (noSlResults));
 
 			// 1) наша большая таблица WITH SL vs WITHOUT SL
-			PolicySlComparisonPrinter.Print (withSlResults, noSlResults);
+			//PolicySlComparisonPrinter.Print (withSlResults, noSlResults);
 
 			// 2) Топ/анти-топ сделки по политикам, объединённым из обоих наборов
 			PolicyTopTradesPrinter.PrintTop1 (

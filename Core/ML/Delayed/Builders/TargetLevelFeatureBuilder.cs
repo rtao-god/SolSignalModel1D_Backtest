@@ -35,8 +35,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Builders
 			DateTime from = entryUtc.AddHours (-6);
 			var last6 = candles1h
 				.Where (c => c.OpenTimeUtc < entryUtc && c.OpenTimeUtc >= from)
-				.OrderBy (c => c.OpenTimeUtc)
 				.ToList ();
+
 
 			if (last6.Count == 0)
 				return feats;

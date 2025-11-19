@@ -23,6 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			using var fs = new FileStream (_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 			if (fs.Length == 0) return null;
 
+			// Идём с конца файла наверх, пока не найдём последнюю непустую строку.
 			fs.Seek (-1, SeekOrigin.End);
 			while (fs.Position > 0)
 				{
@@ -40,11 +41,18 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				var doc = JsonDocument.Parse (lastLine);
 				if (doc.RootElement.TryGetProperty ("t", out var tEl))
 					{
-					var dt = DateTime.Parse (tEl.GetString ()!, null, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+					var dt = DateTime.Parse (
+						tEl.GetString ()!,
+						null,
+						DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
 					return dt;
 					}
 				}
-			catch { }
+			catch
+				{
+				// Повреждённая последняя строка — считаем, что таймстампа нет.
+				}
 			return null;
 			}
 
@@ -54,6 +62,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			using var sw = new StreamWriter (_path, append: true);
 			foreach (var c in candles)
 				{
+				// Важно: порядок свойств стабильный -> формат строки стабилен.
+				// Это позволяет в будущем, при необходимости, заменить JsonDocument
+				// на ручной парсер без риска "заглядывания вперёд".
 				var line = JsonSerializer.Serialize (new
 					{
 					t = c.OpenTimeUtc.ToString ("o"),
@@ -68,27 +79,54 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 
 		/// <summary>
 		/// Чтение диапазона свечей (универсально для любого TF-файла).
+		/// Предполагается, что файл отсортирован по времени по возрастанию
+		/// (мы всегда только аппендим свежие свечи).
 		/// </summary>
 		public List<CandleLine> ReadRange ( DateTime startUtc, DateTime endUtc )
 			{
 			var res = new List<CandleLine> ();
 			if (!File.Exists (_path)) return res;
 
+			// Нормализуем входные границы в UTC, чтобы избежать странностей с Kind.
+			startUtc = startUtc.ToUniversalTime ();
+			endUtc = endUtc.ToUniversalTime ();
+
+			if (startUtc >= endUtc)
+				return res;
+
 			using var fs = new FileStream (_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 			using var sr = new StreamReader (fs);
 			string? line;
+
 			while ((line = sr.ReadLine ()) != null)
 				{
 				if (string.IsNullOrWhiteSpace (line)) continue;
+
 				try
 					{
 					var doc = JsonDocument.Parse (line);
 					var root = doc.RootElement;
 
 					if (!root.TryGetProperty ("t", out var tEl)) continue;
-					var dt = DateTime.Parse (tEl.GetString ()!, null, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
 
-					if (dt < startUtc || dt >= endUtc) continue;
+					var dt = DateTime.Parse (
+						tEl.GetString ()!,
+						null,
+						DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
+					// Файл отсортирован по времени:
+					// 1) если свеча раньше нужного интервала — просто пропускаем;
+					// 2) если свеча идёт ПОСЛЕ endUtc — дальше можно не читать вообще.
+					if (dt < startUtc)
+						{
+						continue;
+						}
+
+					if (dt >= endUtc)
+						{
+						// Критичная оптимизация: выходим из цикла, остальные строки ещё "позже".
+						break;
+						}
 
 					double o = root.GetProperty ("o").GetDouble ();
 					double h = root.GetProperty ("h").GetDouble ();
@@ -97,9 +135,12 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 
 					res.Add (new CandleLine (dt, o, h, l, c));
 					}
-				catch { /* skip bad rows */ }
+				catch
+					{
+					// Некорректная строка — просто пропускаем.
+					}
 				}
-			res.Sort (( a, b ) => a.OpenTimeUtc.CompareTo (b.OpenTimeUtc));
+
 			return res;
 			}
 

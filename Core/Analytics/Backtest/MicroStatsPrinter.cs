@@ -17,38 +17,84 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		{
 		public static void Print ( IReadOnlyList<DataRow> mornings, IReadOnlyList<PredictionRecord> records )
 			{
-			// mornings пока не используем, оставляем для совместимости сигнатуры
-			PrintFlatOnlyMicro (records);
+			// 1) Микро-статистика по flat-дням с привязкой к REAL фактам из DataRow
+			PrintFlatOnlyMicro (mornings, records);
 			Console.WriteLine ();
+
+			// 2) Направленная точность по не-боковикам (как и раньше)
 			PrintNonFlatDirection (records);
 			}
 
 		// ----- 1) Только по предсказанным БОКОВИКАМ -----
-		private static void PrintFlatOnlyMicro ( IReadOnlyList<PredictionRecord> records )
+		private static void PrintFlatOnlyMicro (
+			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<PredictionRecord> records )
 			{
+			// Собираем быстрый lookup: дата → DataRow с REAL микро-фактом.
+			// Предполагается, что сюда переданы утренние строки (IsMorning=true),
+			// но на всякий случай не фильтруем по IsMorning ещё раз.
+			var morningMap = mornings
+				.GroupBy (r => r.Date)
+				.ToDictionary (g => g.Key, g => g.First ());
+
 			int microUpPred = 0, microUpHit = 0, microUpMiss = 0;
 			int microDownPred = 0, microDownHit = 0, microDownMiss = 0;
 			int microNone = 0;
 
-			foreach (var r in records.Where (r => r.PredLabel == 1)) // только flat-предсказания
+			// Берём только те дни, где модель предсказала flat (PredLabel=1):
+			// именно для них мы вообще используем микро-модель.
+			foreach (var r in records.Where (r => r.PredLabel == 1))
 				{
+				// --------- 1) Берём ground-truth микро-факт ---------
+				bool factMicroUp = false;
+				bool factMicroDown = false;
+
+				// Основной источник истины — DataRow (path-based разметка из RowBuilder)
+				if (morningMap.TryGetValue (r.DateUtc, out var row))
+					{
+					factMicroUp = row.FactMicroUp;
+					factMicroDown = row.FactMicroDown;
+					}
+				else
+					{
+					// Fallback: если по какой-то причине DataRow нет,
+					// используем то, что уже лежит в PredictionRecord.
+					factMicroUp = r.FactMicroUp;
+					factMicroDown = r.FactMicroDown;
+					}
+
+				// Если для дня нет реального микро-направления (true flat без явного наклона),
+				// то такой день не даёт смысла для оценки микро-модели — скипаем его из метрик.
+				if (!factMicroUp && !factMicroDown)
+					continue;
+
+				// --------- 2) Считаем предсказания микро-направления ---------
 				bool anyPred = false;
 
 				if (r.PredMicroUp)
 					{
 					anyPred = true;
 					microUpPred++;
-					if (r.FactMicroUp) microUpHit++; else microUpMiss++;
+					if (factMicroUp)
+						microUpHit++;
+					else
+						microUpMiss++;
 					}
 
 				if (r.PredMicroDown)
 					{
 					anyPred = true;
 					microDownPred++;
-					if (r.FactMicroDown) microDownHit++; else microDownMiss++;
+					if (factMicroDown)
+						microDownHit++;
+					else
+						microDownMiss++;
 					}
 
-				if (!anyPred) microNone++;
+				// Случай, когда день был REAL micro-flat (есть факт),
+				// но микро-направление вообще не предсказывалось.
+				if (!anyPred)
+					microNone++;
 				}
 
 			ConsoleStyler.WriteHeader ("Micro-layer stats (flat-only)");
@@ -70,8 +116,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			if (totalDirPred == 0)
 				{
-				WriteColoredLine (ConsoleColor.DarkGray,
-					"Micro flat-only: нет ни одного micro-сигнала на flat-днях");
+				WriteColoredLine (
+					ConsoleColor.DarkGray,
+					"Micro flat-only: нет ни одного micro-сигнала на flat-днях с REAL micro-фактом");
 				return;
 				}
 

@@ -41,13 +41,24 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 		/// </summary>
 		public async Task UpdateAllAsync ( DateTime? fullBackfillFromUtc = null )
 			{
-			await UpdateOneAsync ("1m", TimeSpan.FromMinutes (1), fullBackfillFromUtc);
-			await UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc);
-			await UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc);
+			// Было: три await подряд → сетевая и файловая работа идут строго последовательно.
+			// Стало: три задачи параллельно.
+			// Важно: разные TF пишут в разные файлы, поэтому гонок нет.
+			var tasks = new[]
+				{
+				UpdateOneAsync ("1m", TimeSpan.FromMinutes (1), fullBackfillFromUtc),
+				UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc),
+				UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc)
+				};
+
+			await Task.WhenAll (tasks);
 			}
 
 		public async Task UpdateSelectiveAsync ( IEnumerable<string> intervals, DateTime? fullBackfillFromUtc = null )
 			{
+			// Здесь можно тоже распараллелить через Task.WhenAll, но лучше оставить
+			// последовательное поведение, если этот метод используется для дебага
+			// или точечных апдейтов.
 			foreach (var iv in intervals)
 				{
 				switch (iv)

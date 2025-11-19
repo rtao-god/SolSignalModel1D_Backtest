@@ -17,6 +17,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 		/// Горизонт берём не "тупо +24 часа", а до следующего
 		/// рабочего NY-утра (через Windowing.ComputeBaselineExitUtc).
 		/// </summary>
+		
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+
 		public static int AssignLabel (
 			DateTime entryUtc,
 			double entryPrice,
@@ -38,12 +41,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 
 			// --- ВАЖНО: вместо "entryUtc + 24h" считаем реальный exit через NY-утро ---
 			DateTime endUtc;			
-				var nyTz = TimeZones.NewYork;
-				endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+				endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: NyTz);
 
 			var dayMins = minutes
 				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < endUtc)
-				.OrderBy (m => m.OpenTimeUtc)
 				.ToList ();
 
 			if (dayMins.Count == 0)

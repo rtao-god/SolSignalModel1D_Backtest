@@ -77,12 +77,10 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			// 1h и 1m только для "фактов" внутри дня
 			var day1h = sol1h
 				.Where (h => h.OpenTimeUtc >= dayRow.Date && h.OpenTimeUtc < dayRow.Date.AddHours (24))
-				.OrderBy (h => h.OpenTimeUtc)
 				.ToList ();
 
 			var day1m = sol1m
 				.Where (m => m.OpenTimeUtc >= dayRow.Date && m.OpenTimeUtc < dayRow.Date.AddHours (24))
-				.OrderBy (m => m.OpenTimeUtc)
 				.ToList ();
 
 			bool strong = predCls == 2 || predCls == 0;

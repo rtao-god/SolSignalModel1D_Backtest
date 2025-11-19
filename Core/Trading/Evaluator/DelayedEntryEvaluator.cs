@@ -61,8 +61,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 
 			var dayBars = candles1h
 				.Where (c => c.OpenTimeUtc >= dayStartUtc && c.OpenTimeUtc < endUtc)
-				.OrderBy (c => c.OpenTimeUtc)
 				.ToList ();
+
 			if (dayBars.Count == 0)
 				return res;
 

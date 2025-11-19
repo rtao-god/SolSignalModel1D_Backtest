@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
@@ -31,7 +32,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				"Withdrawn $",
 				"Total %",
 				"Max DD %",
-				"Liq #"
+				"Liq #",
+				"RealLiq #"
 			);
 
 			foreach (var r in results
@@ -39,7 +41,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				.ThenBy (x => x.Margin.ToString ()))
 				{
 				var trades = r.Trades ?? new List<PnLTrade> ();
-				var longs  = trades.Where (x => x.IsLong).ToList ();
+				var longs = trades.Where (x => x.IsLong).ToList ();
 				var shorts = trades.Where (x => !x.IsLong).ToList ();
 
 				int w = trades.Count (x => x.NetReturnPct > 0.0);
@@ -59,12 +61,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 				// --- wealth-based Totals через снапшоты бакетов ---
 				double startCapital = 0.0;
-				double equityNow    = 0.0;
+				double equityNow = 0.0;
 
 				if (r.BucketSnapshots != null && r.BucketSnapshots.Count > 0)
 					{
 					startCapital = r.BucketSnapshots.Sum (b => b.StartCapital);
-					equityNow    = r.BucketSnapshots.Sum (b => b.EquityNow);
+					equityNow = r.BucketSnapshots.Sum (b => b.EquityNow);
 					}
 
 				double withdrawn = r.WithdrawnTotal;
@@ -82,17 +84,26 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 					}
 
 				// --- приводим long/short к wealth-based Total, чтобы суммы сходились ---
-				double longUsd  = longUsdRaw;
+				double longUsd = longUsdRaw;
 				double shortUsd = shortUsdRaw;
 
 				if (startCapital > 0.0 && Math.Abs (rawTotalUsd) > 1e-9)
 					{
 					double scale = totalUsdWealth / rawTotalUsd;
-					longUsd  = longUsdRaw  * scale;
+					longUsd = longUsdRaw * scale;
 					shortUsd = shortUsdRaw * scale;
 					}
 
+				// "Ужатые" ликвидации по PnL-движку (позиционные)
 				int liqCnt = trades.Count (x => x.IsLiquidated);
+
+				// Реальные ликвидации считаем по отдельному флагу.
+				// Для cross-маржи вместо числа выводим "—",
+				// так как там любая реальная ликвидация фактически = смерть счёта.
+				int realLiqCnt = trades.Count (x => x.IsRealLiquidation);
+				string realLiqStr = r.Margin == MarginMode.Isolated
+					? realLiqCnt.ToString ()
+					: "—";
 
 				var line = new[]
 				{
@@ -110,7 +121,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 					$"{Math.Round(withdrawn, 2):0.##}$",
 					$"{r.TotalPnlPct:0.00}%",
 					$"{r.MaxDdPct:0.00}%",
-					liqCnt.ToString()
+					liqCnt.ToString(),
+					realLiqStr
 				};
 
 				var color = r.TotalPnlPct >= 0
@@ -147,10 +159,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			foreach (var g in last)
 				{
-				var longs  = g.Where (x => x.IsLong).ToList ();
+				var longs = g.Where (x => x.IsLong).ToList ();
 				var shorts = g.Where (x => !x.IsLong).ToList ();
 
-				double longAvg  = longs.Count  > 0 ? longs.Average  (x => x.NetReturnPct) : 0.0;
+				double longAvg = longs.Count > 0 ? longs.Average (x => x.NetReturnPct) : 0.0;
 				double shortAvg = shorts.Count > 0 ? shorts.Average (x => x.NetReturnPct) : 0.0;
 
 				var monthStr = $"{g.Key.Y}-{g.Key.M:00}";

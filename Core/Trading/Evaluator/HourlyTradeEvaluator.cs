@@ -184,7 +184,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			if (candles1h == null || candles1h.Count == 0)
 				return report;
 
-			var hours = candles1h.OrderBy (c => c.OpenTimeUtc).ToList ();
+			var hours = candles1h.ToList ();
 
 			double equity = 1.0;
 			double peak = 1.0;

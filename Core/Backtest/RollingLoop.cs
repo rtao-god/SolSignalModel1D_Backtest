@@ -52,27 +52,27 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			// 3) Сравнение политик по SL
 			PolicySlComparisonPrinter.Print (withSlBase, noSlBase);
 
-			// 3B) Расширенный SL отчёт
+			// 3.1) Расширенный SL отчёт
 			SlPnlReportPrinter.PrintMatchedDeltaAndPnl (records, withSlBase, noSlBase);
 
 			// 4) Policy summary (WITH SL)
-			PolicyBreakdownPrinter.PrintSummary (withSlBase, "Policy summary (WITH SL)");
-			PolicyBreakdownPrinter.PrintMonthlySkew (withSlBase, 12);
+			//PolicyBreakdownPrinter.PrintSummary (withSlBase, "Policy summary (WITH SL)");
+			//PolicyBreakdownPrinter.PrintMonthlySkew (withSlBase, 12);
 
-			PolicyRatiosPrinter.Print (withSlBase, "Policy ratios (WITH SL)");
-			PolicyRatiosPrinter.Print (noSlBase, "Policy ratios (NO SL)");
+			//PolicyRatiosPrinter.Print (withSlBase, "Policy ratios (WITH SL)");
+			//PolicyRatiosPrinter.Print (noSlBase, "Policy ratios (NO SL)");
 
 			// 5) Delayed A/B
-			DelayedStatsPrinter.Print (records);
+			//DelayedStatsPrinter.Print (records);
 
 			// 6) Tails
-			WindowTailPrinter.PrintBlockTails (
-				mornings,
-				records,
-				withSlBase,
-				takeDays: 20,
-				skipDays: 30,
-				title: "Window tails (WITH SL)");
+			//WindowTailPrinter.PrintBlockTails (
+			//	mornings,
+			//	records,
+			//	withSlBase,
+			//	takeDays: 20,
+			//	skipDays: 30,
+			//	title: "Window tails (WITH SL)");
 
 			// =====================================================================
 			// 7) ANTI-DIRECTION OVERLAY (base/anti × with SL / no SL)
@@ -134,7 +134,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					out var withdrawnTotal,
 					out var bucketSnapshots,
 					out var hadLiquidation,
-					useAntiDirectionOverlay: useAnti // <── ДОБАВЛЕНО
+					useAntiDirectionOverlay: useAnti 
 				);
 
 				results.Add (new BacktestPolicyResult

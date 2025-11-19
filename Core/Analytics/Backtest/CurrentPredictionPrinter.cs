@@ -164,10 +164,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 		/// <summary>
 		/// Печатает конкретный торговый план:
-		/// направление, плечо, SL/TP (в % и по цене), размер позиции, оценочную ликвидацию.
+		/// направление, плечо, SL/TP (в % и по цене), размер позиции, реальную ликвидацию.
 		/// Логика SL/TP:
 		///   slPct = clamp(MinMove, 1%..4%);
 		///   tpPct = max(1.5 * slPct, 1.5%).
+		/// Ликвидация считается как реальная (по упрощённой формуле cross-маржи),
+		/// без «ужатия», которое используется только в PnL-движке.
 		/// </summary>
 		private static void PrintTradeDetails (
 			PredictionRecord rec,
@@ -221,21 +223,44 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			Console.WriteLine ($"Размер позиции: {positionQty:0.000} SOL (~{positionUsd:0.00}$) при марже {walletBalanceUsd:0.00}$");
 
-			// Приближённая оценка цены ликвидации по плечу:
-			//   LONG: P_liq ≈ entry * (1 - 1 / L)
-			//   SHORT: P_liq ≈ entry * (1 + 1 / L)
-			// Это грубая модель, без учёта maintenance margin и комиссий.
+			// Реалистичная оценка цены реальной ликвидации для cross-маржи
+			// по упрощённой модели USDT-фьючерсов без комиссий:
+			//   Q = walletBalance * L / entry
+			//   Equity(P) = B + (P - entry) * Q   (для LONG)
+			//   MM(P)     = mmr * |Q| * P
+			//   ликвидация при Equity(P) = MM(P)
+			//
+			// Отсюда при фиксированном maintenance margin rate (mmr ~ 0.4%):
+			//   LONG:  P_liq ≈ entry * (L - 1) / (L * (1 - mmr))
+			//   SHORT: P_liq ≈ entry * (1 + L) / (L * (1 + mmr))
+			//
+			// Здесь считаем это "реальной" биржевой ликвидацией.
+			// В PnL-движке можно отдельно зажать уровень (чуть ближе),
+			// но в принтере показываем именно эту точку.
 			if (leverage > 1.0)
 				{
-				double liqPrice = goLong
-					? entry * (1.0 - 1.0 / leverage)
-					: entry * (1.0 + 1.0 / leverage);
+				const double mmr = 0.004; // 0.4% как грубый прокси maintenance margin rate
 
-				Console.WriteLine ($"Оценка ликвидации: {liqPrice:0.0000} USDT");
+				double liqPrice;
+				if (goLong)
+					{
+					liqPrice = entry * (leverage - 1.0) / (leverage * (1.0 - mmr));
+					}
+				else
+					{
+					liqPrice = entry * (1.0 + leverage) / (leverage * (1.0 + mmr));
+					}
+
+				// для понимания можно вывести и расстояние до ликвидации
+				double liqDistPct = goLong
+					? (entry - liqPrice) / entry * 100.0
+					: (liqPrice - entry) / entry * 100.0;
+
+				Console.WriteLine ($"Реальная ликвидация (оценка): {liqPrice:0.0000} USDT (~{liqDistPct:0.0}% от entry)");
 				}
 			else
 				{
-				Console.WriteLine ("Эффективное плечо ≤ 1x — до полной ликвидации депозит не доводится (ближе к споту).");
+				Console.WriteLine ("Эффективное плечо ≤ 1x — формальной маржинальной ликвидации нет (режим ближе к споту).");
 				}
 
 			Console.WriteLine ();
@@ -264,7 +289,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		/// Вычисляет forward по базовому горизонту:
 		/// entryUtc → следующая рабочая NY-утренняя граница 08:00 (минус 2 минуты).
 		/// Возвращает false, если свечей не хватает для покрытия exit-окна.
-		/// Логика совпадает с исходным вариантом.
 		/// </summary>
 		private static bool TryComputeForwardBaseline (
 			IReadOnlyList<Candle6h> sol6h,

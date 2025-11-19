@@ -93,13 +93,24 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			var btcEma50 = Indicators.Indicators.ComputeEma6h (btcWinTrain, BtcEmaFast);
 			var btcEma200 = Indicators.Indicators.ComputeEma6h (btcWinTrain, BtcEmaSlow);
 
-			// Быстрый доступ к 6h SOL по времени открытия
+			// Быстрый доступ к 6h SOL по времени открытия (пока не используется, оставлено для совместимости)
 			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
 
 			// Отсортированные 1m-свечи для path-разметки
-			var sol1mSorted = solAll1m
-				.OrderBy (m => m.OpenTimeUtc)
-				.ToList ();
+			var sol1mSorted = solAll1m;
+
+			// Отсортированные 6h-свечи и максимум по exit-времени,
+			// который вообще можно корректно покрыть последней 6h-свечой.
+			var sol6hSorted = solAll6h;
+
+			if (sol6hSorted.Count == 0)
+				throw new InvalidOperationException ("[RowBuilder] solAll6h is empty.");
+
+			var last6h = sol6hSorted[sol6hSorted.Count - 1];
+
+			// Последняя 6h-свеча покрывает интервал [last6h.OpenTimeUtc; last6h.OpenTimeUtc + 6h).
+			// Любой baseline exit позже maxExitUtc честно покрыть нельзя → такие дни скипаются.
+			var maxExitUtc = last6h.OpenTimeUtc.AddHours (6);
 
 			// Конфиг/состояние адаптивного minMove (каузальное накопление истории)
 			var minCfg = new MinMoveConfig ();
@@ -124,11 +135,19 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				// Базовый выход: следующая рабочая NY-утренняя граница 08:00 (минус 2 минуты).
 				DateTime exitUtc = Windowing.ComputeBaselineExitUtc (openUtc, nyTz);
 
+				// Если baseline exit вылезает за конец последней доступной 6h-свечи,
+				// честно посчитать SolFwd1 нельзя → этот день скипаем.
+				if (exitUtc >= maxExitUtc)
+					{
+					// Никаких исключений здесь не кидаем, это естественный край данных.
+					continue;
+					}
+
 				// 6h-свеча, которая покрывает момент выхода.
 				var exitCandle = Find6hCandleContainingTime (solAll6h, exitUtc);
 				if (exitCandle == null)
 					{
-					Console.WriteLine ($"[RowBuilder] missing 6h candle for baseline exit {exitUtc:O}, entry {openUtc:O}");
+					// Это уже реальная дыра в 6h-серии, а не естественный край.
 					throw new InvalidOperationException (
 						$"[RowBuilder] no 6h candle covering baseline exit {exitUtc:O} for entry {openUtc:O}");
 					}
@@ -255,7 +274,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					oi = ex.OI;
 					}
 
-				// Path-based разметка по 1m (полный путь от entry, минMove-ориентированный)
+				// Path-based разметка по 1m (полный путь от entry, minMove-ориентированный)
 				int pathLabel;
 				int firstPassDir;
 				DateTime? firstPassTimeUtc;
@@ -409,22 +428,18 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			if (all == null || all.Count == 0)
 				return null;
 
-			var sorted = all.OrderBy (c => c.OpenTimeUtc).ToList ();
-			for (int i = 0; i < sorted.Count; i++)
+			var sorted = all.ToList ();
+			for (int i = 0; i < all.Count; i++)
 				{
-				var cur = sorted[i];
+				var cur = all[i];
 				DateTime start = cur.OpenTimeUtc;
-				DateTime end;
-
-				if (i + 1 < sorted.Count)
-					end = sorted[i + 1].OpenTimeUtc;
-				else
-					end = cur.OpenTimeUtc.AddHours (6);
+				DateTime end = (i + 1 < all.Count)
+					? all[i + 1].OpenTimeUtc
+					: cur.OpenTimeUtc.AddHours (6);
 
 				if (targetUtc >= start && targetUtc < end)
 					return cur;
 				}
-
 			return null;
 			}
 		}

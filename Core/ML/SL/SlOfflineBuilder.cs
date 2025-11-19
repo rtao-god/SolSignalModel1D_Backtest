@@ -13,7 +13,7 @@ using System.Linq;
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
 	/// <summary>
-	/// Строит каузальный SL-датасет.
+	/// Строит SL-датасет.
 	/// Лейбл: кто был первым по 1m (TP / SL) в baseline-окне
 	/// entryUtc → следующее рабочее NY-утро (минус 2 минуты).
 	/// Фичи: по 1h (см. SlFeatureBuilder).

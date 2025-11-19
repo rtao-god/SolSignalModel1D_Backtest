@@ -1,8 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Backtest;
+using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
@@ -184,6 +186,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				"Margin",
 				"Mode",
 				"PosLiq #",
+				"RealLiq #",
 				"AccRuin",
 				"BalMin %",
 				"Bal<35%",
@@ -223,12 +226,16 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 						? $"{m.ReqGainPct:0.0}%"
 						: (double.IsPositiveInfinity (m.ReqGainPct) ? "INF" : "0.0%");
 
+				string realLiqStr = m.Margin == MarginMode.Isolated
+					? m.RealLiqCount.ToString ()
+					: "—";
+
 				var line = new[]
 				{
 					m.PolicyName,
 					m.Margin.ToString(),
 					m.Mode,
-					m.PosLiqCount.ToString(),
+					realLiqStr,
 					m.AccountRuinCount.ToString(),
 					balMinStr,
 					balDeathStr,

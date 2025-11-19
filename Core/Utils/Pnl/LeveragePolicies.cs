@@ -47,21 +47,16 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			}
 
 		/// <summary>
-		/// торговать только "нормальные" дни
+		/// торговать только "нормальные" дни:
 		/// </summary>
 		public sealed class UltraSafePolicy : ILeveragePolicy
 			{
 			public string Name => "ultra_safe";
 
-			private const double SlThresh = 0.6;
 			private const double LevGood = 3.0;
 
 			public double ResolveLeverage ( PredictionRecord rec )
 				{
-				if (rec.RegimeDown)
-					return 0.0;
-				if (rec.SlProb > SlThresh)
-					return 0.0;
 				return LevGood;
 				}
 			}

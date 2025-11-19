@@ -9,7 +9,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 	{
 	/// <summary>
 	/// Фичи для SL-модели.
-	/// Главное изменение: контекст берём сглаженный (2h-блоки за последние 6h),
+	/// контекст берём сглаженный (2h-блоки за последние 6h),
 	/// а “шиповость” оставляем по последнему 1h.
 	/// </summary>
 	public static class SlFeatureBuilder
@@ -49,23 +49,23 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				{
 				double totalHigh = blocks2h.Max (b => b.High);
 				double totalLow = blocks2h.Min (b => b.Low);
-				feats[3] = (float) ((totalHigh - totalLow) / entryPrice);           // общий 2h range
-				feats[6] = (float) ((totalHigh - entryPrice) / entryPrice);         // насколько мы под хай 2h
-				feats[7] = (float) ((entryPrice - totalLow) / entryPrice);          // насколько мы над лоу 2h
+				feats[3] = (float) ((totalHigh - totalLow) / entryPrice);   // общий 2h range
+				feats[6] = (float) ((totalHigh - entryPrice) / entryPrice); // насколько мы под хай 2h
+				feats[7] = (float) ((entryPrice - totalLow) / entryPrice);  // насколько мы над лоу 2h
 				}
 
 			// первый 2h-блок (самый “старый” из последних 6h)
 			if (blocks2h.Count >= 1)
 				{
 				var b0 = blocks2h[0];
-				feats[4] = (float) ((b0.High - b0.Low) / entryPrice);               // ранний range
+				feats[4] = (float) ((b0.High - b0.Low) / entryPrice); // ранний range
 				}
 
 			// последний 2h-блок (как выглядел рынок прямо перед входом)
 			if (blocks2h.Count >= 2)
 				{
 				var bLast = blocks2h[blocks2h.Count - 1];
-				feats[5] = (float) ((bLast.High - bLast.Low) / entryPrice);         // последний range
+				feats[5] = (float) ((bLast.High - bLast.Low) / entryPrice); // последний range
 				}
 
 			// ===== 1h-хвост =====

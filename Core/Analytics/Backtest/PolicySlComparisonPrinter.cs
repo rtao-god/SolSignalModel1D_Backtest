@@ -1,8 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Backtest;
+using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
@@ -111,6 +113,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 		/// <summary>
 		/// Risk-таблица: ликвидации, баланс, восстановление из MaxDD, время «внизу», ReqGain%.
+		/// Для ликвидаций выводится:
+		/// - RealLiq # — количество сделок с флагом IsRealLiquidation (для isolated; для cross печатается «—»);
+		/// - AccRuin   — факт хотя бы одного «руин-события» на уровне политики.
 		/// </summary>
 		private static void PrintRiskTable ( IReadOnlyList<PolicySlMetrics.PolicyRowMetrics> rows )
 			{
@@ -121,7 +126,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				"Policy",
 				"Margin",
 				"Mode",
-				"PosLiq #",
+				"RealLiq #",
 				"AccRuin",
 				"BalMin %",
 				"Bal<35%",
@@ -161,12 +166,18 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 						? $"{m.ReqGainPct:0.0}%"
 						: (double.IsPositiveInfinity (m.ReqGainPct) ? "INF" : "0.0%");
 
+				// Реальные ликвидации выводим только для isolated.
+				// Для cross — просто тире, т.к. там 1 ликвидация = фактически смерть.
+				string realLiqStr = m.Margin == MarginMode.Isolated
+					? m.RealLiqCount.ToString ()
+					: "—";
+
 				var line = new[]
 				{
 					m.PolicyName,
 					m.Margin.ToString(),
 					m.Mode,
-					m.PosLiqCount.ToString(),
+					realLiqStr,
 					m.AccountRuinCount.ToString(),
 					balMinStr,
 					balDeathStr,

@@ -32,7 +32,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			{
 			var points = dailyEq
 				.Where (kv => kv.Key != DateTime.MinValue.Date)
-				.OrderBy (kv => kv.Key)
 				.ToList ();
 
 			if (points.Count < 2)
@@ -77,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			{
 			double peak = 0.0;
 			double maxDd = 0.0;
-			foreach (var kv in dailyEq.Where (k => k.Key != DateTime.MinValue.Date).OrderBy (k => k.Key))
+			foreach (var kv in dailyEq.Where (k => k.Key != DateTime.MinValue.Date))
 				{
 				double v = kv.Value;
 				if (v > peak) peak = v;

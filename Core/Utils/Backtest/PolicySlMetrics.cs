@@ -51,9 +51,22 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Backtest
 			public double AvgLongPct { get; init; }
 			public double AvgShortPct { get; init; }
 
-			// Ликвидации
-			public int PosLiqCount { get; init; }       // ликвидации позиций
-			public int AccountRuinCount { get; init; }  // ликвидаций счёта (HadLiquidation → 0/1)
+			// Ликвидации / руин-метрики
+
+			/// <summary>
+			/// Ликвидации счёта / аккаунта в рамках политики.
+			/// Для cross: фактически «смерть» всего аккаунта после первой критической просадки.
+			/// Для isolated: достаточно смерти хотя бы одного бакета.
+			/// </summary>
+			public int AccountRuinCount { get; init; }
+
+			/// <summary>
+			/// Количество сделок, где в бэктесте сработала «реальная» ликвидация позиции
+			/// (флаг <see cref="PnLTrade.IsRealLiquidation"/>).
+			/// Для cross значение хранится для полноты, но в таблицах выводится «—»,
+			/// т.к. там важнее сам факт окончательной смерти, а не число таких случаев.
+			/// </summary>
+			public int RealLiqCount { get; init; }
 
 			// Балансные метрики
 			public double StartCapital { get; init; }
@@ -142,8 +155,18 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Backtest
 			double avgLongPct = longs.Count > 0 ? longs.Average (x => x.NetReturnPct) : 0.0;
 			double avgShortPct = shorts.Count > 0 ? shorts.Average (x => x.NetReturnPct) : 0.0;
 
-			int posLiqCount = trades.Count (x => x.IsLiquidated);
+			// --- Ликвидации/руин ---
+
+			// Было ли хоть одно «руин-событие» на уровне политики (смерть бакета).
 			int accountRuinCount = r.HadLiquidation ? 1 : 0;
+
+			// Реальные ликвидации считаем только для isolated.
+			// Критерий — флаг IsRealLiquidation на сделке.
+			int realLiqCount = 0;
+			if (r.Margin == MarginMode.Isolated)
+				{
+				realLiqCount = trades.Count (x => x.IsRealLiquidation);
+				}
 
 			// --- Балансные метрики по active equity ---
 			var bal = ComputeBalanceStats (r);
@@ -201,8 +224,8 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Backtest
 				AvgLongPct = avgLongPct,
 				AvgShortPct = avgShortPct,
 
-				PosLiqCount = posLiqCount,
 				AccountRuinCount = accountRuinCount,
+				RealLiqCount = realLiqCount,
 
 				StartCapital = bal.StartCapital,
 				BalMinFrac = bal.MinEquityFrac,

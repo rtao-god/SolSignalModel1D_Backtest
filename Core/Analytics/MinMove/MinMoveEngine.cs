@@ -8,7 +8,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.MinMove
 	public static class MinMoveEngine
 		{
 		/// <summary>
-		/// Главный метод: адаптивный minMove, строго каузально.
+		/// Главный метод: адаптивный minMove.
 		/// Использует только:
 		/// - текущие atrPct/dynVol;
 		/// - состояние state (накоплено только по прошлым дням);
