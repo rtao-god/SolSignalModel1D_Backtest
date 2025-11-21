@@ -1,40 +1,26 @@
-﻿// Core/Utils/ConsoleBlockTimer.cs
-using System;
-using System.Diagnostics;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest.Core.Utils
 	{
 	/// <summary>
-	/// Помощник для обёртывания крупных блоков:
-	/// рисует текстовую "анимацию" в консоли и печатает время выполнения.
-	/// Может опционально сообщать шаг/процент через ConsoleProgress.
+	/// LEGACY-хелпер: минимальная обёртка вокруг блока,
+	/// которая просто крутит "анимацию" в заголовке окна (Console.Title)
+	/// на время выполнения action.
 	/// </summary>
 	public static class ConsoleBlockTimer
 		{
-		private static readonly object ConsoleLock = new object ();
-
 		/// <summary>
-		/// Асинхронный блок с анимацией и измерением времени
-		/// без информации о прогрессе (процентах).
+		/// Асинхронный блок с анимацией только в заголовке окна.
 		/// </summary>
 		public static Task RunAsync ( string title, Func<Task> action )
 			{
-			return RunCoreAsync (title, 0, 0, action);
+			return RunCoreAsync (title, action);
 			}
 
 		/// <summary>
-		/// Асинхронный блок с анимацией и измерением времени
-		/// с учётом шага/общего числа шагов (для вывода процентов).
-		/// </summary>
-		public static Task RunAsync ( string title, int stepIndex, int totalSteps, Func<Task> action )
-			{
-			return RunCoreAsync (title, stepIndex, totalSteps, action);
-			}
-
-		/// <summary>
-		/// Обёртка для синхронных блоков без процентов.
+		/// Синхронный блок с анимацией только в заголовке окна.
 		/// </summary>
 		public static Task RunAsync ( string title, Action action )
 			{
@@ -43,8 +29,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils
 
 			return RunCoreAsync (
 				title,
-				0,
-				0,
 				() =>
 				{
 					action ();
@@ -53,94 +37,114 @@ namespace SolSignalModel1D_Backtest.Core.Utils
 			}
 
 		/// <summary>
-		/// Обёртка для синхронных блоков с шагом/процентами.
+		/// Общая реализация:
+		/// - запускает фоновой спиннер, который крутит / - \ * в заголовке;
+		/// - выполняет action;
+		/// - останавливает спиннер и возвращает исходный заголовок.
 		/// </summary>
-		public static Task RunAsync ( string title, int stepIndex, int totalSteps, Action action )
-			{
-			if (action == null)
-				throw new ArgumentNullException (nameof (action));
-
-			return RunCoreAsync (
-				title,
-				stepIndex,
-				totalSteps,
-				() =>
-				{
-					action ();
-					return Task.CompletedTask;
-				});
-			}
-
-		private static async Task RunCoreAsync ( string title, int stepIndex, int totalSteps, Func<Task> action )
+		private static async Task RunCoreAsync ( string title, Func<Task> action )
 			{
 			if (action == null)
 				throw new ArgumentNullException (nameof (action));
 
 			title ??= string.Empty;
 
-			var sw = Stopwatch.StartNew ();
 			using var cts = new CancellationTokenSource ();
 
-			// Анимация на фоновой задаче.
-			var spinnerTask = Task.Run (() => SpinnerLoop (title, cts.Token));
+			string? originalTitle = null;
+			Task? spinnerTask = null;
 
 			try
 				{
+				// Пытаемся сохранить исходный заголовок консоли.
+				try
+					{
+					originalTitle = Console.Title;
+					}
+				catch
+					{
+					// Если консоль не поддерживает Title — работаем без восстановления.
+					originalTitle = null;
+					}
+
+				// Запускаем фоновую "анимацию" в заголовке окна (НЕ пишет в текст консоли).
+				spinnerTask = Task.Run (() => SpinnerLoop (title, originalTitle, cts.Token));
+
+				// Основная работа блока.
 				await action ().ConfigureAwait (false);
 				}
 			finally
 				{
+				// Останавливаем спиннер.
 				cts.Cancel ();
 
-				try
+				if (spinnerTask != null)
 					{
-					await spinnerTask.ConfigureAwait (false);
-					}
-				catch
-					{
-					// Ошибка в анимации не должна ломать основной пайплайн.
-					}
-
-				sw.Stop ();
-
-				// Если известен шаг/общее количество шагов — отдаём вывод ConsoleProgress.
-				if (stepIndex > 0 && totalSteps > 0)
-					{
-					ConsoleProgress.PrintStep (title, stepIndex, totalSteps, sw.Elapsed);
-					}
-				else
-					{
-					// Fallback-режим: просто лог времени блока.
-					var elapsed = sw.Elapsed;
-					string formatted = elapsed.TotalSeconds >= 1.0
-						? $"{elapsed.TotalSeconds:0.000}s"
-						: $"{elapsed.TotalMilliseconds:0}ms";
-
-					lock (ConsoleLock)
+					try
 						{
-						Console.WriteLine ($"\r[{title}] done in {formatted}          ");
+						await spinnerTask.ConfigureAwait (false);
+						}
+					catch
+						{
+						// Любые ошибки анимации игнорируем.
+						}
+					}
+
+				// Пытаемся вернуть исходный заголовок.
+				if (originalTitle != null)
+					{
+					try
+						{
+						Console.Title = originalTitle;
+						}
+					catch
+						{
+						// Если заголовок поменять нельзя — молча игнорируем.
 						}
 					}
 				}
 			}
 
-		private static void SpinnerLoop ( string title, CancellationToken token )
+		/// <summary>
+		/// Фоновая "анимация": крутит / - \ * в заголовке окна.
+		/// </summary>
+		private static void SpinnerLoop ( string title, string? originalTitle, CancellationToken token )
 			{
 			var frames = new[] { "/", "-", "\\", "*" };
 			int idx = 0;
 
+			// Базовый текст заголовка для анимации.
+			string baseTitle;
+
+			if (!string.IsNullOrEmpty (title))
+				{
+				baseTitle = title;
+				}
+			else if (!string.IsNullOrEmpty (originalTitle))
+				{
+				baseTitle = originalTitle;
+				}
+			else
+				{
+				baseTitle = "SolSignalModel1D_Backtest";
+				}
+
 			while (!token.IsCancellationRequested)
 				{
-				string frame = frames[idx++ % frames.Length];
+				var frame = frames[idx++ % frames.Length];
 
-				lock (ConsoleLock)
+				try
 					{
-					Console.Write ($"\r[{title}] {frame}");
+					Console.Title = $"{baseTitle} {frame}";
+					}
+				catch
+					{
+					// Если заголовок поменять нельзя (редирект и т.п.) — выходим.
+					return;
 					}
 
 				try
 					{
-					// Частота обновления анимации (~8 кадров/сек).
 					Thread.Sleep (120);
 					}
 				catch (ThreadInterruptedException)

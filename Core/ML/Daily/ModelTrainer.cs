@@ -1,18 +1,32 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Microsoft.ML;
+﻿using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.ML.Utils;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Daily
 	{
+	/// <summary>
+	/// Тренер дневного двухшагового пайплайна:
+	/// 1) бинарная модель "есть ли ход" (move);
+	/// 2) бинарные модели направления (dir-normal / dir-down);
+	/// 3) микро-модель для боковика (через MicroFlatTrainer).
+	/// Вся подготовка данных вынесена в DailyTrainingDataBuilder, хелперы — в MlTrainingUtils.
+	/// </summary>
 	public sealed class ModelTrainer
 		{
+		// Общий MLContext для всех дневных/микро-моделей.
+		// Остаётся внутри тренера и не используется в диагностике.
 		private readonly MLContext _ml = new MLContext (seed: 42);
+
+		// Граница "актуального" рынка для логов/метрик внутри тренера.
 		private static readonly DateTime RecentCutoff = new DateTime (2025, 1, 1);
 
+		// Балансировка классов (оставляем как было).
 		private static readonly bool BalanceMove = false;
 		private static readonly bool BalanceDir = true;
 		private const double BalanceTargetFrac = 0.70;
@@ -21,6 +35,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			List<DataRow> trainRows,
 			HashSet<DateTime>? datesToExclude = null )
 			{
+			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
+
+			// 1) Фильтрация по датам (например, выкинуть out-of-sample / тестовые дни).
 			if (datesToExclude != null && datesToExclude.Count > 0)
 				{
 				trainRows = trainRows
@@ -28,24 +45,23 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 					.ToList ();
 				}
 
-			trainRows = trainRows.OrderBy (r => r.Date).ToList ();
+			// 2) Собираем обучающие выборки для move/dir.
+			DailyTrainingDataBuilder.Build (
+				trainRows,
+				balanceMove: BalanceMove,
+				balanceDir: BalanceDir,
+				balanceTargetFrac: BalanceTargetFrac,
+				moveTrainRows: out var moveTrainRows,
+				dirNormalRows: out var dirNormalRows,
+				dirDownRows: out var dirDownRows);
 
-			// ===== move =====
-			List<DataRow> moveTrainRows = trainRows;
-			if (BalanceMove)
-				{
-				moveTrainRows = OversampleBinary (
-					trainRows,
-					r => Math.Abs (r.SolFwd1) >= r.MinMove,
-					BalanceTargetFrac
-				);
-				}
-
+			// ===== 1. Модель "есть ли ход" (move) =====
+			// Цель: Label != 1 (non-flat по path-based label).
 			var moveData = _ml.Data.LoadFromEnumerable (
 				moveTrainRows.Select (r => new MlSampleBinary
 					{
-					Label = Math.Abs (r.SolFwd1) >= r.MinMove,
-					Features = ToFloatFixed (r.Features)
+					Label = r.Label != 1,
+					Features = MlTrainingUtils.ToFloatFixed (r.Features)
 					})
 			);
 
@@ -63,27 +79,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			var moveModel = movePipe.Fit (moveData);
 			Console.WriteLine ($"[2stage] move-model trained on {moveTrainRows.Count} rows");
 
-			// ===== dir =====
-			var moveRows = trainRows
-				.Where (r => Math.Abs (r.SolFwd1) >= r.MinMove)
-				.OrderBy (r => r.Date)
-				.ToList ();
-
-			var dirNormalRows = moveRows.Where (r => !r.RegimeDown).OrderBy (r => r.Date).ToList ();
-			var dirDownRows = moveRows.Where (r => r.RegimeDown).OrderBy (r => r.Date).ToList ();
-
-			if (BalanceDir)
-				{
-				dirNormalRows = OversampleBinary (dirNormalRows, r => r.SolFwd1 > 0, BalanceTargetFrac);
-				dirDownRows = OversampleBinary (dirDownRows, r => r.SolFwd1 > 0, BalanceTargetFrac);
-				}
-
+			// ===== 2. Направление (dir-normal / dir-down) =====
 			var dirNormalModel = BuildDirModel (dirNormalRows, "dir-normal");
 			var dirDownModel = BuildDirModel (dirDownRows, "dir-down");
 
-			// ===== micro =====
-			var microModel = BuildMicroFlatModel (trainRows);
+			// ===== 3. Микро-модель для боковика =====
+			var microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, trainRows);
 
+			// Бандл остаётся тем же — чтобы не ломать внешний код.
 			return new ModelBundle
 				{
 				MoveModel = moveModel,
@@ -94,8 +97,15 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 				};
 			}
 
+		/// <summary>
+		/// Тренировка бинарной модели направления для заданного режима.
+		/// Цель: up? по path-based Label (2 = up, 0 = down).
+		/// </summary>
 		private ITransformer? BuildDirModel ( List<DataRow> rows, string tag )
 			{
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+
+			// rows сюда уже приходят только с Label ∈ {0,2} (см. DailyTrainingDataBuilder).
 			if (rows.Count < 40)
 				{
 				Console.WriteLine ($"[2stage] {tag}: мало строк ({rows.Count}), скипаем");
@@ -107,8 +117,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			var data = _ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.SolFwd1 > 0,
-					Features = ToFloatFixed (r.Features)
+					// true = up (Label=2), false = down (Label=0)
+					Label = r.Label == 2,
+					Features = MlTrainingUtils.ToFloatFixed (r.Features)
 					})
 			);
 
@@ -126,92 +137,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			var model = pipe.Fit (data);
 			Console.WriteLine ($"[2stage] {tag}: trained on {rows.Count} rows (recent {recent})");
 			return model;
-			}
-
-		private ITransformer? BuildMicroFlatModel ( List<DataRow> rows )
-			{
-			var flats = rows
-				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.Date)
-				.ToList ();
-
-			if (flats.Count < 30)
-				{
-				Console.WriteLine ("[2stage-micro] мало микро-дней, скипаем");
-				return null;
-				}
-
-			var up = flats.Where (r => r.FactMicroUp).ToList ();
-			var dn = flats.Where (r => r.FactMicroDown).ToList ();
-			int take = Math.Min (up.Count, dn.Count);
-			if (take > 0)
-				{
-				up = up.Take (take).OrderBy (r => r.Date).ToList ();
-				dn = dn.Take (take).OrderBy (r => r.Date).ToList ();
-				flats = up.Concat (dn).OrderBy (r => r.Date).ToList ();
-				}
-
-			var data = _ml.Data.LoadFromEnumerable (
-				flats.Select (r => new MlSampleBinary
-					{
-					Label = r.FactMicroUp,
-					Features = ToFloatFixed (r.Features)
-					})
-			);
-
-			var pipe = _ml.BinaryClassification.Trainers.LightGbm (
-				new LightGbmBinaryTrainer.Options
-					{
-					NumberOfLeaves = 12,
-					NumberOfIterations = 70,
-					LearningRate = 0.07f,
-					MinimumExampleCountPerLeaf = 15,
-					Seed = 42,
-					NumberOfThreads = 1
-					});
-
-			var model = pipe.Fit (data);
-			Console.WriteLine ($"[2stage-micro] обучено на {flats.Count} REAL микро-днях");
-			return model;
-			}
-
-		private static List<DataRow> OversampleBinary (
-			List<DataRow> src,
-			Func<DataRow, bool> isPositive,
-			double targetFrac )
-			{
-			var pos = src.Where (isPositive).ToList ();
-			var neg = src.Where (r => !isPositive (r)).ToList ();
-
-			if (pos.Count == 0 || neg.Count == 0)
-				return src;
-
-			bool posIsMajor = pos.Count >= neg.Count;
-			int major = posIsMajor ? pos.Count : neg.Count;
-			int minor = posIsMajor ? neg.Count : pos.Count;
-
-			int target = (int) Math.Round (major * targetFrac, MidpointRounding.AwayFromZero);
-			if (target <= minor)
-				return src;
-
-			var minorList = posIsMajor ? neg : pos;
-			var res = new List<DataRow> (src.Count + (target - minor));
-			res.AddRange (src);
-
-			int need = target - minor;
-			for (int i = 0; i < need; i++)
-				res.Add (minorList[i % minorList.Count]);
-
-			return res.OrderBy (r => r.Date).ToList ();
-			}
-
-		private static float[] ToFloatFixed ( double[] src )
-			{
-			var f = new float[MlSchema.FeatureCount];
-			int len = Math.Min (src.Length, MlSchema.FeatureCount);
-			for (int i = 0; i < len; i++)
-				f[i] = (float) src[i];
-			return f;
 			}
 		}
 	}

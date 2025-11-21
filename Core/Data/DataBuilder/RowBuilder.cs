@@ -153,15 +153,25 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					}
 
 				var btcC = btcWinTrain.FirstOrDefault (x => x.OpenTimeUtc == openUtc);
-				if (btcC == null) continue;
+				if (btcC == null)
+					throw new InvalidOperationException ($"[RowBuilder] no BTC 6h candle matching SOL candle at {openUtc:O}.");
 
 				int solIdx = solWinTrain.IndexOf (c);
 				int btcIdx = btcWinTrain.IndexOf (btcC);
-				if (solIdx <= 0 || btcIdx <= 0) continue;
+
+				if (solIdx < 0)
+					throw new InvalidOperationException ($"[RowBuilder] SOL candle not found in solWinTrain at {openUtc:O}.");
+				if (btcIdx < 0)
+					throw new InvalidOperationException ($"[RowBuilder] BTC candle not found in btcWinTrain at {openUtc:O}.");
+
+				// Недостаточно истории для ретурнов — пропускаем самые ранние дни
+				if (solIdx == 0 || btcIdx == 0)
+					continue;
 
 				double solClose = c.Close;
 				double solCloseFwd = exitCandle.Close;
-				if (solClose <= 0 || solCloseFwd <= 0) continue;
+				if (solClose <= 0 || solCloseFwd <= 0)
+					throw new InvalidOperationException ($"[RowBuilder] non-positive SOL close price at entry {openUtc:O} or exit {exitUtc:O}.");
 
 				// Ретурны SOL/BTC на разных горизонтах (по 6h-окнам)
 				double solRet1 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 1);
@@ -194,46 +204,60 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					? (btcEma50Val - btcEma200Val) / btcEma200Val
 					: 0.0;
 
-				// Fear & Greed
-				int fng = 50;
-				if (fngHistory != null && fngHistory.Count > 0)
-					fng = Indicators.Indicators.PickNearestFng (fngHistory, openUtc.Date);
+				// Fear & Greed: без истории — это уже ошибка входных данных
+				if (fngHistory == null || fngHistory.Count == 0)
+					throw new InvalidOperationException ("[RowBuilder] fngHistory is null or empty.");
+
+				int fng = Indicators.Indicators.PickNearestFng (fngHistory, openUtc.Date);
 				double fngNorm = (fng - 50.0) / 50.0;
 
-				// DXY (сжатый 30-дневный change)
-				double dxyChg30 = 0.0;
-				if (dxySeries != null && dxySeries.Count > 0)
-					{
-					dxyChg30 = Indicators.Indicators.GetDxyChange30 (dxySeries, openUtc.Date);
-					dxyChg30 = Math.Clamp (dxyChg30, -0.03, 0.03);
-					}
+				// DXY (сжатый 30-дневный change) — без ряда DXY тоже считаем ошибкой
+				if (dxySeries == null || dxySeries.Count == 0)
+					throw new InvalidOperationException ("[RowBuilder] dxySeries is null or empty.");
+
+				double dxyChg30 = Indicators.Indicators.GetDxyChange30 (dxySeries, openUtc.Date);
+				dxyChg30 = Math.Clamp (dxyChg30, -0.03, 0.03);
 
 				// GOLD через PAXG (30-дневный change)
-				double goldChg30 = 0.0;
-				if (paxgWinTrain.Count > 0)
+				if (paxgWinTrain == null || paxgWinTrain.Count == 0)
+					throw new InvalidOperationException ("[RowBuilder] paxgWinTrain is null or empty.");
+
+				var gC = paxgWinTrain.FirstOrDefault (x => x.OpenTimeUtc == openUtc);
+				if (gC == null)
+					throw new InvalidOperationException ($"[RowBuilder] no PAXG candle for SOL entry {openUtc:O}.");
+
+				int gIdx = paxgWinTrain.IndexOf (gC);
+				int g30 = gIdx - 30;
+				if (g30 < 0)
 					{
-					var gC = paxgWinTrain.FirstOrDefault (x => x.OpenTimeUtc == openUtc);
-					if (gC != null)
-						{
-						int gIdx = paxgWinTrain.IndexOf (gC);
-						int g30 = gIdx - 30;
-						if (g30 >= 0)
-							{
-							double gNow = gC.Close;
-							double gPast = paxgWinTrain[g30].Close;
-							if (gNow > 0 && gPast > 0)
-								goldChg30 = gNow / gPast - 1.0;
-							}
-						}
+					// Недостаточно истории по золоту для 30-дневного изменения — скипаем день.
+					continue;
 					}
 
-				// BTC vs 200SMA (позиция BTC относительно долгосрочной средней)
-				double btcVs200 = 0.0;
-				if (btcSma200.TryGetValue (openUtc, out double sma200) && sma200 > 0)
-					btcVs200 = (btcC.Close - sma200) / sma200;
+				double gNow = gC.Close;
+				double gPast = paxgWinTrain[g30].Close;
+				if (gNow <= 0 || gPast <= 0)
+					throw new InvalidOperationException ($"[RowBuilder] invalid PAXG close prices for 30-day change at {openUtc:O}.");
 
-				// RSI-блок (центрированный и наклон за 3 шага)
-				double solRsiVal = solRsi.TryGetValue (openUtc, out double rsiTmp) ? rsiTmp : 50.0;
+				double goldChg30 = gNow / gPast - 1.0;
+
+				// BTC vs 200SMA (позиция BTC относительно долгосрочной средней)
+				if (!btcSma200.TryGetValue (openUtc, out double sma200))
+					{
+					// Недостаточно истории для 200SMA — не подставляем заглушку, просто не берём день в выборку.
+					continue;
+					}
+				if (sma200 <= 0)
+					throw new InvalidOperationException ($"[RowBuilder] non-positive BTC 200SMA at {openUtc:O}.");
+
+				double btcVs200 = (btcC.Close - sma200) / sma200;
+
+				// RSI-блок (центрированный и наклон за 3 шага) — без значения RSI день не берём
+				if (!solRsi.TryGetValue (openUtc, out double solRsiVal))
+					{
+					// Недостаточно истории для RSI — скипаем день.
+					continue;
+					}
 				double solRsiCentered = solRsiVal - 50.0;
 				double rsiSlope3 = Indicators.Indicators.GetRsiSlope6h (solRsi, openUtc, 3);
 
@@ -243,10 +267,14 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				// Волатильность: dynVol + ATR (в процентах)
 				double dynVol = Indicators.Indicators.ComputeDynVol6h (solWinTrain, solIdx, 10);
-				if (dynVol <= 0) dynVol = 0.004;
+				if (dynVol <= 0)
+					throw new InvalidOperationException ($"[RowBuilder] dynVol is non-positive at {openUtc:O} (solIdx={solIdx}).");
 
 				double atrAbs = Indicators.Indicators.FindNearest (solAtr, openUtc, 0.0);
-				double atrPct = atrAbs > 0 && solClose > 0 ? atrAbs / solClose : 0.0;
+				if (atrAbs <= 0)
+					throw new InvalidOperationException ($"[RowBuilder] ATR is non-positive at {openUtc:O}.");
+
+				double atrPct = atrAbs / solClose;
 
 				// Режим рынка (DOWN / NORMAL) по Sol/BTC 30d
 				bool isDownRegime = solRet30 < DownSol30Thresh || btcRet30 < DownBtc30Thresh;
@@ -266,7 +294,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				double minMove = mm.MinMove;
 
-				// Дневные extra-поля (funding / OI), если есть
+				// Дневные extra-поля (funding / OI) (пока что LEGACY, поэтому отсутствие данных не считаем ошибкой)
 				double funding = 0.0, oi = 0.0;
 				if (extraDaily != null && extraDaily.TryGetValue (openUtc.Date, out var ex))
 					{
@@ -307,10 +335,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				// Флаг утреннего NY-окна (для фильтрации сигналов)
 				bool isMorning = Windowing.IsNyMorning (openUtc, nyTz);
 
-				// Alt-заглушки (оставлены для совместимости)
-				double altFrac6h = 1.0, altFrac24h = 1.0, altMedian24h = 0.02;
-				int altCount = 4;
-				bool altReliable = true;
+				// Alt-метрики пока не реализованы: явно помечаем отсутствующие данные, без "красивых" заглушек
+				double altFrac6h = double.NaN;
+				double altFrac24h = double.NaN;
+				double altMedian24h = double.NaN;
+				int altCount = 0;
+				bool altReliable = false;
 
 				// Вектор фич для ML-модели
 				var feats = new List<double>
@@ -380,7 +410,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					// Факт по close на baseline-горизонте
 					SolFwd1 = solFwd1,
 
-					// Alt-статистика (заглушки)
+					// Alt-статистика: явное отсутствие (NaN/0) и AltReliable = false
 					AltFracPos6h = altFrac6h,
 					AltFracPos24h = altFrac24h,
 					AltMedian24h = altMedian24h,

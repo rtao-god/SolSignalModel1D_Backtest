@@ -1,5 +1,4 @@
-﻿// Core/Utils/Pnl/PnlCalculator.Slicing.cs
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;

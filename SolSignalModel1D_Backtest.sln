@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36429.23
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolSignalModel1D_Backtest", "SolSignalModel1D_Backtest.csproj", "{866EC47A-0F04-BB1F-2CF7-063777144EFE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolSignalModel1D_Backtest.Api", "..\SolSignalModel1D_Backtest.Api\SolSignalModel1D_Backtest.Api.csproj", "{CFBCE7B0-4385-4CA3-AC6F-CCF3BFE2C25F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{866EC47A-0F04-BB1F-2CF7-063777144EFE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{866EC47A-0F04-BB1F-2CF7-063777144EFE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{866EC47A-0F04-BB1F-2CF7-063777144EFE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CFBCE7B0-4385-4CA3-AC6F-CCF3BFE2C25F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CFBCE7B0-4385-4CA3-AC6F-CCF3BFE2C25F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CFBCE7B0-4385-4CA3-AC6F-CCF3BFE2C25F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CFBCE7B0-4385-4CA3-AC6F-CCF3BFE2C25F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

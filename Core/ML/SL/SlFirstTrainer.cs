@@ -5,8 +5,9 @@ using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Analytics.ML;
 
-namespace SolSignalModel1D_Backtest.Core.ML
+namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	/// <summary>
 	/// SL-классификатор: учим только на прошлых сэмплах, свежим — больший вес,
@@ -109,6 +110,46 @@ namespace SolSignalModel1D_Backtest.Core.ML
 			int len = Math.Min (src.Length, MlSchema.FeatureCount);
 			Array.Copy (src, arr, len);
 			return arr;
+			}
+
+		/// <summary>
+		/// PFI + direction для SL-модели на произвольном наборе SlHitSample
+		/// (train / test / holdout). Весами здесь не пользуемся — все Weight=1.
+		/// Модель не переобучается, только логируется важность фич.
+		/// </summary>
+		public void LogFeatureImportance (
+			ITransformer model,
+			IEnumerable<SlHitSample> evalSamples,
+			string tag = "sl-oos" )
+			{
+			if (model == null) throw new ArgumentNullException (nameof (model));
+			if (evalSamples == null) throw new ArgumentNullException (nameof (evalSamples));
+
+			var list = evalSamples.ToList ();
+			if (list.Count == 0)
+				{
+				Console.WriteLine ($"[pfi:{tag}] SL eval dataset is empty, skip.");
+				return;
+				}
+
+			// Для анализа дублируем структуру train-строки, но Weight ставим = 1.
+			var rows = list
+				.Select (s => new SlHitTrainRow
+					{
+					Label = s.Label,
+					Features = PadToFixed (s.Features),
+					Weight = 1.0f
+					})
+				.ToList ();
+
+			var data = _ml.Data.LoadFromEnumerable (rows);
+
+			FeatureImportanceAnalyzer.LogBinaryFeatureImportance (
+				_ml,
+				model,
+				data,
+				SlFeatureSchema.Names,
+				tag);
 			}
 		}
 	}

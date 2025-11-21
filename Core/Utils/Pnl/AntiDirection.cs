@@ -1,5 +1,4 @@
-﻿// Core/Utils/Pnl/PnlCalculator.AntiDirection.cs
-using System;
+﻿using System;
 using SolSignalModel1D_Backtest.Core.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Utils.Pnl

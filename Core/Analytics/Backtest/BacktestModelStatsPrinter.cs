@@ -1,5 +1,4 @@
-﻿// File: Core/Analytics/Backtest/BacktestModelStatsPrinter.cs
-using System;
+﻿using System;
 using System.Linq;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Data;
@@ -20,10 +19,21 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	public static class BacktestModelStatsPrinter
 		{
 		/// <summary>
+		/// Маленькая структура для sweep-а порогов SL-модели:
+		/// только дни, у которых есть и path-based исход (TP/SL), и SlProb &gt; 0.
+		/// </summary>
+		private sealed class SlThresholdDay
+			{
+			public bool IsSlDay { get; set; }
+			public double Prob { get; set; }
+			}
+
+		/// <summary>
 		/// Основная точка входа:
 		/// - Daily confusion по классам (0/1/2);
 		/// - Trend-confusion по направлению (DOWN vs UP);
-		/// - SL-model confusion + метрики (TPR/FPR/Precision/Recall/F1/PR-AUC, coverage).
+		/// - SL-model confusion + метрики (TPR/FPR/Precision/Recall/F1/PR-AUC, coverage)
+		///   + доп. sweep по порогам вероятности SL.
 		/// </summary>
 		public static void Print (
 			IReadOnlyList<PredictionRecord> records,
@@ -86,12 +96,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 				var line = new[]
 				{
-					LabelName (y),
-					m[y, 0].ToString (),
-					m[y, 1].ToString (),
-					m[y, 2].ToString (),
-					correct.ToString (),
-					totalRow.ToString (),
+					LabelName(y),
+					m[y, 0].ToString(),
+					m[y, 1].ToString(),
+					m[y, 2].ToString(),
+					correct.ToString(),
+					totalRow.ToString(),
 					$"{acc:0.0}%"
 				};
 
@@ -128,7 +138,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		/// <summary>
 		/// Путаница только по направлению рынка:
 		/// - истинный тренд: только класс 0 (down) или 2 (up), боковик (1) вообще игнорируем;
-		/// - предсказанный тренд: 2 ИЛИ (1 & PredMicroUp) → UP, 0 ИЛИ (1 & PredMicroDown) → DOWN;
+		/// - предсказанный тренд: 2 ИЛИ (1 &amp; PredMicroUp) → UP, 0 ИЛИ (1 &amp; PredMicroDown) → DOWN;
 		/// - считаем accuracy по DOWN-дням, по UP-дням и overall;
 		/// - порог цвета — 50% (выше броска монеты → зелёный, ниже → красный).
 		/// </summary>
@@ -192,10 +202,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				var line = new[]
 				{
 					names[y],
-					m[y, 0].ToString (),
-					m[y, 1].ToString (),
-					correct.ToString (),
-					totalRow.ToString (),
+					m[y, 0].ToString(),
+					m[y, 1].ToString(),
+					correct.ToString(),
+					totalRow.ToString(),
 					$"{acc:0.0}%"
 				};
 
@@ -243,6 +253,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			int scoredDays = 0;
 			var prPoints = new List<(double Score, int Label)> ();
 
+			// для sweep-а порогов: только дни с TP/SL-исходом и ненулевой SlProb
+			var thrDays = new List<SlThresholdDay> ();
+
 			var m1 = sol1m.OrderBy (m => m.OpenTimeUtc).ToList ();
 
 			foreach (var r in records)
@@ -255,7 +268,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 				var outcome = GetDayOutcomeFromMinutes (r, m1, dailyTpPct, dailySlPct, nyTz);
 				if (outcome == DayOutcome.None)
-					continue; // дни без TP/SL вообще не учитываем в confusion
+					{
+					// дни без TP/SL вообще не участвуют ни в confusion, ни в PR-AUC/threshold sweep
+					continue;
+					}
 
 				bool isSlDay = outcome == DayOutcome.SlFirst;
 				bool predHigh = r.SlHighDecision;
@@ -266,6 +282,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 					{
 					scoredDays++;
 					prPoints.Add ((r.SlProb, isSlDay ? 1 : 0));
+					thrDays.Add (new SlThresholdDay
+						{
+						IsSlDay = isSlDay,
+						Prob = r.SlProb
+						});
 					}
 
 				if (!isSlDay)
@@ -322,6 +343,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			// === Цветной строчный summary для SL-модели ===
 			PrintSlSummaryLine (coverage, tpr, fpr, precision, f1, prAuc);
+
+			// === Доп. sweep по порогам вероятности SL на том же OOS-наборе ===
+			PrintSlThresholdSweep (thrDays);
 			}
 
 		/// <summary>
@@ -466,6 +490,61 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				$"PR-AUC={prAuc:0.000}";
 
 			WriteColoredLine (color, summary);
+			}
+
+		/// <summary>
+		/// Sweep по порогам вероятности SL-модели на OOS-наборе.
+		/// Печатает таблицу:
+		/// thr, TPR(SL), FPR(TP), pred HIGH %, high / total.
+		/// </summary>
+		private static void PrintSlThresholdSweep ( List<SlThresholdDay> days )
+			{
+			ConsoleStyler.WriteHeader ("SL threshold sweep (runtime)");
+
+			if (days == null || days.Count == 0)
+				{
+				Console.WriteLine ("[sl-thr] no days with both TP/SL outcome and SlProb > 0 – sweep skipped.");
+				return;
+				}
+
+			int totalSl = days.Count (d => d.IsSlDay);
+			int totalTp = days.Count - totalSl;
+
+			Console.WriteLine ($"[sl-thr] base set: totalDays={days.Count}, SL-days={totalSl}, TP-days={totalTp}");
+
+			var t = new TextTable ();
+			t.AddHeader ("thr", "TPR(SL)", "FPR(TP)", "pred HIGH %", "high / total");
+
+			double[] thresholds = { 0.30, 0.40, 0.50, 0.60 };
+
+			foreach (double thr in thresholds)
+				{
+				int highSl = days.Count (d => d.IsSlDay && d.Prob >= thr);
+				int highTp = days.Count (d => !d.IsSlDay && d.Prob >= thr);
+				int highTotal = highSl + highTp;
+
+				double tpr = totalSl > 0 ? (double) highSl / totalSl : 0.0;
+				double fpr = totalTp > 0 ? (double) highTp / totalTp : 0.0;
+				double highFrac = days.Count > 0 ? (double) highTotal / days.Count : 0.0;
+
+				var row = new[]
+				{
+					$"{thr:0.00}",
+					$"{tpr * 100.0:0.0}%",
+					$"{fpr * 100.0:0.0}%",
+					$"{highFrac * 100.0:0.0}%",
+					$"{highTotal}/{days.Count}"
+				};
+
+				// Условно "хороший" порог: TPR >= 60% и FPR <= 40%
+				var color = (tpr >= 0.60 && fpr <= 0.40)
+					? ConsoleStyler.GoodColor
+					: ConsoleStyler.BadColor;
+
+				t.AddColoredRow (color, row);
+				}
+
+			t.WriteToConsole ();
 			}
 
 		private static void WriteColoredLine ( ConsoleColor color, string text )

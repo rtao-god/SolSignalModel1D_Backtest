@@ -1,16 +1,26 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+﻿using System;
 using System.Linq;
+using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.ML.Micro;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.ML.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.ML
 	{
 	/// <summary>
-	/// Обёртка над натрененным бандлом.
+	/// Обёртка над натрененным бандлом:
+	/// 1) дневной двухшаговый пайплайн (move + dir),
+	/// 2) микро-модель, которая срабатывает только при дневном flat.
+	/// Без эвристик и ручных подмен предсказаний.
 	/// </summary>
 	public sealed class PredictionEngine
 		{
 		private readonly ModelBundle _bundle;
+
+		/// <summary>
+		/// Порог уверенности для микро-модели в flat-днях.
+		/// </summary>
 		private const float FlatMicroProbThresh = 0.60f;
 
 		public readonly struct PredResult
@@ -22,127 +32,173 @@ namespace SolSignalModel1D_Backtest.Core.ML
 				Micro = micro;
 				}
 
+			/// <summary>Итоговый дневной класс: 0=down, 1=flat, 2=up.</summary>
 			public int Class { get; }
+
+			/// <summary>Человекочитаемое описание ветки/решения.</summary>
 			public string Reason { get; }
+
+			/// <summary>Информация по микро-слою (если он применялся).</summary>
 			public MicroInfo Micro { get; }
 			}
 
 		public PredictionEngine ( ModelBundle bundle )
 			{
-			_bundle = bundle;
+			_bundle = bundle ?? throw new ArgumentNullException (nameof (bundle));
 			}
 
+		/// <summary>
+		/// Основной инференс:
+		/// 1) move-модель решает, есть ли ход (true/false);
+		/// 2) если хода нет → дневной flat (class=1) + опционально микро-слой;
+		/// 3) если ход есть → dir-модель даёт направление (0/2) с BTC-фильтром;
+		/// 4) никаких fallback-веток: при некорректной конфигурации бандла — исключение.
+		/// </summary>
 		public PredResult Predict ( DataRow r )
 			{
-			// если есть ML — двухшаговая схема
-			if (_bundle.MlCtx != null && _bundle.MoveModel != null)
+			try
 				{
+				if (r == null)
+					throw new ArgumentNullException (nameof (r));
+
+				if (r.Features == null)
+					{
+					throw new InvalidOperationException (
+						"[PredictionEngine] DataRow.Features == null. " +
+						"Проблема в построении DataRow: нет фич для дня " + r.Date.ToString ("O"));
+					}
+
+				var fixedFeatures = MlTrainingUtils.ToFloatFixed (r.Features);
+
+				if (_bundle.MlCtx == null)
+					throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MlCtx == null (модели не инициализированы)");
+
 				var ml = _bundle.MlCtx;
 
-				// 1) будет ли ход
-				var moveEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MoveModel);
-				var moveOut = moveEng.Predict (new MlSampleBinary
-					{
-					Features = r.Features.Select (f => (float) f).ToArray ()
-					});
+				if (_bundle.MoveModel == null)
+					throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MoveModel == null (нет дневной move-модели)");
 
-				// хода нет → микрослой (БЕЗ проверки факта!)
+				if (_bundle.DirModelNormal == null && _bundle.DirModelDown == null)
+					throw new InvalidOperationException (
+						"[PredictionEngine] Оба направления (DirModelNormal/DirModelDown) == null — нет дневной dir-модели");
+
+				// Общий бинарный сэмпл для всех моделей
+				var sample = new MlSampleBinary
+					{
+					Features = fixedFeatures
+					};
+
+				// ===== 1. Бинарная модель "есть ли ход" (move) =====
+				var moveEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MoveModel);
+				var moveOut = moveEng.Predict (sample);
+
+				// ===== 2. Нет хода → дневной flat + микро-слой (если он есть) =====
 				if (!moveOut.PredictedLabel)
 					{
-					if (_bundle.MicroFlatModel != null)
-						{
-						var microEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
-						var microOut = microEng.Predict (new MlSampleBinary
-							{
-							Features = r.Features.Select (f => (float) f).ToArray ()
-							});
+					var microInfo = RunMicroIfAvailable (r, fixedFeatures, ml);
 
-						float p = microOut.Probability;
+					string reason = microInfo.Predicted
+						? (microInfo.Up ? "day:flat+microUp" : "day:flat+microDown")
+						: "day:flat";
 
-						// Предполагаем: true => microUp, false => microDown
-						if (p >= FlatMicroProbThresh)
-							{
-							if (microOut.PredictedLabel)
-								{
-								return new PredResult (
-									1,
-									"2stage:flat+microUp",
-									new MicroInfo
-										{
-										Predicted = true,
-										Up = true,
-										ConsiderUp = true,
-										ConsiderDown = false,
-										Prob = p,
-										// Correct заполняем только если есть разметка факта
-										Correct = r.FactMicroUp
-										});
-								}
-							else
-								{
-								return new PredResult (
-									1,
-									"2stage:flat+microDown",
-									new MicroInfo
-										{
-										Predicted = true,
-										Up = false,
-										ConsiderUp = false,
-										ConsiderDown = true,
-										Prob = p,
-										Correct = r.FactMicroDown
-										});
-								}
-							}
-						}
-
-					// просто боковик
-					return new PredResult (
-						1,
-						"2stage:flat",
-						new MicroInfo ());
+					return new PredResult (1, reason, microInfo);
 					}
 
-				// 2) ход есть → берём направление по режиму
-				var dirModel = r.RegimeDown ? _bundle.DirModelDown : _bundle.DirModelNormal;
-				if (dirModel != null)
+				// ===== 3. Ход есть → направление (dir) =====
+
+				var dirModel = r.RegimeDown && _bundle.DirModelDown != null
+					? _bundle.DirModelDown
+					: _bundle.DirModelNormal;
+
+				if (dirModel == null)
 					{
-					var dirEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (dirModel);
-					var dirOut = dirEng.Predict (new MlSampleBinary
-						{
-						Features = r.Features.Select (f => (float) f).ToArray ()
-						});
-
-					bool wantsUp = dirOut.PredictedLabel;
-
-					if (wantsUp)
-						{
-						// Фон. фильтр по BTC
-						bool btcEmaDown = r.BtcEma50vs200 < -0.002;
-						bool btcShortRed = r.BtcRet1 < 0 && r.BtcRet30 < 0;
-						if (btcEmaDown && btcShortRed)
-							{
-							return new PredResult (
-								1,
-								"2stage:move-up-blocked-by-btc-ema",
-								new MicroInfo ());
-							}
-
-						return new PredResult (2, "2stage:move-up", new MicroInfo ());
-						}
-					else
-						{
-						return new PredResult (0, "2stage:move-down", new MicroInfo ());
-						}
+					throw new InvalidOperationException (
+						"[PredictionEngine] Нет dir-модели ни для нормального, ни для даун-режима");
 					}
 
-				// нет модели направления — считаем боковиком
-				return new PredResult (1, "2stage:no-dir", new MicroInfo ());
+				var dirEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (dirModel);
+				var dirOut = dirEng.Predict (sample);
+
+				bool wantsUp = dirOut.PredictedLabel;
+
+				if (wantsUp)
+					{
+					// Фоновый фильтр по BTC: это не заглушка, а реальный risk-filter.
+					bool btcEmaDown = r.BtcEma50vs200 < -0.002;
+					bool btcShortRed = r.BtcRet1 < 0 && r.BtcRet30 < 0;
+
+					if (btcEmaDown && btcShortRed)
+						{
+						// BTC-фильтр блокирует лонг → остаёмся во flat.
+						return new PredResult (1, "day:move-up-blocked-by-btc", new MicroInfo ());
+						}
+
+					return new PredResult (2, "day:move-up", new MicroInfo ());
+					}
+
+				return new PredResult (0, "day:move-down", new MicroInfo ());
+				}
+			catch (Exception ex)
+				{
+				// Ошибка — редкий случай, логируем, чтобы было понятно, что именно пошло не так.
+				Console.WriteLine ($"[PredictionEngine][ERROR] {ex.GetType ().Name}: {ex.Message}");
+				Console.WriteLine (ex.StackTrace);
+				throw;
+				}
+			}
+
+		/// <summary>
+		/// Микро-слой: вызывается только для дневного flat.
+		/// Если модели нет или вероятность ниже порога — возвращается "пустой" MicroInfo.
+		/// Никаких подмен класса дня: дневной класс всегда == 1 в этой ветке.
+		/// </summary>
+		private MicroInfo RunMicroIfAvailable ( DataRow r, float[] fixedFeatures, MLContext ml )
+			{
+			var microInfo = new MicroInfo ();
+
+			if (_bundle.MicroFlatModel == null)
+				{
+				// Микро-модели нет — дневной flat без уточнения.
+				return microInfo;
 				}
 
-			// fallback
-			return new PredResult (1, "fallback", new MicroInfo ());
+			var microEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
+
+			var microSample = new MlSampleBinary
+				{
+				Features = fixedFeatures
+				};
+
+			var microOut = microEng.Predict (microSample);
+			float p = microOut.Probability;
+
+			if (p < FlatMicroProbThresh)
+				{
+				// Вероятность ниже порога — микро-сигнал считаем ненадёжным.
+				microInfo.Predicted = false;
+				microInfo.Prob = p;
+				return microInfo;
+				}
+
+			// Достаточно уверенный микро-прогноз
+			microInfo.Predicted = true;
+			microInfo.Up = microOut.PredictedLabel;
+			microInfo.ConsiderUp = microOut.PredictedLabel;
+			microInfo.ConsiderDown = !microOut.PredictedLabel;
+			microInfo.Prob = p;
+
+			// Заполняем Correct только если есть path-based разметка
+			if (r.FactMicroUp || r.FactMicroDown)
+				{
+				microInfo.Correct = microOut.PredictedLabel
+					? r.FactMicroUp
+					: r.FactMicroDown;
+				}
+
+			return microInfo;
 			}
+
+		// ===== Оценка качества с учётом микро-слоя (оставляю как было) =====
 
 		public bool EvalMicroAware ( DataRow r, int predClass, MicroInfo micro )
 			{

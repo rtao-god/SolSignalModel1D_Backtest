@@ -4,6 +4,7 @@ using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.States;
+using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
@@ -83,8 +84,9 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				.Where (m => m.OpenTimeUtc >= dayRow.Date && m.OpenTimeUtc < dayRow.Date.AddHours (24))
 				.ToList ();
 
-			bool strong = predCls == 2 || predCls == 0;
 			double dayMinMove = dayRow.MinMove > 0 ? dayRow.MinMove : 0.02;
+			// единая логика strong/weak для train и runtime
+			bool strong = SlUtils.IsStrongByMinMove (dayMinMove /*, rec.RegimeDown */);
 
 			// базовый исход — ТОЛЬКО по минуте (факт, для статистики)
 			var baseOutcome = MinuteTradeEvaluator.Evaluate (

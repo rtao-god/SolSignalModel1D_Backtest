@@ -1,6 +1,7 @@
 ﻿using System;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
+using SolSignalModel1D_Backtest.Core.ML.Micro;
 
 namespace SolSignalModel1D_Backtest.Core.Utils
 	{

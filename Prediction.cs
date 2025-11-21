@@ -2,6 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using System;
 using System.Collections.Generic;
@@ -12,18 +13,129 @@ namespace SolSignalModel1D_Backtest
 	{
 	internal partial class Program
 		{
+		/// <summary>
+		/// Глобальная граница train-периода для дневной модели.
+		/// Всё, что ≤ этой даты, используется только для обучения.
+		/// Всё, что &gt; этой даты, идёт в PredictionRecords и метрики.
+		/// </summary>
+		private static DateTime _trainUntilUtc;
+
+		/// <summary>
+		/// Создаёт PredictionEngine:
+		/// - выбирает обучающую часть истории (train) по дате;
+		/// - тренирует дневной move+dir и микро-слой через ModelTrainer;
+		/// - запоминает границу train-периода в _trainUntilUtc;
+		/// - никаких fallback: если моделей нет, сразу исключение.
+		/// </summary>
+		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
+			{
+			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
+			if (allRows.Count == 0)
+				throw new InvalidOperationException ("[engine] Пустой список DataRow для обучения моделей");
+
+			var ordered = allRows
+				.OrderBy (r => r.Date)
+				.ToList ();
+
+			DateTime minDate = ordered.First ().Date;
+			DateTime maxDate = ordered.Last ().Date;
+
+			// Простой временной hold-out: последние N дней не участвуют в обучении,
+			// чтобы модели не видели самые свежие дни, по которым считаются метрики.
+			const int HoldoutDays = 120;
+
+			DateTime trainUntil = maxDate.AddDays (-HoldoutDays);
+
+			var trainRows = ordered
+				.Where (r => r.Date <= trainUntil)
+				.ToList ();
+
+			if (trainRows.Count < 100)
+				{
+				// Если данных мало — лучше обучиться на всём, чем падать.
+				Console.WriteLine (
+					$"[engine] trainRows too small ({trainRows.Count}), " +
+					$"используем всю историю без hold-out (метрики будут train-like)");
+				trainRows = ordered;
+				_trainUntilUtc = ordered.Last ().Date; // по сути, train == вся история → OOS нет
+				}
+			else
+				{
+				_trainUntilUtc = trainUntil;
+
+				Console.WriteLine (
+					$"[engine] training on rows &lt;= {trainUntil:yyyy-MM-dd} " +
+					$"({trainRows.Count} из {ordered.Count}, диапазон [{minDate:yyyy-MM-dd}; {trainUntil:yyyy-MM-dd}])");
+				}
+
+			var trainer = new ModelTrainer ();
+			var bundle = trainer.TrainAll (trainRows);
+
+			if (bundle.MlCtx == null)
+				throw new InvalidOperationException ("[engine] ModelTrainer вернул ModelBundle с MlCtx == null");
+
+			if (bundle.MoveModel == null)
+				throw new InvalidOperationException ("[engine] ModelBundle.MoveModel == null после обучения");
+
+			if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
+				throw new InvalidOperationException (
+					"[engine] Оба направления (DirModelNormal/DirModelDown) == null после обучения");
+
+			Console.WriteLine (
+				"[engine] ModelBundle trained: move+dir " +
+				(bundle.MicroFlatModel != null ? "+ micro" : "(без микро-слоя, микро будет выключен)"));
+
+			return new PredictionEngine (bundle);
+			}
+
+		/// <summary>
+		/// Строит PredictionRecord'ы ТОЛЬКО для out-of-sample дней:
+		/// для тех mornings, у которых r.Date &gt; _trainUntilUtc.
+		/// Train-период используется только для обучения и не попадает в метрики.
+		/// </summary>
 		private static async Task<List<PredictionRecord>> LoadPredictionRecordsAsync (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<Candle6h> solAll6h,
 			PredictionEngine engine )
 			{
-			// Prepare sorted 6h list for forward range calculations
-			var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList ();
-			int usedHeuristic = 0;
-			var list = new List<PredictionRecord> (mornings.Count);
+			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
+			if (solAll6h == null) throw new ArgumentNullException (nameof (solAll6h));
+			if (engine == null) throw new ArgumentNullException (nameof (engine));
 
-			foreach (var r in mornings)
+			if (_trainUntilUtc == default)
 				{
+				throw new InvalidOperationException (
+					"[forward] _trainUntilUtc не установлен. " +
+					"Сначала должен быть вызван CreatePredictionEngineOrFallback.");
+				}
+
+			// Подготавливаем отсортированный список 6h-свечей для forward-метрик.
+			var sorted6h = solAll6h is List<Candle6h> list6h
+				? list6h
+				: solAll6h.ToList ();
+
+			if (sorted6h.Count == 0)
+				throw new InvalidOperationException ("[forward] Пустая серия 6h для SOL");
+
+			// OOS-морнинги: только дни, которые НЕ использовались в обучении дневной модели.
+			var oosMornings = mornings
+				.Where (r => r.Date > _trainUntilUtc)
+				.OrderBy (r => r.Date)
+				.ToList ();
+
+			if (oosMornings.Count == 0)
+				{
+				Console.WriteLine (
+					$"[forward] нет out-of-sample mornings: все дни &lt;= trainUntil={_trainUntilUtc:O}. " +
+					"Метрики будут пустые/некорректные.");
+				}
+
+			var list = new List<PredictionRecord> (oosMornings.Count);
+
+			foreach (var r in oosMornings)
+				{
+				// Предсказание только через PredictionEngine (дневная модель + микро).
+				// Никаких эвристик и ручных подмен.
 				var pr = engine.Predict (r);
 
 				int cls = pr.Class;
@@ -31,25 +143,19 @@ namespace SolSignalModel1D_Backtest
 				bool microDn = pr.Micro.ConsiderDown;
 				string reason = pr.Reason;
 
-				if (string.Equals (pr.Reason, "fallback", StringComparison.OrdinalIgnoreCase))
-					{
-					var h = HeuristicPredict (r);
-					cls = h.Class;
-					microUp = h.MicroUp;
-					microDn = h.MicroDown;
-					reason = $"heur:{h.Reason}";
-					usedHeuristic++;
-					}
-
-				// Вычисляем показатели по forward-окну (до базового выхода t_exit)
+				// Вычисляем показатели по forward-окну (до базового выхода t_exit).
 				DateTime entryUtc = r.Date;
 
-				// Здесь также используем общий NyTz, чтобы baseline-окно было согласовано с остальными расчётами.
+				// Общий NyTz (определён в другом partial Program), чтобы baseline-окно
+				// совпадало с PnL/SL/Delayed.
 				DateTime exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
 
 				int entryIdx = sorted6h.FindIndex (c => c.OpenTimeUtc == entryUtc);
 				if (entryIdx < 0)
-					throw new InvalidOperationException ($"[forward] entry candle {entryUtc:O} not found in 6h series");
+					{
+					throw new InvalidOperationException (
+						$"[forward] entry candle {entryUtc:O} not found in 6h series");
+					}
 
 				int exitIdx = -1;
 				for (int i = entryIdx; i < sorted6h.Count; i++)
@@ -58,35 +164,43 @@ namespace SolSignalModel1D_Backtest
 					DateTime end = (i + 1 < sorted6h.Count)
 						? sorted6h[i + 1].OpenTimeUtc
 						: start.AddHours (6);
+
 					if (exitUtc >= start && exitUtc <= end)
 						{
 						exitIdx = i;
 						break;
 						}
 					}
+
 				if (exitIdx < 0)
 					{
-					Console.WriteLine ($"[forward] no 6h candle covering baseline exit {exitUtc:O} (entry {entryUtc:O})");
-					throw new InvalidOperationException ($"[forward] no 6h candle covering baseline exit {exitUtc:O}");
+					throw new InvalidOperationException (
+						$"[forward] no 6h candle covering baseline exit {exitUtc:O} (entry {entryUtc:O})");
 					}
+
 				if (exitIdx <= entryIdx)
 					{
-					throw new InvalidOperationException ($"[forward] exitIdx {exitIdx} <= entryIdx {entryIdx}");
+					throw new InvalidOperationException (
+						$"[forward] exitIdx {exitIdx} &lt;= entryIdx {entryIdx} для entry {entryUtc:O}");
 					}
 
 				double entryPrice = sorted6h[entryIdx].Close;
 				double maxHigh = double.MinValue;
 				double minLow = double.MaxValue;
+
 				for (int j = entryIdx + 1; j <= exitIdx; j++)
 					{
 					var c = sorted6h[j];
 					if (c.High > maxHigh) maxHigh = c.High;
 					if (c.Low < minLow) minLow = c.Low;
 					}
+
 				if (maxHigh == double.MinValue || minLow == double.MaxValue)
 					{
-					throw new InvalidOperationException ($"[forward] no candles between entry {entryUtc:O} and exit {exitUtc:O}");
+					throw new InvalidOperationException (
+						$"[forward] no candles between entry {entryUtc:O} and exit {exitUtc:O}");
 					}
+
 				double fwdClose = sorted6h[exitIdx].Close;
 
 				list.Add (new PredictionRecord
@@ -126,62 +240,7 @@ namespace SolSignalModel1D_Backtest
 					});
 				}
 
-			Console.WriteLine ($"[predict] heuristic applied = {usedHeuristic}/{mornings.Count}");
 			return await Task.FromResult (list);
-			}
-
-		private static (int Class, bool MicroUp, bool MicroDown, string Reason) HeuristicPredict ( DataRow r )
-			{
-			double up = 0, dn = 0;
-
-			if (r.SolEma50vs200 > 0.005) up += 1.2;
-			if (r.SolEma50vs200 < -0.005) dn += 1.2;
-			if (r.BtcEma50vs200 > 0.0) up += 0.6;
-			if (r.BtcEma50vs200 < 0.0) dn += 0.6;
-
-			if (r.SolRet3 > 0) up += 0.7; else if (r.SolRet3 < 0) dn += 0.7;
-			if (r.SolRet1 > 0) up += 0.4; else if (r.SolRet1 < 0) dn += 0.4;
-
-			if (r.SolRsiCentered > +4) up += 0.7;
-			if (r.SolRsiCentered < -4) dn += 0.7;
-
-			if (r.BtcRet30 > 0) up += 0.3; else if (r.BtcRet30 < 0) dn += 0.3;
-			if (r.DxyChg30 > 0.01) dn += 0.2;
-			if (r.GoldChg30 > 0.01) dn += 0.1;
-
-			double gap = Math.Abs (up - dn);
-			bool move = (up >= 1.8 || dn >= 1.8) && gap >= 0.6;
-
-			if (move)
-				{
-				return (up >= dn ? 2 : 0, false, false, $"move:{(up >= dn ? "up" : "down")}, u={up:0.00}, d={dn:0.00}");
-				}
-			else
-				{
-				bool microUp = up > dn + 0.3;
-				bool microDn = dn > up + 0.3;
-
-				if (!microUp && !microDn)
-					{
-					if (r.RsiSlope3 > +8) microUp = true;
-					else if (r.RsiSlope3 < -8) microDn = true;
-					}
-
-				return (1, microUp, microDn, $"flat: u={up:0.00} d={dn:0.00} rsiSlope={r.RsiSlope3:0.0}");
-				}
-			}
-
-		private static PredictionEngine CreatePredictionEngineOrFallback ()
-			{
-			var bundle = new ModelBundle
-				{
-				MlCtx = null,
-				MoveModel = null,
-				DirModelNormal = null,
-				DirModelDown = null,
-				MicroFlatModel = null
-				};
-			return new PredictionEngine (bundle);
 			}
 		}
 	}

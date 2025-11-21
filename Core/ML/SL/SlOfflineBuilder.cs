@@ -1,16 +1,16 @@
-﻿// Core/ML/SlOfflineBuilder.cs
-using SolSignalModel1D_Backtest.Core.Backtest;
+﻿using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace SolSignalModel1D_Backtest.Core.ML
+namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	/// <summary>
 	/// Строит SL-датасет.
@@ -28,13 +28,18 @@ namespace SolSignalModel1D_Backtest.Core.ML
 		/// <param name="sol6hDict">6h-словарь SOL (для entry).</param>
 		/// <param name="tpPct">TP в долях (0.03 = 3%).</param>
 		/// <param name="slPct">SL в долях (0.05 = 5%).</param>
+		/// <param name="strongSelector">
+		/// Кастомная логика strong/weak для SL-фич:
+		/// если null — считаем все дни "сильными" (совместимо со старым поведением).
+		/// </param>
 		public static List<SlHitSample> Build (
 			List<DataRow> rows,
 			IReadOnlyList<Candle1h>? sol1h,
 			IReadOnlyList<Candle1m>? sol1m,
 			Dictionary<DateTime, Candle6h> sol6hDict,
 			double tpPct = 0.03,
-			double slPct = 0.05 )
+			double slPct = 0.05,
+			Func<DataRow, bool>? strongSelector = null )
 			{
 			var result = new List<SlHitSample> (rows.Count * 2);
 
@@ -59,11 +64,18 @@ namespace SolSignalModel1D_Backtest.Core.ML
 					continue;
 
 				double entry = c6.Close;
-				if (entry <= 0) continue;
+				if (entry <= 0)
+					continue;
 
-				// MinMove остаётся в фичах как есть
+				// MinMove остаётся в фичах как есть, но с мягким полом,
+				// чтобы совсем нулевые значения не ломали масштаб.
 				double dayMinMove = r.MinMove;
-				if (dayMinMove <= 0) dayMinMove = 0.02;
+				if (dayMinMove <= 0)
+					dayMinMove = 0.02;
+
+				// strong/weak признак для SL-фич берём из внешнего селектора;
+				// если селектор не задан — считаем день сильным (совместимо с прошлой логикой).
+				bool strongSignal = strongSelector?.Invoke (r) ?? true;
 
 				DateTime entryUtc = r.Date;
 
@@ -104,7 +116,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 						var feats = SlFeatureBuilder.Build (
 							entryUtc: entryUtc,
 							goLong: true,
-							strongSignal: true,
+							strongSignal: strongSignal,
 							dayMinMove: dayMinMove,
 							entryPrice: entry,
 							candles1h: sol1h
@@ -135,7 +147,7 @@ namespace SolSignalModel1D_Backtest.Core.ML
 						var feats = SlFeatureBuilder.Build (
 							entryUtc: entryUtc,
 							goLong: false,
-							strongSignal: true,
+							strongSignal: strongSignal,
 							dayMinMove: dayMinMove,
 							entryPrice: entry,
 							candles1h: sol1h
