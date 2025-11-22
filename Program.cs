@@ -7,11 +7,10 @@ using SolSignalModel1D_Backtest.Core.Data.Indicators;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Analytics.Reports;   
+using SolSignalModel1D_Backtest.Reports;                  
+using SolSignalModel1D_Backtest.Reports.Model;
+using SolSignalModel1D_Backtest.Core.Utils.Pnl;          
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -63,11 +62,11 @@ namespace SolSignalModel1D_Backtest
 			);
 
 			await Task.WhenAll
-				(
-					solUpdater.UpdateAllAsync (),
-					btcUpdater.UpdateAllAsync (),
-					paxgUpdater.UpdateAllAsync ()
-				);
+			(
+				solUpdater.UpdateAllAsync (),
+				btcUpdater.UpdateAllAsync (),
+				paxgUpdater.UpdateAllAsync ()
+			);
 
 			Console.WriteLine ("[update] Candle update done.");
 
@@ -83,12 +82,10 @@ namespace SolSignalModel1D_Backtest
 			List<Candle1m> sol1m = null!;
 
 			// --- 2. ресэмплинг и загрузка всех таймфреймов ---
-			// Обеспечиваем наличие 6h (ресэмплинг из 1h/1m при надобности)
 			CandleResampler.Ensure6hAvailable (solSym);
 			CandleResampler.Ensure6hAvailable (btcSym);
 			CandleResampler.Ensure6hAvailable (paxgSym);
 
-			// Читаем 6h
 			solAll6h = ReadAll6h (solSym);
 			btcAll6h = ReadAll6h (btcSym);
 			paxgAll6h = ReadAll6h (paxgSym);
@@ -98,17 +95,14 @@ namespace SolSignalModel1D_Backtest
 
 			Console.WriteLine ($"[6h] SOL={solAll6h.Count}, BTC={btcAll6h.Count}, PAXG={paxgAll6h.Count}");
 
-			// 1h SOL — нужен для SL-фич
 			solAll1h = ReadAll1h (solSym);
 			Console.WriteLine ($"[1h] SOL count = {solAll1h.Count}");
 
-			// Минутки SOL: нужны и для Path-based меток, и для Delayed A, и для SL-датасета
 			sol1m = ReadAll1m (solSym);
 			Console.WriteLine ($"[1m] SOL count = {sol1m.Count}");
 			if (sol1m.Count == 0)
 				throw new InvalidOperationException ("[init] Нет 1m свечей SOLUSDT в cache/candles.");
 
-			// Диапазон
 			var lastUtc = solAll6h.Max (c => c.OpenTimeUtc);
 			var fromUtc = lastUtc.Date.AddDays (-540);
 			var toUtc = lastUtc.Date;
@@ -141,18 +135,14 @@ namespace SolSignalModel1D_Backtest
 
 			// --- 5. предсказания и forward-метрики ---
 				{
-				// Строим PredictionEngine: пытаемся обучить микро-модель flat-дней.
-				// Если микро-дней < 30, MicroFlatModel будет null и PredictionEngine уйдёт в fallback.
 				var engine = CreatePredictionEngineOrFallback (allRows);
 
-				// PredictionRecord[] + forward (из 6h) — уже без heuristic-логики.
 				records = await LoadPredictionRecordsAsync (mornings, solAll6h, engine);
 				Console.WriteLine ($"[records] built = {records.Count}");
 				}
 
-			// --- 5a. PFI для дневных моделей (move / dir-normal / dir-down / micro-flat) ---
+			// --- 5a. PFI для дневных моделей ---
 				{
-				// Разделяем train / OOS по тому же cut-off, который уже используется для SL-трейнера.
 				var dailyTrainRows = allRows
 					.Where (r => r.Date <= _trainUntilUtc)
 					.ToList ();
@@ -169,13 +159,10 @@ namespace SolSignalModel1D_Backtest
 					{
 					var dailyTrainer = new ModelTrainer ();
 
-					// Учим отдельный бандл только под анализ (не трогаем основной PredictionEngine).
 					var bundle = dailyTrainer.TrainAll (dailyTrainRows, datesToExclude: null);
 
-					// PFI + direction на train
 					DailyModelDiagnostics.LogFeatureImportanceOnDailyModels (bundle, dailyTrainRows, "train");
 
-					// PFI + direction на OOS (если есть)
 					if (dailyOosRows.Count > 0)
 						{
 						var tag = dailyOosRows.Count >= 50 ? "oos" : "oos-small";
@@ -188,10 +175,8 @@ namespace SolSignalModel1D_Backtest
 					}
 				}
 
-			// --- 6. SL-модель: оффлайн-тренировка + SlProb/SlHighDecision ---
+			// --- 6. SL-модель ---
 				{
-				// Берём для обучения SL-модели только те дневные строки,
-				// которые лежат в train-периоде дневной модели.
 				var slTrainRows = allRows
 					.Where (r => r.Date <= _trainUntilUtc)
 					.ToList ();
@@ -205,7 +190,7 @@ namespace SolSignalModel1D_Backtest
 				);
 				}
 
-			// --- 6b. Глобальная сводка PFI по всем моделям ---
+			// --- 6b. Глобальная сводка PFI ---
 			FeatureImportanceAnalyzer.PrintGlobalSummary (
 				topPerModel: 5,
 				topGlobalFeatures: 15,
@@ -230,6 +215,13 @@ namespace SolSignalModel1D_Backtest
 			var policies = BuildPolicies ();
 			Console.WriteLine ($"[policies] total = {policies.Count}");
 
+			// Для отчёта нужны голые ILeveragePolicy (без MarginMode и имени)
+			var leveragePolicies = policies
+				.Where (p => p.Policy != null)
+				.Select (p => p.Policy!)
+				.Cast<ILeveragePolicy> ()
+				.ToList ();
+
 			var runner = new BacktestRunner ();
 
 			// --- 8. верхнеуровневый бэктест/принтер ---
@@ -240,6 +232,30 @@ namespace SolSignalModel1D_Backtest
 				policies: policies,
 				cfg: new BacktestRunner.Config { DailyStopPct = 0.05, DailyTpPct = 0.03 }
 			);
+
+			// --- 9. Сохраняем отчёт "текущий прогноз" в JSON через ReportStorage ---
+			try
+				{
+				var report = CurrentPredictionReportBuilder.Build (
+					records: records,
+					policies: leveragePolicies,
+					walletBalanceUsd: 200.0);
+
+				if (report == null)
+					{
+					Console.WriteLine ("[current-report] report not built (no records or policies).");
+					}
+				else
+					{
+					var storage = new ReportStorage ();
+					storage.Save (report);
+					Console.WriteLine ("[current-report] current_prediction report saved to /reports/current_prediction.");
+					}
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[current-report] error while building/saving report: {ex.Message}");
+				}
 			}
 		}
 	}

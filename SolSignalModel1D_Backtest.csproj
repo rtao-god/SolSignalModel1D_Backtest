@@ -16,4 +16,9 @@
 	  <Folder Include="cache\" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<ProjectReference Include="SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />
+	</ItemGroup>
+
 </Project>
+

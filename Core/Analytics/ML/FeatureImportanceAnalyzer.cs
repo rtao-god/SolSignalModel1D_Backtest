@@ -13,7 +13,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 	public static partial class FeatureImportanceAnalyzer
 		{
 		/// <summary>
-		/// Стандартный вход для твоего кода:
+		/// Стандартный вход для кода раннера:
 		/// считает PFI + direction, печатает табличку и регистрирует снапшот
 		/// для глобального summary.
 		/// </summary>
@@ -86,7 +86,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 		/// </summary>
 		public static void PrintGlobalSummary (
 			int topPerModel = 5,
-			int topGlobalFeatures = 15,
+			int topGlobalFeatures = int.MaxValue, // по умолчанию — без отсечения, печатаем все фичи
 			double importanceThreshold = 0.003 )
 			{
 			FeatureImportanceSummary.PrintGlobalSummary (
