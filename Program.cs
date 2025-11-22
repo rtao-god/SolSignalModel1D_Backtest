@@ -7,27 +7,21 @@ using SolSignalModel1D_Backtest.Core.Data.Indicators;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily;
-using SolSignalModel1D_Backtest.Core.Analytics.Reports;   
-using SolSignalModel1D_Backtest.Reports;                  
+using SolSignalModel1D_Backtest.Core.Analytics.Reports;
+using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Model;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;          
+using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest
 	{
 	internal partial class Program
 		{
-		/// <summary>
-		/// Общая таймзона Нью-Йорка для всех расчётов.
-		/// </summary>
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		/// <summary>
-		/// Результат построения дневных строк.
-		/// </summary>
 		private sealed class DailyRowsBundle
 			{
-			public List<DataRow> AllRows { get; init; } = new List<DataRow> ();
-			public List<DataRow> Mornings { get; init; } = new List<DataRow> ();
+			public List<DataRow> AllRows { get; init; } = new ();
+			public List<DataRow> Mornings { get; init; } = new ();
 			}
 
 		public static async Task Main ( string[] args )
@@ -70,7 +64,6 @@ namespace SolSignalModel1D_Backtest
 
 			Console.WriteLine ("[update] Candle update done.");
 
-			// Символы без слэшей, чтобы совпадали с именами файлов в cache/candles/
 			var solSym = "SOLUSDT";
 			var btcSym = "BTCUSDT";
 			var paxgSym = "PAXGUSDT";
@@ -211,11 +204,14 @@ namespace SolSignalModel1D_Backtest
 				);
 				}
 
-			// Политики (const 2/3/5/10/15/50 × Cross/Isolated + риск-политики)
-			var policies = BuildPolicies ();
+			// === Baseline-конфиг бэктеста (SL/TP + политики) ===
+			var backtestConfig = BacktestConfigFactory.CreateBaseline ();
+
+			// Политики, построенные из конфига (PolicyConfig → PolicySpec + ILeveragePolicy)
+			var policies = BacktestPolicyFactory.BuildPolicySpecs (backtestConfig);
 			Console.WriteLine ($"[policies] total = {policies.Count}");
 
-			// Для отчёта нужны голые ILeveragePolicy (без MarginMode и имени)
+			// Для отчёта "текущий прогноз" нужны голые ILeveragePolicy (без MarginMode и имени)
 			var leveragePolicies = policies
 				.Where (p => p.Policy != null)
 				.Select (p => p.Policy!)
@@ -230,10 +226,41 @@ namespace SolSignalModel1D_Backtest
 				records: records,
 				candles1m: sol1m,
 				policies: policies,
-				cfg: new BacktestRunner.Config { DailyStopPct = 0.05, DailyTpPct = 0.03 }
+				config: backtestConfig
 			);
 
-			// --- 9. Сохраняем отчёт "текущий прогноз" в JSON через ReportStorage ---
+			// --- 9. Сохраняем отчёт бэктеста (backtest_summary) ---
+			try
+				{
+				// Универсальный движок: строим BacktestSummary на основе тех же данных,
+				// которые использует BacktestRunner/ RollingLoop.
+				var summary = BacktestEngine.RunBacktest (
+					mornings: mornings,
+					records: records,
+					candles1m: sol1m,
+					policies: policies,
+					config: backtestConfig
+				);
+
+				var backtestReport = BacktestSummaryReportBuilder.Build (summary);
+
+				if (backtestReport == null)
+					{
+					Console.WriteLine ("[backtest-report] report not built (no data).");
+					}
+				else
+					{
+					var storage = new ReportStorage ();
+					storage.Save (backtestReport);
+					Console.WriteLine ("[backtest-report] backtest_summary report saved to /reports/backtest_summary.");
+					}
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[backtest-report] error while building/saving report: {ex.Message}");
+				}
+
+			// --- 10. Сохраняем отчёт "текущий прогноз" ---
 			try
 				{
 				var report = CurrentPredictionReportBuilder.Build (

@@ -15,6 +15,10 @@
 	<ItemGroup>
 	  <Folder Include="cache\" />
 	</ItemGroup>
+	
+	 <ItemGroup>
+		<Compile Remove="SolSignalModel1D_Backtest.Reports\**\*.cs" />
+     </ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />

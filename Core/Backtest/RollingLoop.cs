@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
@@ -26,9 +22,14 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<PolicySpec> policies,
-			double dailyStopPct = 0.05,
-			double dailyTpPct = 0.03 )
+			BacktestConfig config )
 			{
+			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
+			if (records == null) throw new ArgumentNullException (nameof (records));
+			if (candles1m == null) throw new ArgumentNullException (nameof (candles1m));
+			if (policies == null) throw new ArgumentNullException (nameof (policies));
+			if (config == null) throw new ArgumentNullException (nameof (config));
+
 			// 1) МИКРО-статистика
 			MicroStatsPrinter.Print (mornings, records);
 
@@ -36,16 +37,14 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			var withSlBase = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: true,
-				dailyStopPct,
-				dailyTpPct,
+				config: config,
 				useAnti: false
 			);
 
 			var noSlBase = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: false,
-				dailyStopPct,
-				dailyTpPct,
+				config: config,
 				useAnti: false
 			);
 
@@ -81,16 +80,14 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			var withSlAnti = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: true,
-				dailyStopPct,
-				dailyTpPct,
+				config: config,
 				useAnti: true
 			);
 
 			var noSlAnti = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: false,
-				dailyStopPct,
-				dailyTpPct,
+				config: config,
 				useAnti: true
 			);
 
@@ -110,8 +107,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			bool useStopLoss,
-			double dailyStopPct,
-			double dailyTpPct,
+			BacktestConfig config,
 			bool useAnti = false )
 			{
 			var results = new List<BacktestPolicyResult> (policies.Count);
@@ -125,8 +121,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					candles1m,
 					p.Policy,
 					p.Margin,
-					useStopLoss: useStopLoss,
-					dailyStopPct: dailyStopPct,
 					out var trades,
 					out var totalPnlPct,
 					out var maxDdPct,
@@ -134,8 +128,12 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					out var withdrawnTotal,
 					out var bucketSnapshots,
 					out var hadLiquidation,
-					useAntiDirectionOverlay: useAnti 
-				);
+					useDailyStopLoss: useStopLoss,          // управляем дневным SL
+					useDelayedIntradayStops: useStopLoss,   // и intraday SL для delayed тем же флагом
+					dailyTpPct: config.DailyTpPct,          // TP берём из BacktestConfig
+					dailyStopPct: config.DailyStopPct,      // SL берём из BacktestConfig
+					useAntiDirectionOverlay: useAnti        // Anti-D
+	);
 
 				results.Add (new BacktestPolicyResult
 					{
