@@ -1,0 +1,6 @@
+@SolSignalModel1D_Backtest.Api_HostAddress = http://localhost:5289
+
+GET {{SolSignalModel1D_Backtest.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
