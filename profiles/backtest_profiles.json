@@ -1,0 +1,98 @@
+[
+  {
+    "id": "baseline",
+    "name": "Baseline",
+    "description": "\u0421\u0438\u0441\u0442\u0435\u043C\u043D\u044B\u0439 baseline-\u043F\u0440\u043E\u0444\u0438\u043B\u044C (\u043A\u043E\u043D\u0441\u043E\u043B\u044C\u043D\u044B\u0439 \u043A\u043E\u043D\u0444\u0438\u0433 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E).",
+    "isSystem": true,
+    "config": {
+      "dailyStopPct": 0.05,
+      "dailyTpPct": 0.03,
+      "policies": [
+        {
+          "name": "const_2x_cross",
+          "policyType": "const",
+          "leverage": 2,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "const_2x_isolated",
+          "policyType": "const",
+          "leverage": 2,
+          "marginMode": "Isolated"
+        },
+        {
+          "name": "const_3x_cross",
+          "policyType": "const",
+          "leverage": 3,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "const_3x_isolated",
+          "policyType": "const",
+          "leverage": 3,
+          "marginMode": "Isolated"
+        },
+        {
+          "name": "const_5x_cross",
+          "policyType": "const",
+          "leverage": 5,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "const_5x_isolated",
+          "policyType": "const",
+          "leverage": 5,
+          "marginMode": "Isolated"
+        },
+        {
+          "name": "const_10x_cross",
+          "policyType": "const",
+          "leverage": 10,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "const_10x_isolated",
+          "policyType": "const",
+          "leverage": 10,
+          "marginMode": "Isolated"
+        },
+        {
+          "name": "const_15x_cross",
+          "policyType": "const",
+          "leverage": 15,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "const_15x_isolated",
+          "policyType": "const",
+          "leverage": 15,
+          "marginMode": "Isolated"
+        },
+        {
+          "name": "const_50x_cross",
+          "policyType": "const",
+          "leverage": 50,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "const_50x_isolated",
+          "policyType": "const",
+          "leverage": 50,
+          "marginMode": "Isolated"
+        },
+        {
+          "name": "risk_aware_cross",
+          "policyType": "risk_aware",
+          "leverage": null,
+          "marginMode": "Cross"
+        },
+        {
+          "name": "ultra_safe_cross",
+          "policyType": "ultra_safe",
+          "leverage": null,
+          "marginMode": "Cross"
+        }
+      ]
+    }
+  }
+]

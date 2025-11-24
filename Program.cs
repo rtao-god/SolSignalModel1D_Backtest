@@ -207,6 +207,20 @@ namespace SolSignalModel1D_Backtest
 			// === Baseline-конфиг бэктеста (SL/TP + политики) ===
 			var backtestConfig = BacktestConfigFactory.CreateBaseline ();
 
+			// Инициализация хранилища профилей (лениво создаёт baseline-профиль в backtest_profiles.json).
+			try
+				{
+				var profileRepo =
+					new Core.Backtest.Services.JsonBacktestProfileRepository ();
+
+				// Достаточно просто один раз дернуть GetAllAsync — внутри создастся baseline при необходимости.
+				await profileRepo.GetAllAsync ();
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[profiles] failed to init backtest profiles: {ex.Message}");
+				}
+
 			// Политики, построенные из конфига (PolicyConfig → PolicySpec + ILeveragePolicy)
 			var policies = BacktestPolicyFactory.BuildPolicySpecs (backtestConfig);
 			Console.WriteLine ($"[policies] total = {policies.Count}");
@@ -287,8 +301,9 @@ namespace SolSignalModel1D_Backtest
 						configName: "default"
 					);
 
-					var storage = new ReportStorage ();
-					storage.Save (snapshot, "backtest_baseline");
+					var baselineStorage = new BacktestBaselineStorage ();
+					baselineStorage.Save (snapshot);
+
 					Console.WriteLine ("[backtest-baseline] snapshot saved.");
 					}
 				}

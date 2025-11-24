@@ -32,6 +32,28 @@ namespace SolSignalModel1D_Backtest.Core.Infra
 		public static string CandlesDir => EnsureDir (Path.Combine (CacheRoot, "candles"));
 		public static string IndicatorsDir => EnsureDir (Path.Combine (CacheRoot, "indicators"));
 
+		/// <summary>
+		/// Каталог профилей бэктеста.
+		/// Располагается рядом с cache:
+		///   <repo-root>/cache
+		///   <repo-root>/profiles
+		/// Если родитель cache не найден (маловероятно) — будет под CacheRoot.
+		/// </summary>
+		public static string ProfilesDir
+			{
+			get
+				{
+				var cacheRoot = CacheRoot;
+				var cacheDirInfo = new DirectoryInfo (cacheRoot);
+
+				// Пытаемся подняться на уровень выше cache.
+				var repoRoot = cacheDirInfo.Parent?.FullName ?? cacheRoot;
+
+				var profiles = Path.Combine (repoRoot, "profiles");
+				return EnsureDir (profiles);
+				}
+			}
+
 		private static string EnsureDir ( string p )
 			{
 			Directory.CreateDirectory (p);

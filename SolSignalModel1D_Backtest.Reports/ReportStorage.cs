@@ -13,7 +13,7 @@ namespace SolSignalModel1D_Backtest.Reports
 	/// Структура:
 	///   {RootDir}/{kind}/{id}.json
 	/// где:
-	///   kind = тип отчёта (например, "current_prediction", "backtest_summary", "backtest_baseline"),
+	///   kind = логический тип отчёта (например, "current_prediction", "backtest_summary", "backtest_baseline"),
 	///   id   = уникальный идентификатор снапшота.
 	/// </summary>
 	public sealed class ReportStorage
@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Reports
 
 		public ReportStorage ()
 			{
-			// Общий корень для ВСЕХ приложений в рамках пользователя:
+			// Общий корень для ВСЕХ отчётов:
 			//   %LOCALAPPDATA%\SolSignalModel1D_Backtest\reports
 			var baseDir = Path.Combine (
 				Environment.GetFolderPath (Environment.SpecialFolder.LocalApplicationData),
@@ -45,7 +45,7 @@ namespace SolSignalModel1D_Backtest.Reports
 			}
 
 		/// <summary>
-		/// Сохраняет отчёт типа ReportDocument как JSON.
+		/// Сохраняет ReportDocument как JSON.
 		/// Путь: {root}/{kind}/{id}.json
 		/// </summary>
 		public void Save ( ReportDocument document )
@@ -67,56 +67,57 @@ namespace SolSignalModel1D_Backtest.Reports
 			}
 
 		/// <summary>
-		/// Сохраняет произвольный DTO с Id (например, BacktestBaselineSnapshot).
-		/// Путь: {root}/{kind}/{id}.json, где:
-		///   kind = произвольная строка (например, "backtest_baseline"),
-		///   Id берётся из свойства payload.Id.
-		/// </summary>
-		public void Save<T> ( T payload, string kind )
-			where T : class
-			{
-			if (payload == null) throw new ArgumentNullException (nameof (payload));
-			if (string.IsNullOrWhiteSpace (kind))
-				throw new ArgumentException ("Kind must be non-empty.", nameof (kind));
-
-			var id = TryGetId (payload);
-			if (string.IsNullOrWhiteSpace (id))
-				{
-				throw new InvalidOperationException (
-					$"Payload type {typeof (T).Name} must have non-empty string Id property.");
-				}
-
-			var kindDir = GetKindDir (kind);
-			Directory.CreateDirectory (kindDir);
-
-			var fileName = $"{id}.json";
-			var fullPath = Path.Combine (kindDir, fileName);
-
-			var json = JsonSerializer.Serialize (payload, _jsonOptions);
-			File.WriteAllText (fullPath, json);
-			}
-
-		/// <summary>
 		/// Загружает последний по времени current_prediction-отчёт.
 		/// Используется /api/current-prediction.
 		/// </summary>
 		public ReportDocument? LoadLatestCurrentPrediction ()
 			{
-			return LoadLatest<ReportDocument> ("current_prediction");
+			return LoadLatestByKind ("current_prediction");
 			}
 
 		/// <summary>
 		/// Загружает последний по времени backtest_summary-отчёт.
-		/// Используется /api/backtest/summary (на будущее).
+		/// Используется /api/backtest/summary.
 		/// </summary>
 		public ReportDocument? LoadLatestBacktestSummary ()
 			{
-			return LoadLatest<ReportDocument> ("backtest_summary");
+			return LoadLatestByKind ("backtest_summary");
 			}
 
 		/// <summary>
-		/// Общий generic-метод: загружает последний по времени отчёт указанного kind.
-		/// Тип T определяет схему JSON (ReportDocument, BacktestBaselineSnapshot и т.п.).
+		/// Общий метод для ReportDocument (legacy API).
+		/// Оставлен ради обратной совместимости.
+		/// </summary>
+		public ReportDocument? LoadLatestByKind ( string kind )
+			{
+			return LoadLatest<ReportDocument> (kind);
+			}
+
+		public BacktestBaselineSnapshot? LoadLatestBacktestBaseline ()
+			{
+			const string kind = "backtest_baseline";
+
+			var kindDir = GetKindDir (kind);
+			if (!Directory.Exists (kindDir))
+				return null;
+
+			var files = Directory.GetFiles (kindDir, "*.json", SearchOption.TopDirectoryOnly);
+			if (files.Length == 0)
+				return null;
+
+			var latestFile = files
+				.Select (f => new FileInfo (f))
+				.OrderByDescending (fi => fi.LastWriteTimeUtc)
+				.First ();
+
+			var json = File.ReadAllText (latestFile.FullName);
+			return JsonSerializer.Deserialize<BacktestBaselineSnapshot> (json, _jsonOptions);
+			}
+
+		/// <summary>
+		/// Универсальный загрузчик "последнего" JSON по kind для произвольного типа.
+		/// Например:
+		///   LoadLatest&lt;BacktestBaselineSnapshot&gt;("backtest_baseline")
 		/// </summary>
 		public T? LoadLatest<T> ( string kind )
 			where T : class
@@ -142,31 +143,9 @@ namespace SolSignalModel1D_Backtest.Reports
 			return JsonSerializer.Deserialize<T> (json, _jsonOptions);
 			}
 
-		/// <summary>
-		/// Старая совместимая обёртка для ReportDocument.
-		/// </summary>
-		public ReportDocument? LoadLatestByKind ( string kind )
-			{
-			return LoadLatest<ReportDocument> (kind);
-			}
-
 		private string GetKindDir ( string kind )
 			{
 			return Path.Combine (_rootDir, kind);
-			}
-
-		/// <summary>
-		/// Пытается прочитать строковое свойство Id у произвольного DTO.
-		/// Используется generic-Save для "жёстких" DTO.
-		/// </summary>
-		private static string? TryGetId ( object payload )
-			{
-			var type = payload.GetType ();
-			var prop = type.GetProperty ("Id");
-			if (prop == null || prop.PropertyType != typeof (string))
-				return null;
-
-			return (string?) prop.GetValue (payload);
 			}
 		}
 	}
