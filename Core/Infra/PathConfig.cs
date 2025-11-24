@@ -5,10 +5,11 @@ using System.Linq;
 namespace SolSignalModel1D_Backtest.Core.Infra
 	{
 	/// <summary>
-	/// Централизованная конфигурация путей (корень кэша вне bin).
+	/// Централизованная конфигурация путей. Кэширование данных.
 	/// Правила:
 	/// 1) env SSM_CACHE_ROOT — если задан, используем его.
-	/// 2) иначе ищем корень репозитория (папка с .git или *.sln) от CWD вверх.
+	/// 2) иначе ищем корень репозитория (папка с .git или *.sln) от CWD вверх,
+	///    при этом .git имеет приоритет над .sln.
 	/// 3) fallback: текущая директория.
 	/// Итог: cache/ под корнем.
 	/// </summary>
@@ -37,16 +38,44 @@ namespace SolSignalModel1D_Backtest.Core.Infra
 			return p;
 			}
 
+		/// <summary>
+		/// Ищет корень репозитория, двигаясь вверх от start.
+		/// Приоритет:
+		/// - сначала ищем .git и при первом попадании возвращаем его каталог;
+		/// - .sln запоминаем как кандидат, но продолжаем идти вверх;
+		/// - если .git не нашли, но видели .sln — берём каталог с .sln;
+		/// - иначе возвращаем исходный start.
+		/// </summary>
 		private static string FindRepoRootFrom ( string start )
 			{
 			var dir = new DirectoryInfo (start);
+			DirectoryInfo? slnCandidate = null;
+
 			while (dir != null)
 				{
-				bool hasGit = Directory.Exists (Path.Combine (dir.FullName, ".git"));
+				var gitDir = Path.Combine (dir.FullName, ".git");
+				if (Directory.Exists (gitDir))
+					{
+					// Нашли git-репозиторий — считаем это корнем для всех подпроектов.
+					return dir.FullName;
+					}
+
+				// Если нашли .sln, запоминаем ПЕРВЫЙ встретившийся как кандидат,
+				// но не выходим — продолжаем искать .git выше.
 				bool hasSln = Directory.EnumerateFiles (dir.FullName, "*.sln").Any ();
-				if (hasGit || hasSln) return dir.FullName;
+				if (hasSln && slnCandidate == null)
+					{
+					slnCandidate = dir;
+					}
+
 				dir = dir.Parent;
 				}
+
+			// Если .git нет, но по пути виделась .sln — используем её каталог.
+			if (slnCandidate != null)
+				return slnCandidate.FullName;
+
+			// Fallback — исходная директория.
 			return start;
 			}
 		}

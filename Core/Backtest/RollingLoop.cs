@@ -102,7 +102,19 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		// =====================================================================
 		// Бэктест для всех политик (с базовым или anti-direction режимом)
 		// =====================================================================
-		private static List<BacktestPolicyResult> SimulateAllPolicies (
+
+		/// <summary>
+		/// Считает PnL для всех политик при заданных:
+		/// - флаге useStopLoss (вкл/выкл дневной и intraday SL),
+		/// - флаге useAnti (base vs anti-direction overlay),
+		/// - BacktestConfig (SL/TP и прочее).
+		///
+		/// ВАЖНО:
+		/// - метод теперь public, чтобы его можно было использовать
+		///   вне RollingLoop (например, для baseline-снапшота);
+		/// - логика внутри не меняется, только расширяется объект результата.
+		/// </summary>
+		public static List<BacktestPolicyResult> SimulateAllPolicies (
 			IReadOnlyList<PolicySpec> policies,
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
@@ -133,12 +145,13 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					dailyTpPct: config.DailyTpPct,          // TP берём из BacktestConfig
 					dailyStopPct: config.DailyStopPct,      // SL берём из BacktestConfig
 					useAntiDirectionOverlay: useAnti        // Anti-D
-	);
+				);
 
 				results.Add (new BacktestPolicyResult
 					{
 					PolicyName = p.Name,
 					Margin = p.Margin,
+					UseAntiDirectionOverlay = useAnti,
 					Trades = trades,
 					TotalPnlPct = totalPnlPct,
 					MaxDdPct = maxDdPct,

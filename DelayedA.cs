@@ -10,7 +10,7 @@ using DelayedIntradayResult = SolSignalModel1D_Backtest.Core.Trading.Evaluator.D
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	public partial class Program
 		{
 		/// <summary>
 		/// Модель A для отложенного входа.

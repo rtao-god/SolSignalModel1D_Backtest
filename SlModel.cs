@@ -11,7 +11,7 @@ using System.Linq;
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	    public partial class Program
 		{
 		/// <summary>
 		/// Тренируем SL-модель на каузальном оффлайн-датасете (SlOfflineBuilder)

@@ -6,7 +6,7 @@ using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	public partial class Program
 		{
 		private static List<RollingLoop.PolicySpec> BuildPolicies ()
 			{

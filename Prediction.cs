@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	public partial class Program
 		{
 		/// <summary>
 		/// Глобальная граница train-периода для дневной модели.

@@ -14,7 +14,7 @@ using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	public partial class Program
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
@@ -252,12 +252,49 @@ namespace SolSignalModel1D_Backtest
 					{
 					var storage = new ReportStorage ();
 					storage.Save (backtestReport);
-					Console.WriteLine ("[backtest-report] backtest_summary report saved to /reports/backtest_summary.");
+					Console.WriteLine ("[backtest-report] backtest_summary report saved.");
 					}
 				}
 			catch (Exception ex)
 				{
 				Console.WriteLine ($"[backtest-report] error while building/saving report: {ex.Message}");
+				}
+
+			// --- 9b. Сохраняем baseline-снапшот бэктеста (backtest_baseline) ---
+			try
+				{
+				// Здесь считаем baseline PnL по тем же данным, что и выше,
+				// но без консольного вывода и только WITH SL, без overlay.
+				var baselineResults = RollingLoop.SimulateAllPolicies (
+					policies: policies,
+					records: records,
+					candles1m: sol1m,
+					useStopLoss: true,
+					config: backtestConfig,
+					useAnti: false
+				);
+
+				if (baselineResults.Count == 0)
+					{
+					Console.WriteLine ("[backtest-baseline] no baseline results (no policies or records).");
+					}
+				else
+					{
+					var snapshot = BacktestBaselineSnapshotBuilder.Build (
+						withSlBase: baselineResults,
+						dailyStopPct: backtestConfig.DailyStopPct,
+						dailyTpPct: backtestConfig.DailyTpPct,
+						configName: "default"
+					);
+
+					var storage = new ReportStorage ();
+					storage.Save (snapshot, "backtest_baseline");
+					Console.WriteLine ("[backtest-baseline] snapshot saved.");
+					}
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[backtest-baseline] error while building/saving snapshot: {ex.Message}");
 				}
 
 			// --- 10. Сохраняем отчёт "текущий прогноз" ---
@@ -276,7 +313,7 @@ namespace SolSignalModel1D_Backtest
 					{
 					var storage = new ReportStorage ();
 					storage.Save (report);
-					Console.WriteLine ("[current-report] current_prediction report saved to /reports/current_prediction.");
+					Console.WriteLine ("[current-report] current_prediction report saved.");
 					}
 				}
 			catch (Exception ex)

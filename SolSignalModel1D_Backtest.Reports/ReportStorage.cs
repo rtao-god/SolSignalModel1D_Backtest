@@ -13,7 +13,7 @@ namespace SolSignalModel1D_Backtest.Reports
 	/// Структура:
 	///   {RootDir}/{kind}/{id}.json
 	/// где:
-	///   kind = ReportDocument.Kind (например, "current_prediction", "backtest_summary"),
+	///   kind = тип отчёта (например, "current_prediction", "backtest_summary", "backtest_baseline"),
 	///   id   = уникальный идентификатор снапшота.
 	/// </summary>
 	public sealed class ReportStorage
@@ -45,7 +45,7 @@ namespace SolSignalModel1D_Backtest.Reports
 			}
 
 		/// <summary>
-		/// Сохраняет отчёт как JSON.
+		/// Сохраняет отчёт типа ReportDocument как JSON.
 		/// Путь: {root}/{kind}/{id}.json
 		/// </summary>
 		public void Save ( ReportDocument document )
@@ -64,9 +64,36 @@ namespace SolSignalModel1D_Backtest.Reports
 
 			var json = JsonSerializer.Serialize (document, _jsonOptions);
 			File.WriteAllText (fullPath, json);
+			}
 
-			// Для отладки: можно раскомментировать
-			// Console.WriteLine($"[ReportStorage] Saved {document.Kind} -> {fullPath}");
+		/// <summary>
+		/// Сохраняет произвольный DTO с Id (например, BacktestBaselineSnapshot).
+		/// Путь: {root}/{kind}/{id}.json, где:
+		///   kind = произвольная строка (например, "backtest_baseline"),
+		///   Id берётся из свойства payload.Id.
+		/// </summary>
+		public void Save<T> ( T payload, string kind )
+			where T : class
+			{
+			if (payload == null) throw new ArgumentNullException (nameof (payload));
+			if (string.IsNullOrWhiteSpace (kind))
+				throw new ArgumentException ("Kind must be non-empty.", nameof (kind));
+
+			var id = TryGetId (payload);
+			if (string.IsNullOrWhiteSpace (id))
+				{
+				throw new InvalidOperationException (
+					$"Payload type {typeof (T).Name} must have non-empty string Id property.");
+				}
+
+			var kindDir = GetKindDir (kind);
+			Directory.CreateDirectory (kindDir);
+
+			var fileName = $"{id}.json";
+			var fullPath = Path.Combine (kindDir, fileName);
+
+			var json = JsonSerializer.Serialize (payload, _jsonOptions);
+			File.WriteAllText (fullPath, json);
 			}
 
 		/// <summary>
@@ -75,7 +102,7 @@ namespace SolSignalModel1D_Backtest.Reports
 		/// </summary>
 		public ReportDocument? LoadLatestCurrentPrediction ()
 			{
-			return LoadLatestByKind ("current_prediction");
+			return LoadLatest<ReportDocument> ("current_prediction");
 			}
 
 		/// <summary>
@@ -84,13 +111,15 @@ namespace SolSignalModel1D_Backtest.Reports
 		/// </summary>
 		public ReportDocument? LoadLatestBacktestSummary ()
 			{
-			return LoadLatestByKind ("backtest_summary");
+			return LoadLatest<ReportDocument> ("backtest_summary");
 			}
 
 		/// <summary>
-		/// Общий метод: загружает последний по времени отчёт указанного kind.
+		/// Общий generic-метод: загружает последний по времени отчёт указанного kind.
+		/// Тип T определяет схему JSON (ReportDocument, BacktestBaselineSnapshot и т.п.).
 		/// </summary>
-		public ReportDocument? LoadLatestByKind ( string kind )
+		public T? LoadLatest<T> ( string kind )
+			where T : class
 			{
 			if (string.IsNullOrWhiteSpace (kind))
 				throw new ArgumentException ("Kind must be non-empty.", nameof (kind));
@@ -110,12 +139,34 @@ namespace SolSignalModel1D_Backtest.Reports
 				.First ();
 
 			var json = File.ReadAllText (latestFile.FullName);
-			return JsonSerializer.Deserialize<ReportDocument> (json, _jsonOptions);
+			return JsonSerializer.Deserialize<T> (json, _jsonOptions);
+			}
+
+		/// <summary>
+		/// Старая совместимая обёртка для ReportDocument.
+		/// </summary>
+		public ReportDocument? LoadLatestByKind ( string kind )
+			{
+			return LoadLatest<ReportDocument> (kind);
 			}
 
 		private string GetKindDir ( string kind )
 			{
 			return Path.Combine (_rootDir, kind);
+			}
+
+		/// <summary>
+		/// Пытается прочитать строковое свойство Id у произвольного DTO.
+		/// Используется generic-Save для "жёстких" DTO.
+		/// </summary>
+		private static string? TryGetId ( object payload )
+			{
+			var type = payload.GetType ();
+			var prop = type.GetProperty ("Id");
+			if (prop == null || prop.PropertyType != typeof (string))
+				return null;
+
+			return (string?) prop.GetValue (payload);
 			}
 		}
 	}

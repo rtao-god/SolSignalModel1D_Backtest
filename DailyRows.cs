@@ -2,14 +2,10 @@
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	public partial class Program
 		{
 		private static async Task<DailyRowsBundle> BuildDailyRowsAsync (
 			IndicatorsDailyUpdater indicatorsUpdater,

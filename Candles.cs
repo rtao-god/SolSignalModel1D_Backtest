@@ -7,7 +7,7 @@ using System.Linq;
 
 namespace SolSignalModel1D_Backtest
 	{
-	internal partial class Program
+	public partial class Program
 		{
 		private static List<Candle6h> ReadAll6h ( string symbol )
 			{

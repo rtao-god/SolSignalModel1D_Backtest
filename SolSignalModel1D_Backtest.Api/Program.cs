@@ -1,14 +1,22 @@
-
+п»їusing Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using SolSignalModel1D_Backtest.Api.Dto;
+using SolSignalModel1D_Backtest.Api.Services;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+using SolSignalModel1D_Backtest.Core.Analytics.Reports;
 using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 using SolSignalModel1D_Backtest.Reports;
+using SolSignalModel1D_Backtest.Reports.Model;
 
 var builder = WebApplication.CreateBuilder (args);
 
 builder.Services.AddRouting ();
 
-// CORS: в dev пускаем всех
+// CORS: РІ dev РїСѓСЃРєР°РµРј РІСЃРµС…
 builder.Services.AddCors (options =>
 {
 	options.AddDefaultPolicy (policy =>
@@ -21,18 +29,16 @@ builder.Services.AddCors (options =>
 });
 
 builder.Services.AddEndpointsApiExplorer ();
-builder.Services.AddSwaggerGen (c =>
-{
-	c.SwaggerDoc ("v1", new OpenApiInfo
-		{
-		Title = "SolSignalModel1D API",
-		Version = "v1",
-		Description = "REST API для чтения отчётов (current prediction, backtests и т.д.)."
-		});
-});
+builder.Services.AddSwaggerGen ();
 
-// файловое хранилище отчётов
+// С„Р°Р№Р»РѕРІРѕРµ С…СЂР°РЅРёР»РёС‰Рµ РѕС‚С‡С‘С‚РѕРІ
 builder.Services.AddSingleton<ReportStorage> ();
+
+// РїСЂРµРІСЊСЋ-Р±СЌРєС‚РµСЃС‚ (PnL-РґРІРёР¶РѕРє Р±РµР· РєРѕРЅСЃРѕР»СЊРЅРѕРіРѕ РІС‹РІРѕРґР°)
+builder.Services.AddSingleton<BacktestPreviewService> ();
+
+// РїСЂРѕРІР°Р№РґРµСЂ РґР°РЅРЅС‹С… РґР»СЏ Р±СЌРєС‚РµСЃС‚Р°/РїСЂРµРІСЊСЋ (РєР°СЂРєР°СЃ, СЂРµР°Р»РёР·Р°С†РёСЋ РЅСѓР¶РЅРѕ РґРѕРїРёСЃР°С‚СЊ)
+builder.Services.AddSingleton<IBacktestDataProvider, BacktestDataProvider> ();
 
 var app = builder.Build ();
 
@@ -57,7 +63,7 @@ app.MapGet ("/api/current-prediction", ( ReportStorage storage ) =>
 		return Results.NotFound (new
 			{
 			error = "snapshot_not_found",
-			message = "Нет сохранённого отчёта по текущему прогнозу."
+			message = "РќРµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅРѕРіРѕ РѕС‚С‡С‘С‚Р° РїРѕ С‚РµРєСѓС‰РµРјСѓ РїСЂРѕРіРЅРѕР·Сѓ."
 			});
 		}
 
@@ -73,14 +79,33 @@ app.MapGet ("/api/backtest/summary", ( ReportStorage storage ) =>
 		return Results.NotFound (new
 			{
 			error = "backtest_summary_not_found",
-			message = "Нет сохранённого отчёта по бэктесту."
+			message = "РќРµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅРѕРіРѕ РѕС‚С‡С‘С‚Р° РїРѕ Р±СЌРєС‚РµСЃС‚Сѓ."
 			});
 		}
 
 	return Results.Ok (summary);
 });
 
-// GET /api/backtest/config (baseline-конфиг)
+// GET /api/backtest/baseline
+app.MapGet ("/api/backtest/baseline", ( ReportStorage storage ) =>
+{
+	var snapshot = storage.LoadLatest<BacktestBaselineSnapshot> ("backtest_baseline");
+	if (snapshot == null)
+		{
+		return Results.NotFound (new
+			{
+			error = "baseline_not_found",
+			message = "РќРµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅРѕРіРѕ baseline-СЃСЂРµР·Р° Р±СЌРєС‚РµСЃС‚Р°."
+			});
+		}
+
+	return Results.Ok (snapshot);
+})
+.WithName ("GetBacktestBaseline")
+.Produces<BacktestBaselineSnapshot> (StatusCodes.Status200OK)
+.Produces (StatusCodes.Status404NotFound);
+
+// GET /api/backtest/config (baseline-РєРѕРЅС„РёРі)
 app.MapGet ("/api/backtest/config", () =>
 {
 	var cfg = BacktestConfigFactory.CreateBaseline ();
@@ -108,12 +133,14 @@ app.MapGet ("/api/backtest/config", () =>
 // GET /api/ping
 app.MapGet ("/api/ping", () => Results.Ok ("ok"));
 
-// POST /api/backtest/preview (one-shot what-if по BacktestConfig)
+// POST /api/backtest/preview (one-shot what-if РїРѕ BacktestConfig)
 app.MapPost ("/api/backtest/preview", async (
-	HttpContext httpContext,
-	BacktestPreviewRequestDto request ) =>
+	BacktestPreviewRequestDto request,
+	IBacktestDataProvider dataProvider,
+	BacktestPreviewService previewService,
+	CancellationToken cancellationToken ) =>
 {
-	// 1) Собираем BacktestConfig: либо baseline, либо на базе DTO.
+	// 1) РЎРѕР±РёСЂР°РµРј BacktestConfig: Р»РёР±Рѕ baseline, Р»РёР±Рѕ РЅР° Р±Р°Р·Рµ DTO.
 	BacktestConfig config;
 	if (request.Config == null)
 		{
@@ -121,7 +148,7 @@ app.MapPost ("/api/backtest/preview", async (
 		}
 	else
 		{
-		// Маппинг DTO ? BacktestConfig (минимальный, без валидации тонких кейсов).
+		// РњР°РїРїРёРЅРі DTO в†’ BacktestConfig (РјРёРЅРёРјР°Р»СЊРЅС‹Р№, Р±РµР· РІР°Р»РёРґР°С†РёРё С‚РѕРЅРєРёС… РєРµР№СЃРѕРІ).
 		config = new BacktestConfig
 			{
 			DailyStopPct = request.Config.DailyStopPct,
@@ -146,7 +173,7 @@ app.MapPost ("/api/backtest/preview", async (
 			}
 		}
 
-	// 2) Опционально фильтруем политики по SelectedPolicies.
+	// 2) РћРїС†РёРѕРЅР°Р»СЊРЅРѕ С„РёР»СЊС‚СЂСѓРµРј РїРѕР»РёС‚РёРєРё РїРѕ SelectedPolicies.
 	if (request.SelectedPolicies != null && request.SelectedPolicies.Count > 0)
 		{
 		var selected = new HashSet<string> (request.SelectedPolicies, StringComparer.OrdinalIgnoreCase);
@@ -160,7 +187,7 @@ app.MapPost ("/api/backtest/preview", async (
 			return Results.BadRequest (new
 				{
 				error = "no_policies_selected",
-				message = "После фильтрации список политик пуст. Укажи хотя бы одно корректное имя."
+				message = "РџРѕСЃР»Рµ С„РёР»СЊС‚СЂР°С†РёРё СЃРїРёСЃРѕРє РїРѕР»РёС‚РёРє РїСѓСЃС‚. РЈРєР°Р¶Рё С…РѕС‚СЏ Р±С‹ РѕРґРЅРѕ РєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ."
 				});
 			}
 
@@ -171,17 +198,62 @@ app.MapPost ("/api/backtest/preview", async (
 			}
 		}
 
-	// 3) На этом шаге нет общего data-орchestrator’а для API.
-	// Консоль уже умеет собирать candles/rows/records и вызывать BacktestEngine,
-	// но этот пайплайн пока живёт только там. Чтобы не дублировать код и не
-	// ломать текущую консоль, здесь честно возвращаем 501.
-	//
-	// Когда вытащим сбор данных в общий сервис (например, BacktestDataService),
-	// сюда останется добавить:
-	//   var data = await dataService.LoadAsync(config);
-	//   var summary = BacktestEngine.RunBacktest(data.Mornings, data.Records, data.Candles1m, data.Policies, config);
-	//   return Results.Ok(MapToDto(summary));
-	return Results.StatusCode (StatusCodes.Status501NotImplemented);
+	// 3) Р—Р°РіСЂСѓР¶Р°РµРј РґР°РЅРЅС‹Рµ РґР»СЏ Р±СЌРєС‚РµСЃС‚Р° С‡РµСЂРµР· РѕР±С‰РёР№ РїСЂРѕРІР°Р№РґРµСЂ.
+	BacktestDataSnapshot snapshot;
+	try
+		{
+		snapshot = await dataProvider.LoadAsync (cancellationToken);
+		}
+	catch (Exception ex)
+		{
+		// РЇРІРЅРѕ РѕС‚РґРµР»СЏРµРј РїСЂРѕР±Р»РµРјС‹ Р·Р°РіСЂСѓР·РєРё РґР°РЅРЅС‹С….
+		return Results.Problem (
+			title: "data_load_failed",
+			detail: ex.Message,
+			statusCode: StatusCodes.Status500InternalServerError);
+		}
+
+	// 4) РЎС‡РёС‚Р°РµРј РїСЂРµРІСЊСЋ-Р±СЌРєС‚РµСЃС‚ С‡РµСЂРµР· BacktestPreviewService (PnL Р±РµР· РєРѕРЅСЃРѕР»СЊРЅРѕРіРѕ РІС‹РІРѕРґР°).
+	BacktestSummary summary;
+	try
+		{
+		summary = previewService.RunPreview (
+			snapshot.Mornings,
+			snapshot.Records,
+			snapshot.Candles1m,
+			config);
+		}
+	catch (ArgumentException ex)
+		{
+		// РљРѕРЅС„РёРі/РґР°РЅРЅС‹Рµ СЏРІРЅРѕ РЅРµРєРѕСЂСЂРµРєС‚РЅС‹.
+		return Results.BadRequest (new
+			{
+			error = "invalid_preview_config",
+			message = ex.Message
+			});
+		}
+	catch (Exception ex)
+		{
+		// Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР° РїСЂРё СЂР°СЃС‡С‘С‚Рµ РїСЂРµРІСЊСЋ.
+		return Results.Problem (
+			title: "preview_failed",
+			detail: ex.Message,
+			statusCode: StatusCodes.Status500InternalServerError);
+		}
+
+	// 5) РЎС‚СЂРѕРёРј ReportDocument РІ С‚РѕРј Р¶Рµ С„РѕСЂРјР°С‚Рµ, С‡С‚Рѕ baseline backtest_summary.
+	var report = BacktestSummaryReportBuilder.Build (summary);
+	if (report == null)
+		{
+		return Results.Problem (
+			title: "preview_report_not_built",
+			detail: "РћС‚С‡С‘С‚ РїСЂРµРІСЊСЋ-Р±СЌРєС‚РµСЃС‚Р° РЅРµ Р±С‹Р» РїРѕСЃС‚СЂРѕРµРЅ (РЅРµС‚ РїРѕР»РёС‚РёРє РёР»Рё РґР°РЅРЅС‹С…).",
+			statusCode: StatusCodes.Status500InternalServerError);
+		}
+
+	// Р’РђР–РќРћ: Р·РґРµСЃСЊ РјС‹ РЅРµ СЃРѕС…СЂР°РЅСЏРµРј РѕС‚С‡С‘С‚ РІ ReportStorage, Р° РїСЂРѕСЃС‚Рѕ РѕС‚РґР°С‘Рј РµРіРѕ С„СЂРѕРЅС‚Сѓ,
+	// С‡С‚РѕР±С‹ baseline Рё preview Р±С‹Р»Рё РѕРґРёРЅР°РєРѕРІРѕРіРѕ С„РѕСЂРјР°С‚Р° РїРѕ JSON.
+	return Results.Ok (report);
 });
 
 app.Run ();
