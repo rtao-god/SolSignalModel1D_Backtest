@@ -9,7 +9,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 	{
 	/// <summary>
 	/// PFI-движок и расчёт direction-метрик.
-	/// Вынесен в отдельную часть partial-класса, чтобы не раздувать API-файл.
 	/// </summary>
 	public static partial class FeatureImportanceAnalyzer
 		{
