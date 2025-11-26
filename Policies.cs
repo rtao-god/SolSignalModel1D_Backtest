@@ -1,8 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
-using System;
-using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest
 	{

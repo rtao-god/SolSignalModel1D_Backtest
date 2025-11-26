@@ -1,14 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
 using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Backtest;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -158,6 +153,7 @@ namespace SolSignalModel1D_Backtest
 				);
 				}
 
+			// Снэпшот для бэктеста/превью
 			return new BacktestDataSnapshot
 				{
 				Mornings = mornings,

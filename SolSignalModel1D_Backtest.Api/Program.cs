@@ -3,10 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SolSignalModel1D_Backtest.Api.Endpoints;
 using SolSignalModel1D_Backtest.Api.Services;
-using SolSignalModel1D_Backtest.Core.Analytics.Reports;
 using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Reports;
+using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 
 var builder = WebApplication.CreateBuilder (args);
 
@@ -56,8 +56,9 @@ if (app.Environment.IsDevelopment ())
 app.UseRouting ();
 app.UseCors ();
 
-// Группы эндпоинтов вынесены в отдельные утилиты
+// Группы эндпоинтов
 app.MapCurrentPredictionEndpoints ();
 app.MapBacktestEndpoints ();
+app.MapPfiEndpoints ();
 
 app.Run ();

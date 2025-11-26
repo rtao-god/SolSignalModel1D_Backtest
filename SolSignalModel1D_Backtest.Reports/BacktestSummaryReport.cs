@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Reports
+﻿namespace SolSignalModel1D_Backtest.Reports
 	{
 	/// <summary>
 	/// Заглушка под будущий отчёт по бэктесту.

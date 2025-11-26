@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using SolSignalModel1D_Backtest.Reports.Model;
 
@@ -24,13 +20,12 @@ namespace SolSignalModel1D_Backtest.Reports
 		public ReportStorage ()
 			{
 			// Общий корень для ВСЕХ отчётов:
-			//   %LOCALAPPDATA%\SolSignalModel1D_Backtest\reports
-			var baseDir = Path.Combine (
-				Environment.GetFolderPath (Environment.SpecialFolder.LocalApplicationData),
-				"SolSignalModel1D_Backtest",
+			//   <repo>/cache/reports
+			// repo вычисляется внутри PathConfig.CacheRoot
+			_rootDir = Path.Combine (
+				Core.Infra.PathConfig.CacheRoot,
 				"reports");
 
-			_rootDir = baseDir;
 			Directory.CreateDirectory (_rootDir);
 
 			_jsonOptions = new JsonSerializerOptions
@@ -38,9 +33,9 @@ namespace SolSignalModel1D_Backtest.Reports
 				PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 				WriteIndented = true,
 				Converters =
-				{
-					new JsonStringEnumConverter()
-				}
+		{
+			new JsonStringEnumConverter()
+		}
 				};
 			}
 

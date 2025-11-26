@@ -15,6 +15,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />
+		<ProjectReference Include="..\SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
 		<ProjectReference Include="..\SolSignalModel1D_Backtest.csproj" />
 	</ItemGroup>
 

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-
-namespace SolSignalModel1D_Backtest.Reports.Model
+﻿namespace SolSignalModel1D_Backtest.Reports.Model
 	{
 	/// <summary>
 	/// Универсальный отчёт:

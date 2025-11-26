@@ -7,6 +7,8 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 
+	<!-- ML-пакеты нужны, т.к. в partial Program (SlModel/DelayedA и т.п.)
+       используются Microsoft.ML / PredictionEngine -->
 	<ItemGroup>
 		<PackageReference Include="Microsoft.ML" Version="4.0.3" />
 		<PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
@@ -16,13 +18,17 @@
 		<Folder Include="cache\" />
 	</ItemGroup>
 
+	<!-- КРИТИЧЕСКОЕ МЕСТО: не даём root-проекту компилировать исходники Core/Reports/Api,
+       иначе получаются дубли типов (DelayedEntryResult, DelayedIntradayResult и т.п.) -->
 	<ItemGroup>
+		<Compile Remove="SolSignalModel1D_Backtest.Core\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Reports\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Api\**\*.cs" />
 	</ItemGroup>
 
-	<!-- Единственная ссылка: на библиотеку Reports -->
+	<!-- Ссылки на библиотечные проекты -->
 	<ItemGroup>
+		<ProjectReference Include="SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
 		<ProjectReference Include="SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />
 	</ItemGroup>
 

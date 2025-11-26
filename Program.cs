@@ -7,10 +7,13 @@ using SolSignalModel1D_Backtest.Core.Data.Indicators;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily;
-using SolSignalModel1D_Backtest.Core.Analytics.Reports;
-using SolSignalModel1D_Backtest.Reports;
-using SolSignalModel1D_Backtest.Reports.Model;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Reports;
+using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
+using SolSignalModel1D_Backtest.Reports.CurrentPrediction;
+using SolSignalModel1D_Backtest.Reports.Reporting;
+using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -183,12 +186,33 @@ namespace SolSignalModel1D_Backtest
 				);
 				}
 
-			// --- 6b. Глобальная сводка PFI ---
-			FeatureImportanceAnalyzer.PrintGlobalSummary (
-				topPerModel: 5,
-				topGlobalFeatures: 15,
-				importanceThreshold: 0.003
-			);
+			// --- 6c. Сохраняем PFI-репорт по моделям ---
+			try
+				{
+				var pfiSnapshots = FeatureImportanceSnapshots.GetSnapshots ();
+
+				if (pfiSnapshots != null && pfiSnapshots.Count > 0)
+					{
+					var pfiReport = FeatureImportanceReportBuilder.BuildPerModelReport (
+						pfiSnapshots,
+						TableDetailLevel.Technical,
+						explicitTitle: "PFI по моделям (binary)"
+					);
+
+					var storage = new ReportStorage ();
+					storage.Save (pfiReport);
+
+					Console.WriteLine ("[pfi-report] pfi_per_model report saved.");
+					}
+				else
+					{
+					Console.WriteLine ("[pfi-report] no PFI snapshots, report not built.");
+					}
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[pfi-report] error while building/saving PFI report: {ex.Message}");
+				}
 
 			// --- 7. Delayed A по минуткам ---
 				{

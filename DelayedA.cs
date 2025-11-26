@@ -2,16 +2,23 @@
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using DelayedIntradayResult = SolSignalModel1D_Backtest.Core.Trading.Evaluator.DelayedIntradayResult;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
+		// Локальный enum для кодирования результата intraday-эксперимента A в int-поле PredictionRecord.
+		// Значения подобраны под стандартный enum без явных присваиваний (0,1,2,3).
+		private enum DelayedResultCode
+			{
+			None = 0,
+			TpFirst = 1,
+			SlFirst = 2,
+			Ambiguous = 3
+			}
+
 		/// <summary>
 		/// Модель A для отложенного входа.
 		/// Любые проблемы с исходными рядами считаются фатальными – бросаем исключение.
@@ -83,7 +90,6 @@ namespace SolSignalModel1D_Backtest
 				// 1. Гейт по SL-модели: используем A только если SL-модель считает день рискованным
 				if (!rec.SlHighDecision)
 					{
-					// Тут тоже бизнес-логика: день не рискованный → A не нужна
 					rec.DelayedEntryUsed = false;
 					continue;
 					}
@@ -92,7 +98,6 @@ namespace SolSignalModel1D_Backtest
 				DateTime dayStart = rec.DateUtc;
 
 				// t_exit (baseline) = следующее рабочее NY-утро 08:00 (минус 2 минуты) в UTC.
-				// Всё, что связано с delayed A, живёт в окне [dayStart; dayEnd).
 				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
 
 				bool strongSignal = (rec.PredLabel == 2 || rec.PredLabel == 0);
@@ -107,34 +112,33 @@ namespace SolSignalModel1D_Backtest
 				if (dayHours.Count == 0)
 					throw new InvalidOperationException ($"[PopulateDelayedA] No 1h candles in baseline window for {dayStart:O}.");
 
-				// Фичи модели A: смотрим на тот же baseline-интервал, что и реальные таргеты/деньги
+				// Фичи модели A
 				var features = TargetLevelFeatureBuilder.Build (
-					dayStart,        // дата/время входа (начало baseline-окна)
-					wantLong,        // направление
-					strongSignal,    // сильный ли сигнал
-					dayMinMove,      // MinMove дня
-					rec.Entry,       // дневная цена входа
-					dayHours         // 1h-свечи baseline-интервала
+					dayStart,
+					wantLong,
+					strongSignal,
+					dayMinMove,
+					rec.Entry,
+					dayHours
 				);
 
 				var pullbackSample = new PullbackContinuationSample
 					{
 					Features = features,
-					Label = false,      // в рантайме не используется
+					Label = false,
 					EntryUtc = dayStart
 					};
 
 				var predA = pullbackEngine.Predict (pullbackSample);
 
-				// 2. Гейт по модели A: она должна сказать "да, откат имеет смысл" с достаточной уверенностью
+				// 2. Гейт по модели A
 				if (!predA.PredictedLabel || predA.Probability < 0.70f)
 					{
-					// Это не ошибка данных – просто модель A сказала "нет"
 					rec.DelayedEntryUsed = false;
 					continue;
 					}
 
-				// 3. Если дошли сюда — A сказала "да", SL сказал "рискованно" — пробуем отложенный вход.
+				// 3. Если дошли сюда — A сказала "да", SL сказал "рискованно"
 				rec.DelayedSource = "A";
 				rec.DelayedEntryAsked = true;
 				rec.DelayedEntryUsed = true;
@@ -153,7 +157,7 @@ namespace SolSignalModel1D_Backtest
 					? rec.Entry * (1.0 - dipFrac)
 					: rec.Entry * (1.0 + dipFrac);
 
-				// Максимальная задержка — maxDelayHours от dayStart (обычно 4 часа)
+				// Максимальная задержка — 4 часа от dayStart
 				DateTime maxDelayTime = dayStart.AddHours (4);
 				Candle1m? fillBar = null;
 
@@ -177,7 +181,7 @@ namespace SolSignalModel1D_Backtest
 
 				if (fillBar == null)
 					{
-					// цена отката не достигнута — вход не исполнился, это нормальный кейс
+					// цена отката не достигнута — вход не исполнился
 					rec.DelayedEntryExecuted = false;
 					rec.DelayedWhyNot = "no trigger";
 					continue;
@@ -194,7 +198,7 @@ namespace SolSignalModel1D_Backtest
 
 				if (rec.MinMove > 0.0)
 					{
-					double linkedTp = rec.MinMove * 1.2; // коэффициент 1.2 от MinMove для TP
+					double linkedTp = rec.MinMove * 1.2;
 					if (linkedTp > effectiveTpPct)
 						effectiveTpPct = linkedTp;
 					}
