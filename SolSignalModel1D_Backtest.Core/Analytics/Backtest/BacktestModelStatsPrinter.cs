@@ -1,6 +1,4 @@
-﻿using System;
-using System.Linq;
-using System.Collections.Generic;
+﻿using SolSignalModel1D_Backtest.Core.Backtest.Snapshots;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Utils;
@@ -15,25 +13,17 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	///   + цветной summary по основным метрикам SL.
 	/// Все расчёты SL-исхода привязаны к окну [t0; t_exit), где
 	/// t0 = PredictionRecord.DateUtc, t_exit = Windowing.ComputeBaselineExitUtc(t0, nyTz).
+	/// Теперь расчёты вынесены в BacktestModelStatsSnapshotBuilder, а этот класс отвечает только за вывод.
 	/// </summary>
 	public static class BacktestModelStatsPrinter
 		{
-		/// <summary>
-		/// Маленькая структура для sweep-а порогов SL-модели:
-		/// только дни, у которых есть и path-based исход (TP/SL), и SlProb &gt; 0.
-		/// </summary>
-		private sealed class SlThresholdDay
-			{
-			public bool IsSlDay { get; set; }
-			public double Prob { get; set; }
-			}
-
 		/// <summary>
 		/// Основная точка входа:
 		/// - Daily confusion по классам (0/1/2);
 		/// - Trend-confusion по направлению (DOWN vs UP);
 		/// - SL-model confusion + метрики (TPR/FPR/Precision/Recall/F1/PR-AUC, coverage)
 		///   + доп. sweep по порогам вероятности SL.
+		/// Вся математика берётся из BacktestModelStatsSnapshotBuilder.
 		/// </summary>
 		public static void Print (
 			IReadOnlyList<PredictionRecord> records,
@@ -47,69 +37,58 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			ConsoleStyler.WriteHeader ("==== MODEL STATS ====");
 
+			// Считаем снимок модельных статистик.
+			var snapshot = BacktestModelStatsSnapshotBuilder.Compute (
+				records,
+				sol1m,
+				dailyTpPct,
+				dailySlPct,
+				nyTz);
+
 			// 1) Обычная 3-классовая путаница
-			PrintDailyConfusion (records);
+			PrintDailyConfusion (snapshot.Daily);
 			Console.WriteLine ();
 
 			// 2) Путаница по тренду (UP vs DOWN)
-			PrintTrendDirectionConfusion (records);
+			PrintTrendDirectionConfusion (snapshot.Trend);
 			Console.WriteLine ();
 
 			// 3) SL-модель (path-based по 1m) в том же окне, что и таргеты/PnL
-			PrintSlConfusionPathBased (records, sol1m, dailyTpPct, dailySlPct, nyTz);
+			PrintSlStats (snapshot.Sl);
 			Console.WriteLine ();
 			}
 
 		// ===== 1) Дневная путаница (3 класса) =====
 
-		private static void PrintDailyConfusion ( IReadOnlyList<PredictionRecord> records )
+		private static void PrintDailyConfusion ( DailyConfusionStats daily )
 			{
-			int[,] m = new int[3, 3];
-			int[] rowSum = new int[3];
-			int total = 0;
-
-			foreach (var r in records)
-				{
-				if (r.TrueLabel is < 0 or > 2) continue;
-				if (r.PredLabel is < 0 or > 2) continue;
-				m[r.TrueLabel, r.PredLabel]++;
-				rowSum[r.TrueLabel]++;
-				total++;
-				}
-
 			ConsoleStyler.WriteHeader ("Daily label confusion (3-class)");
+
 			var t = new TextTable ();
 			t.AddHeader ("true label", "pred 0", "pred 1", "pred 2", "correct", "total", "acc %");
 
 			// «Бросок монеты» для 3 классов — 1/3 ≈ 33.3%
 			double baseline = 100.0 / 3.0;
 
-			int diag = 0;
-
-			for (int y = 0; y < 3; y++)
+			foreach (var row in daily.Rows)
 				{
-				int correct = m[y, y];
-				int totalRow = rowSum[y];
-				double acc = totalRow > 0 ? (double) correct / totalRow * 100.0 : 0.0;
-
-				diag += correct;
-
 				var line = new[]
 				{
-					LabelName(y),
-					m[y, 0].ToString(),
-					m[y, 1].ToString(),
-					m[y, 2].ToString(),
-					correct.ToString(),
-					totalRow.ToString(),
-					$"{acc:0.0}%"
+					row.LabelName,
+					row.Pred0.ToString(),
+					row.Pred1.ToString(),
+					row.Pred2.ToString(),
+					row.Correct.ToString(),
+					row.Total.ToString(),
+					$"{row.AccuracyPct:0.0}%"
 				};
 
-				var color = acc >= baseline ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+				var color = row.AccuracyPct >= baseline
+					? ConsoleStyler.GoodColor
+					: ConsoleStyler.BadColor;
+
 				t.AddColoredRow (color, line);
 				}
-
-			double accuracy = total > 0 ? (double) diag / total * 100.0 : 0.0;
 
 			// Overall без цвета
 			t.AddRow (
@@ -117,113 +96,60 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 				"",
 				"",
 				"",
-				diag.ToString (),
-				total.ToString (),
-				$"{accuracy:0.0}%"
+				daily.OverallCorrect.ToString (),
+				daily.OverallTotal.ToString (),
+				$"{daily.OverallAccuracyPct:0.0}%"
 			);
 
 			t.WriteToConsole ();
 			}
 
-		private static string LabelName ( int x ) => x switch
-			{
-				0 => "0 (down)",
-				1 => "1 (flat)",
-				2 => "2 (up)",
-				_ => x.ToString ()
-				};
-
 		// ===== 2) Путаница по тренду (UP vs DOWN) =====
 
 		/// <summary>
-		/// Путаница только по направлению рынка:
-		/// - истинный тренд: только класс 0 (down) или 2 (up), боковик (1) вообще игнорируем;
-		/// - предсказанный тренд: 2 ИЛИ (1 &amp; PredMicroUp) → UP, 0 ИЛИ (1 &amp; PredMicroDown) → DOWN;
-		/// - считаем accuracy по DOWN-дням, по UP-дням и overall;
-		/// - порог цвета — 50% (выше броска монеты → зелёный, ниже → красный).
+		/// Печать путаницы только по направлению рынка:
+		/// использует уже посчитанные TrendDirectionStats.
 		/// </summary>
-		private static void PrintTrendDirectionConfusion ( IReadOnlyList<PredictionRecord> records )
+		private static void PrintTrendDirectionConfusion ( TrendDirectionStats trend )
 			{
-			// Индекс 0 = DOWN, 1 = UP
-			int[,] m = new int[2, 2];
-			int[] rowSum = new int[2];
-			int total = 0;
-
-			foreach (var r in records)
-				{
-				// Истинный тренд — только 0 (down) и 2 (up).
-				if (r.TrueLabel is < 0 or > 2) continue;
-
-				int? trueDir = null;
-				if (r.TrueLabel == 0)
-					trueDir = 0; // DOWN
-				else if (r.TrueLabel == 2)
-					trueDir = 1; // UP
-				else
-					continue;    // flat (1) — вообще не учитываем
-
-				// Предсказанный тренд с учётом micro:
-				bool predUp = r.PredLabel == 2 || (r.PredLabel == 1 && r.PredMicroUp);
-				bool predDown = r.PredLabel == 0 || (r.PredLabel == 1 && r.PredMicroDown);
-
-				int? predDir = null;
-				if (predUp && !predDown)
-					predDir = 1;
-				else if (predDown && !predUp)
-					predDir = 0;
-				else
-					continue; // ситуации без явного направления не учитываем
-
-				int y = trueDir.Value;
-				int x = predDir.Value;
-				m[y, x]++;
-				rowSum[y]++;
-				total++;
-				}
-
 			ConsoleStyler.WriteHeader ("Trend-direction confusion (DOWN vs UP)");
+
 			var t = new TextTable ();
 			t.AddHeader ("true trend", "pred DOWN", "pred UP", "correct", "total", "acc %");
 
 			double baseline = 50.0; // «бросок монеты»
 
-			string[] names = { "DOWN days", "UP days" };
-
-			int diag = 0;
-
-			for (int y = 0; y < 2; y++)
+			foreach (var row in trend.Rows)
 				{
-				int correct = m[y, y];
-				int totalRow = rowSum[y];
-				double acc = totalRow > 0 ? (double) correct / totalRow * 100.0 : 0.0;
-
-				diag += correct;
-
 				var line = new[]
 				{
-					names[y],
-					m[y, 0].ToString(),
-					m[y, 1].ToString(),
-					correct.ToString(),
-					totalRow.ToString(),
-					$"{acc:0.0}%"
+					row.Name,
+					row.PredDown.ToString(),
+					row.PredUp.ToString(),
+					row.Correct.ToString(),
+					row.Total.ToString(),
+					$"{row.AccuracyPct:0.0}%"
 				};
 
-				var color = acc >= baseline ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+				var color = row.AccuracyPct >= baseline
+					? ConsoleStyler.GoodColor
+					: ConsoleStyler.BadColor;
+
 				t.AddColoredRow (color, line);
 				}
 
-			double overallAcc = total > 0 ? (double) diag / total * 100.0 : 0.0;
-			var overallColor = overallAcc >= baseline ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+			var overallColor = trend.OverallAccuracyPct >= baseline
+				? ConsoleStyler.GoodColor
+				: ConsoleStyler.BadColor;
 
 			t.AddColoredRow (
 				overallColor,
 				"Accuracy (overall)",
 				"",
 				"",
-				diag.ToString (),
-				total.ToString (),
-				$"{overallAcc:0.0}%"
+				trend.OverallCorrect.ToString (),
+				trend.OverallTotal.ToString (),
+				$"{trend.OverallAccuracyPct:0.0}%"
 			);
 
 			t.WriteToConsole ();
@@ -231,226 +157,53 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 		// ===== 3) SL-модель, path-based через 1m =====
 
-		private enum DayOutcome
+		/// <summary>
+		/// Печать полной статистики SL-модели:
+		/// - confusion-таблица;
+		/// - основные метрики;
+		/// - цветной summary;
+		/// - sweep по порогам.
+		/// Все данные берутся из SlStats.
+		/// </summary>
+		private static void PrintSlStats ( SlStats sl )
 			{
-			None = 0,
-			TpFirst = 1,
-			SlFirst = 2
-			}
-
-		private static void PrintSlConfusionPathBased (
-			IReadOnlyList<PredictionRecord> records,
-			IReadOnlyList<Candle1m> sol1m,
-			double dailyTpPct,
-			double dailySlPct,
-			TimeZoneInfo nyTz )
-			{
-			int tp_low = 0, tp_high = 0, sl_low = 0, sl_high = 0;
-			int slSaved = 0;
-
-			// для coverage/PR-AUC
-			int totalSignalDays = 0;
-			int scoredDays = 0;
-			var prPoints = new List<(double Score, int Label)> ();
-
-			// для sweep-а порогов: только дни с TP/SL-исходом и ненулевой SlProb
-			var thrDays = new List<SlThresholdDay> ();
-
-			var m1 = sol1m.OrderBy (m => m.OpenTimeUtc).ToList ();
-
-			foreach (var r in records)
-				{
-				bool goLong = r.PredLabel == 2 || (r.PredLabel == 1 && r.PredMicroUp);
-				bool goShort = r.PredLabel == 0 || (r.PredLabel == 1 && r.PredMicroDown);
-				if (!goLong && !goShort) continue;
-
-				totalSignalDays++;
-
-				var outcome = GetDayOutcomeFromMinutes (r, m1, dailyTpPct, dailySlPct, nyTz);
-				if (outcome == DayOutcome.None)
-					{
-					// дни без TP/SL вообще не участвуют ни в confusion, ни в PR-AUC/threshold sweep
-					continue;
-					}
-
-				bool isSlDay = outcome == DayOutcome.SlFirst;
-				bool predHigh = r.SlHighDecision;
-
-				// считаем, что "scored" день — если модель вообще выдала probability (SlProb > 0)
-				bool hasScore = r.SlProb > 0.0;
-				if (hasScore)
-					{
-					scoredDays++;
-					prPoints.Add ((r.SlProb, isSlDay ? 1 : 0));
-					thrDays.Add (new SlThresholdDay
-						{
-						IsSlDay = isSlDay,
-						Prob = r.SlProb
-						});
-					}
-
-				if (!isSlDay)
-					{
-					if (predHigh) tp_high++; else tp_low++;
-					}
-				else
-					{
-					if (predHigh) sl_high++; else sl_low++;
-					if (predHigh) slSaved++;
-					}
-				}
+			var confusion = sl.Confusion;
+			var metrics = sl.Metrics;
 
 			// Confusion
 			ConsoleStyler.WriteHeader ("SL-model confusion (runtime, path-based)");
+
 			var t = new TextTable ();
 			t.AddHeader ("day type", "pred LOW", "pred HIGH");
-			t.AddRow ("TP-day", tp_low.ToString (), tp_high.ToString ());
-			t.AddRow ("SL-day", sl_low.ToString (), sl_high.ToString ());
-			t.AddRow ("SL saved (potential)", slSaved.ToString (), "");
+			t.AddRow ("TP-day", confusion.TpLow.ToString (), confusion.TpHigh.ToString ());
+			t.AddRow ("SL-day", confusion.SlLow.ToString (), confusion.SlHigh.ToString ());
+			t.AddRow ("SL saved (potential)", confusion.SlSaved.ToString (), "");
 			t.WriteToConsole ();
 			Console.WriteLine ();
 
-			// Метрики из confusion
-			int tp = sl_high; // SL-day & pred HIGH
-			int fn = sl_low;  // SL-day & pred LOW
-			int fp = tp_high; // TP-day & pred HIGH
-			int tn = tp_low;  // TP-day & pred LOW
-
-			double tpr = (tp + fn) > 0 ? (double) tp / (tp + fn) : 0.0;              // recall
-			double fpr = (fp + tn) > 0 ? (double) fp / (fp + tn) : 0.0;
-			double precision = (tp + fp) > 0 ? (double) tp / (tp + fp) : 0.0;
-			double recall = tpr;
-			double f1 = (precision + recall) > 0 ? 2.0 * precision * recall / (precision + recall) : 0.0;
-
-			double coverage = totalSignalDays > 0
-				? (double) scoredDays / totalSignalDays
-				: 0.0;
-
-			double prAuc = prPoints.Count >= 2
-				? ComputePrAuc (prPoints)
-				: 0.0;
-
+			// Метрики
 			ConsoleStyler.WriteHeader ("SL-model metrics (runtime)");
 			var mTab = new TextTable ();
 			mTab.AddHeader ("metric", "value");
-			mTab.AddRow ("coverage (scored / signal days)", $"{coverage * 100.0:0.0}%  ({scoredDays}/{totalSignalDays})");
-			mTab.AddRow ("TPR / Recall (SL-day)", $"{tpr * 100.0:0.0}%");
-			mTab.AddRow ("FPR (TP-day)", $"{fpr * 100.0:0.0}%");
-			mTab.AddRow ("Precision (SL-day)", $"{precision * 100.0:0.0}%");
-			mTab.AddRow ("F1 (SL-day)", $"{f1:0.000}");
-			mTab.AddRow ("PR-AUC (approx)", $"{prAuc:0.000}");
+			mTab.AddRow ("coverage (scored / signal days)", $"{metrics.Coverage * 100.0:0.0}%  ({confusion.ScoredDays}/{confusion.TotalSignalDays})");
+			mTab.AddRow ("TPR / Recall (SL-day)", $"{metrics.Tpr * 100.0:0.0}%");
+			mTab.AddRow ("FPR (TP-day)", $"{metrics.Fpr * 100.0:0.0}%");
+			mTab.AddRow ("Precision (SL-day)", $"{metrics.Precision * 100.0:0.0}%");
+			mTab.AddRow ("F1 (SL-day)", $"{metrics.F1:0.000}");
+			mTab.AddRow ("PR-AUC (approx)", $"{metrics.PrAuc:0.000}");
 			mTab.WriteToConsole ();
 
-			// === Цветной строчный summary для SL-модели ===
-			PrintSlSummaryLine (coverage, tpr, fpr, precision, f1, prAuc);
+			// Цветной summary — логика порогов/цвета сохранена.
+			PrintSlSummaryLine (
+				metrics.Coverage,
+				metrics.Tpr,
+				metrics.Fpr,
+				metrics.Precision,
+				metrics.F1,
+				metrics.PrAuc);
 
-			// === Доп. sweep по порогам вероятности SL на том же OOS-наборе ===
-			PrintSlThresholdSweep (thrDays);
-			}
-
-		/// <summary>
-		/// Path-based истина по 1m:
-		/// Long: TP если High >= Entry*(1+TP%) раньше, SL если Low <= Entry*(1−SL%) раньше.
-		/// Short: TP если Low <= Entry*(1−TP%), SL если High >= Entry*(1+SL%).
-		/// Если ни TP, ни SL — None.
-		/// При одновременном срабатывании в одной минуте приоритет SL (как в PnL).
-		/// Окно: [DateUtc; t_exit), t_exit = ComputeBaselineExitUtc(DateUtc, nyTz).
-		/// </summary>
-		private static DayOutcome GetDayOutcomeFromMinutes (
-			PredictionRecord r,
-			IReadOnlyList<Candle1m> allMinutes,
-			double tpPct,
-			double slPct,
-			TimeZoneInfo nyTz )
-			{
-			bool goLong = r.PredLabel == 2 || (r.PredLabel == 1 && r.PredMicroUp);
-			bool goShort = r.PredLabel == 0 || (r.PredLabel == 1 && r.PredMicroDown);
-			if (!goLong && !goShort) return DayOutcome.None;
-			if (r.Entry <= 0) return DayOutcome.None;
-
-			DateTime from = r.DateUtc;
-			// новый baseline-горизонт вместо жёсткого +24h
-			DateTime to = Windowing.ComputeBaselineExitUtc (from, nyTz);
-
-			var dayMinutes = allMinutes
-				.Where (m => m.OpenTimeUtc >= from && m.OpenTimeUtc < to)
-				.ToList ();
-			if (dayMinutes.Count == 0) return DayOutcome.None;
-
-			if (goLong)
-				{
-				double tp = r.Entry * (1.0 + tpPct);
-				double sl = slPct > 1e-9 ? r.Entry * (1.0 - slPct) : double.NaN;
-
-				foreach (var m in dayMinutes)
-					{
-					bool hitTp = m.High >= tp;
-					bool hitSl = !double.IsNaN (sl) && m.Low <= sl;
-					if (!hitTp && !hitSl) continue;
-
-					// если оба в одной минуте — считаем SL-днём
-					if (hitSl) return DayOutcome.SlFirst;
-					return DayOutcome.TpFirst;
-					}
-				}
-			else // short
-				{
-				double tp = r.Entry * (1.0 - tpPct);
-				double sl = slPct > 1e-9 ? r.Entry * (1.0 + slPct) : double.NaN;
-
-				foreach (var m in dayMinutes)
-					{
-					bool hitTp = m.Low <= tp;
-					bool hitSl = !double.IsNaN (sl) && m.High >= sl;
-					if (!hitTp && !hitSl) continue;
-
-					if (hitSl) return DayOutcome.SlFirst;
-					return DayOutcome.TpFirst;
-					}
-				}
-
-			return DayOutcome.None;
-			}
-
-		/// <summary>
-		/// Грубая PR-AUC по точкам (score, label) с label∈{0,1}, score∈[0,1].
-		/// Считаем по трапециям в координатах (recall, precision).
-		/// </summary>
-		private static double ComputePrAuc ( List<(double Score, int Label)> points )
-			{
-			if (points == null || points.Count == 0) return 0.0;
-
-			int totalPos = points.Count (p => p.Label == 1);
-			int totalNeg = points.Count (p => p.Label == 0);
-			if (totalPos == 0) return 0.0;
-
-			var sorted = points
-				.OrderByDescending (p => p.Score)
-				.ToList ();
-
-			int tp = 0, fp = 0;
-			double prevRecall = 0.0;
-			double prevPrecision = (double) totalPos / (totalPos + totalNeg); // базовая точка
-			double auc = 0.0;
-
-			foreach (var (score, label) in sorted)
-				{
-				if (label == 1) tp++; else fp++;
-
-				double recall = (double) tp / totalPos;
-				double precision = (tp + fp) > 0 ? (double) tp / (tp + fp) : prevPrecision;
-
-				double deltaR = recall - prevRecall;
-				if (deltaR > 0)
-					{
-					auc += deltaR * (precision + prevPrecision) * 0.5;
-					}
-
-				prevRecall = recall;
-				prevPrecision = precision;
-				}
-
-			return auc;
+			// Sweep по порогам
+			PrintSlThresholdSweep (sl);
 			}
 
 		/// <summary>
@@ -471,7 +224,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 			double fprPct = fpr * 100.0;
 			double precPct = precision * 100.0;
 
-			// Очень грубые пороги, чтобы просто визуально понимать
 			bool good =
 				covPct >= 50.0 &&      // хотя бы половина signal-дней реально скорится
 				tprPct >= 60.0 &&      // TPR ощутимо выше броска монеты
@@ -496,52 +248,42 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 		/// Sweep по порогам вероятности SL-модели на OOS-наборе.
 		/// Печатает таблицу:
 		/// thr, TPR(SL), FPR(TP), pred HIGH %, high / total.
+		/// Данные берутся из SlStats.Thresholds и SlStats.Confusion.
 		/// </summary>
-		private static void PrintSlThresholdSweep ( List<SlThresholdDay> days )
+		private static void PrintSlThresholdSweep ( SlStats sl )
 			{
 			ConsoleStyler.WriteHeader ("SL threshold sweep (runtime)");
 
-			if (days == null || days.Count == 0)
+			var thresholds = sl.Thresholds;
+			var confusion = sl.Confusion;
+
+			if (thresholds == null || thresholds.Count == 0)
 				{
 				Console.WriteLine ("[sl-thr] no days with both TP/SL outcome and SlProb > 0 – sweep skipped.");
 				return;
 				}
 
-			int totalSl = days.Count (d => d.IsSlDay);
-			int totalTp = days.Count - totalSl;
-
-			Console.WriteLine ($"[sl-thr] base set: totalDays={days.Count}, SL-days={totalSl}, TP-days={totalTp}");
+			Console.WriteLine ($"[sl-thr] base set: totalDays={confusion.TotalOutcomeDays}, SL-days={confusion.TotalSlDays}, TP-days={confusion.TotalTpDays}");
 
 			var t = new TextTable ();
 			t.AddHeader ("thr", "TPR(SL)", "FPR(TP)", "pred HIGH %", "high / total");
 
-			double[] thresholds = { 0.30, 0.40, 0.50, 0.60 };
-
-			foreach (double thr in thresholds)
+			foreach (var row in thresholds)
 				{
-				int highSl = days.Count (d => d.IsSlDay && d.Prob >= thr);
-				int highTp = days.Count (d => !d.IsSlDay && d.Prob >= thr);
-				int highTotal = highSl + highTp;
-
-				double tpr = totalSl > 0 ? (double) highSl / totalSl : 0.0;
-				double fpr = totalTp > 0 ? (double) highTp / totalTp : 0.0;
-				double highFrac = days.Count > 0 ? (double) highTotal / days.Count : 0.0;
-
-				var row = new[]
+				var cells = new[]
 				{
-					$"{thr:0.00}",
-					$"{tpr * 100.0:0.0}%",
-					$"{fpr * 100.0:0.0}%",
-					$"{highFrac * 100.0:0.0}%",
-					$"{highTotal}/{days.Count}"
+					row.Threshold.ToString("0.00"),
+					$"{row.TprPct:0.0}%",
+					$"{row.FprPct:0.0}%",
+					$"{row.PredHighPct:0.0}%",
+					$"{row.HighTotal}/{row.TotalDays}"
 				};
 
-				// Условно "хороший" порог: TPR >= 60% и FPR <= 40%
-				var color = (tpr >= 0.60 && fpr <= 0.40)
+				var color = row.IsGood
 					? ConsoleStyler.GoodColor
 					: ConsoleStyler.BadColor;
 
-				t.AddColoredRow (color, row);
+				t.AddColoredRow (color, cells);
 				}
 
 			t.WriteToConsole ();

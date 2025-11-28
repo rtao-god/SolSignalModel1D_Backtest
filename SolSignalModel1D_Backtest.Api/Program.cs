@@ -60,5 +60,6 @@ app.UseCors ();
 app.MapCurrentPredictionEndpoints ();
 app.MapBacktestEndpoints ();
 app.MapPfiEndpoints ();
+app.MapModelStatsEndpoints ();
 
 app.Run ();

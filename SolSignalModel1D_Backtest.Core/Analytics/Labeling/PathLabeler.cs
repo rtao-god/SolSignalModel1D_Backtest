@@ -1,9 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 	{
@@ -39,7 +36,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 			if (minutes == null || minutes.Count == 0 || entryPrice <= 0.0 || minMove <= 0.0)
 				return 1; // flat по умолчанию
 
-			// --- ВАЖНО: вместо "entryUtc + 24h" считаем реальный exit через NY-утро ---
 			DateTime endUtc;			
 				endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: NyTz);
 

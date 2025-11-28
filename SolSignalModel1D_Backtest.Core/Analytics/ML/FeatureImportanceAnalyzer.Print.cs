@@ -2,7 +2,6 @@
 	{
 	/// <summary>
 	/// Печать подробной таблички PFI + direction для одной модели.
-	/// Вынесено отдельно, чтобы не раздувать основной фасад.
 	/// </summary>
 	internal static class FeatureImportancePrinter
 		{

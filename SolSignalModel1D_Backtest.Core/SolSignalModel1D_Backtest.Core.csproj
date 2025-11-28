@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<!-- Классическая библиотека -->
 		<OutputType>Library</OutputType>
 
 		<TargetFramework>net9.0</TargetFramework>
@@ -9,14 +8,9 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 
-	<!-- Здесь сидит вся ML/бэктест-логика, поэтому добавляем ML-пакеты -->
 	<ItemGroup>
 		<PackageReference Include="Microsoft.ML" Version="4.0.3" />
 		<PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
 	</ItemGroup>
-
-	<!-- ВАЖНО: НИКАКИХ ProjectReference отсюда.
-       Core НЕ должен ссылаться на Reports, чтобы не было циклов.
-       Всё, что зависит от ReportDocument/ReportStorage, вытащено в проект Reports. -->
 
 </Project>

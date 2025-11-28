@@ -1,14 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{
 	/// <summary>
 	/// Обёртки-репорты: только дергают табличные принтеры.
-	/// Без “полотна” текста.
 	/// </summary>
 	public static class BacktestReportBuilder
 		{
@@ -40,9 +36,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 
 			// 4) разрез по источникам сигналов (таблица)
 			SourceBreakdownPrinter.Print (allTrades, MergeSources (results), startEquity: 20000.0);
-
-			// ВАЖНО:
-			// Сравнение SL vs No-SL и Delayed A/B вынесено в отдельные методы ниже.
 			}
 
 		/// <summary>

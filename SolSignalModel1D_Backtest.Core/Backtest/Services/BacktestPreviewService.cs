@@ -28,7 +28,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest.Services
 		/// PredictionRecord с уже проставленными полями (dir/micro/SL/Delayed и т.п.).
 		/// </param>
 		/// <param name="candles1m">
-		/// Минутные свечи SOLUSDT для PnL-движка.
+		/// Минутные свечи SOL/USDT для PnL-движка.
 		/// </param>
 		/// <param name="config">
 		/// Конфигурация бэктеста (SL/TP + политики плеча/маржи).

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+﻿using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest
 	{

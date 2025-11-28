@@ -5,9 +5,6 @@ using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
 	{
@@ -33,13 +30,13 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
 			var rows = evalRows.ToList ();
 			if (rows.Count == 0)
 				{
-				Console.WriteLine ($"[pfi:daily:{datasetTag}] empty dataset, nothing to analyze.");
+				Console.WriteLine ($"[pfi:daily: {datasetTag}] empty dataset, nothing to analyze.");
 				return;
 				}
 
 			var minDate = rows.Min (r => r.Date);
 			var maxDate = rows.Max (r => r.Date);
-			Console.WriteLine ($"[pfi:daily:{datasetTag}] rows={rows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
+			Console.WriteLine ($"[pfi:daily: {datasetTag}] rows={rows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
 
 			// Для PFI на eval-сете балансировку отключаем,
 			// чтобы не искажать реальное распределение.
@@ -72,11 +69,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
 					bundle.MoveModel,
 					moveData,
 					DailyFeatureSchema.Names,
-					tag: $"{datasetTag}:move");
+					tag: $"{datasetTag}: move");
 				}
 			else
 				{
-				Console.WriteLine ($"[pfi:daily:{datasetTag}] move-model or data is empty, skip.");
+				Console.WriteLine ($"[pfi:daily: {datasetTag}] move-model or data is empty, skip.");
 				}
 
 			// ===== PFI: dir-normal =====
@@ -96,11 +93,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
 					bundle.DirModelNormal,
 					dirNormalData,
 					DailyFeatureSchema.Names,
-					tag: $"{datasetTag}:dir-normal");
+					tag: $"{datasetTag}: dir-normal");
 				}
 			else
 				{
-				Console.WriteLine ($"[pfi:daily:{datasetTag}] dir-normal: no model or no eval-rows, skip.");
+				Console.WriteLine ($"[pfi:daily: {datasetTag}] dir-normal: no model or no eval-rows, skip.");
 				}
 
 			// ===== PFI: dir-down =====
@@ -119,11 +116,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
 					bundle.DirModelDown,
 					dirDownData,
 					DailyFeatureSchema.Names,
-					tag: $"{datasetTag}:dir-down");
+					tag: $"{datasetTag}: dir-down");
 				}
 			else
 				{
-				Console.WriteLine ($"[pfi:daily:{datasetTag}] dir-down: no model or no eval-rows, skip.");
+				Console.WriteLine ($"[pfi:daily: {datasetTag}] dir-down: no model or no eval-rows, skip.");
 				}
 
 			// ===== PFI: micro-flat =====
@@ -150,16 +147,16 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
 						bundle.MicroFlatModel,
 						microData,
 						MicroFeatureSchema.Names,
-						tag: $"{datasetTag}:micro-flat");
+						tag: $"{datasetTag}: micro-flat");
 					}
 				else
 					{
-					Console.WriteLine ($"[pfi:daily:{datasetTag}] micro: too few micro-rows ({microRows.Count}), skip.");
+					Console.WriteLine ($"[pfi: daily: {datasetTag}] micro: too few micro-rows ({microRows.Count}), skip.");
 					}
 				}
 			else
 				{
-				Console.WriteLine ($"[pfi:daily:{datasetTag}] MicroFlatModel == null, skip micro layer PFI.");
+				Console.WriteLine ($"[pfi: daily: {datasetTag}] MicroFlatModel == null, skip micro layer PFI.");
 				}
 			}
 		}

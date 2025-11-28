@@ -1,65 +1,137 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Reports.Model;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
 
 namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 	{
 	/// <summary>
-	/// Строит ReportDocument для "текущего прогноза" на основе PredictionRecord и политик плеча.
-	/// Вся математика (SL/TP/liq) остаётся в Core, проект Reports — только DTO + I/O.
+	/// Строит ReportDocument для "текущего прогноза" на основе CurrentPredictionSnapshot.
+	/// Здесь только форматирование в key-value и таблицы, без новой математики.
 	/// </summary>
 	public static class CurrentPredictionReportBuilder
 		{
-		public static ReportDocument? Build (
-			IReadOnlyList<PredictionRecord> records,
-			IReadOnlyList<ILeveragePolicy> policies,
-			double walletBalanceUsd )
+		public static ReportDocument? Build ( CurrentPredictionSnapshot snapshot )
 			{
-			if (records == null || records.Count == 0) return null;
-			if (policies == null || policies.Count == 0) return null;
-
-			var last = records
-				.OrderBy (r => r.DateUtc)
-				.Last ();
+			if (snapshot == null)
+				return null;
 
 			var doc = new ReportDocument
 				{
-				Id = $"current-prediction-{last.DateUtc:yyyyMMdd}",
+				Id = $"current-prediction-{snapshot.PredictionDateUtc:yyyyMMdd}",
 				Kind = "current_prediction",
-				Title = "Текущий прогноз (SOLUSDT)",
-				GeneratedAtUtc = DateTime.UtcNow
+				Title = $"Текущий прогноз ({TradingSymbols.SolUsdtDisplay})",
+				GeneratedAtUtc = snapshot.GeneratedAtUtc
 				};
 
-			// === Общие поля прогноза ===
+			// === Общие параметры прогноза (то, что видно юзеру в первую очередь) ===
 			var info = new KeyValueSection
 				{
 				Title = "Общие параметры прогноза"
 				};
 
-			info.Items.Add (new KeyValueItem { Key = "DateUtc", Value = last.DateUtc.ToString ("O") });
-			info.Items.Add (new KeyValueItem { Key = "PredLabel", Value = last.PredLabel.ToString () });
-			info.Items.Add (new KeyValueItem { Key = "Micro", Value = FormatMicro (last) });
-			info.Items.Add (new KeyValueItem { Key = "RegimeDown", Value = last.RegimeDown.ToString () });
-			info.Items.Add (new KeyValueItem { Key = "SlProb", Value = last.SlProb.ToString ("0.00") });
-			info.Items.Add (new KeyValueItem { Key = "SlHighDecision", Value = last.SlHighDecision.ToString () });
-			info.Items.Add (new KeyValueItem { Key = "Entry", Value = last.Entry.ToString ("0.0000") });
-			info.Items.Add (new KeyValueItem { Key = "MinMove", Value = last.MinMove.ToString ("0.0000") });
+			// Дата прогноза, без ISO-мусора
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Дата прогноза (UTC)",
+				Value = FormatDateUtc (snapshot.PredictionDateUtc)
+				});
+
+			// Основное решение дневной модели (Daily)
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Основная модель (Daily)",
+				Value = BuildMainDirectionLabel (snapshot)
+				});
+
+			// Микро-модель (1m), если есть человекочитаемое описание
+			if (!string.IsNullOrWhiteSpace (snapshot.MicroDisplay))
+				{
+				info.Items.Add (new KeyValueItem
+					{
+					Key = "Микро-модель (1m)",
+					Value = snapshot.MicroDisplay
+					});
+				}
+
+			// Режим рынка: нормальный / в фазе снижения
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Режим рынка",
+				Value = snapshot.RegimeDown
+					? "Рынок в фазе снижения"
+					: "Рынок в нормальном режиме"
+				});
+
+			// Вероятность срабатывания стоп-лосса (из SL-модели)
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Вероятность срабатывания стоп-лосса",
+				Value = $"{snapshot.SlProb:0.0} %"
+				});
+
+			// Сигнал SL-модели: аккуратно форматируем, не предполагая точной семантики
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Сигнал SL-модели",
+				Value = FormatSlDecision (snapshot.SlHighDecision)
+				});
+
+			// Текущая цена инструмента
+			info.Items.Add (new KeyValueItem
+				{
+				Key = $"Текущая цена {TradingSymbols.SolUsdtDisplay}",
+				Value = snapshot.Entry.ToString ("0.0000")
+				});
+
+			// Минимальный осмысленный ход (в долях) + сразу человекочитаемый %
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Минимальный осмысленный ход цены",
+				Value = $"{snapshot.MinMove:0.0000} ({snapshot.MinMove * 100:0.0} %)"
+				});
+
+			// Комментарий модели, если есть
+			if (!string.IsNullOrWhiteSpace (snapshot.Reason))
+				{
+				info.Items.Add (new KeyValueItem
+					{
+					Key = "Комментарий модели",
+					Value = snapshot.Reason
+					});
+				}
 
 			doc.KeyValueSections.Add (info);
 
-			// === Forward (берём уже посчитанные поля PredictionRecord, без Windowing) ===
-			if (last.MaxHigh24 > 0 && last.MinLow24 > 0 && last.Close24 > 0)
+			// === Forward 24h (baseline на истории) ===
+			if (snapshot.Forward24h != null)
 				{
-				var fwd = new KeyValueSection
+				var fwd = snapshot.Forward24h;
+
+				var fwdSection = new KeyValueSection
 					{
-					Title = "Forward 24h (baseline)"
+					Title = "Диапазон цены за 24 часа (исторический baseline)"
 					};
 
-				fwd.Items.Add (new KeyValueItem { Key = "MaxHigh24", Value = last.MaxHigh24.ToString ("0.0000") });
-				fwd.Items.Add (new KeyValueItem { Key = "MinLow24", Value = last.MinLow24.ToString ("0.0000") });
-				fwd.Items.Add (new KeyValueItem { Key = "Close24", Value = last.Close24.ToString ("0.0000") });
+				fwdSection.Items.Add (new KeyValueItem
+					{
+					Key = "Максимальная цена за 24 часа",
+					Value = fwd.MaxHigh.ToString ("0.0000")
+					});
+				fwdSection.Items.Add (new KeyValueItem
+					{
+					Key = "Минимальная цена за 24 часа",
+					Value = fwd.MinLow.ToString ("0.0000")
+					});
+				fwdSection.Items.Add (new KeyValueItem
+					{
+					Key = "Цена закрытия через 24 часа",
+					Value = fwd.Close.ToString ("0.0000")
+					});
 
-				doc.KeyValueSections.Add (fwd);
+				doc.KeyValueSections.Add (fwdSection);
 				}
 
 			// === Таблица по политикам (BASE vs ANTI-D) ===
@@ -68,29 +140,50 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 				Title = "Политики плеча (BASE vs ANTI-D)"
 				};
 
+			// Более понятные колонки для человека
 			table.Columns.AddRange (new[]
 			{
-				"Policy",
-				"Branch",
-				"RiskDay",
-				"HasDirection",
-				"Skipped",
-				"Direction",
-				"Leverage",
-				"Entry",
-				"SL%",
-				"TP%",
-				"SL price",
-				"TP price",
-				"Position $",
-				"Position qty",
-				"Liq price",
-				"Liq dist %"
+				"Политика",
+				"Ветка",
+				"Рискованный день",
+				"Есть направление",
+				"Пропущено",
+				"Направление",
+				"Плечо",
+				"Цена входа",
+				"SL, %",
+				"TP, %",
+				"Цена SL",
+				"Цена TP",
+				"Размер позиции, $",
+				"Размер позиции, qty",
+				"Цена ликвидации",
+				"Дистанция до ликвидации, %"
 			});
 
-			foreach (var policy in policies)
+			foreach (var row in snapshot.PolicyRows)
 				{
-				AppendPolicyRows (table, last, policy, walletBalanceUsd);
+				string F ( double? v, string fmt ) => v.HasValue ? v.Value.ToString (fmt) : "-";
+
+				table.Rows.Add (new List<string>
+				{
+					row.PolicyName,
+					row.Branch,
+					row.IsRiskDay.ToString(),
+					row.HasDirection.ToString(),
+					row.Skipped.ToString(),
+					row.Direction,
+					row.Leverage.ToString("0.##"),
+					row.Entry.ToString("0.0000"),
+					row.SlPct.HasValue ? row.SlPct.Value.ToString("0.0") : "-",
+					row.TpPct.HasValue ? row.TpPct.Value.ToString("0.0") : "-",
+					F(row.SlPrice, "0.0000"),
+					F(row.TpPrice, "0.0000"),
+					F(row.PositionUsd, "0.00"),
+					F(row.PositionQty, "0.000"),
+					F(row.LiqPrice, "0.0000"),
+					F(row.LiqDistPct, "0.0")
+				});
 				}
 
 			doc.TableSections.Add (table);
@@ -98,184 +191,124 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			return doc;
 			}
 
-		// ===== Хелперы =====
-
-		private static void AppendPolicyRows (
-			TableSection table,
-			PredictionRecord rec,
-			ILeveragePolicy policy,
-			double walletBalanceUsd )
+		/// <summary>
+		/// Форматирует дату прогноза в человекочитаемый UTC-вид без миллисекунд.
+		/// Пример: 2025-11-26 12:00 UTC.
+		/// </summary>
+		private static string FormatDateUtc ( DateTime dtUtc )
 			{
-			bool hasDir = TryGetDirection (rec, out bool goLong, out bool goShort);
-			bool isRiskDay = rec.SlHighDecision;
-			double lev = policy.ResolveLeverage (rec);
-			string policyName = policy.GetType ().Name;
-			string direction = !hasDir ? "-" : goLong ? "LONG" : "SHORT";
+			var utc = dtUtc.Kind == DateTimeKind.Utc ? dtUtc : dtUtc.ToUniversalTime ();
+			return utc.ToString ("yyyy-MM-dd HH:mm 'UTC'");
+			}
 
-			// BASE ветка: торгует только нерискованные дни.
+		/// <summary>
+		/// Строит подпись основной дневной модели:
+		/// "Рост", "Падение", "Боковик", "Боковик-Рост", "Боковик-Падение".
+		///
+		/// Важно: здесь используется разумная гипотеза по PredLabel:
+		/// -1 ~ падение, 0 ~ боковик, +1 ~ рост.
+		/// Если в твоей реализации другая кодировка — маппинг нужно
+		/// подправить под фактические значения.
+		/// </summary>
+		private static string BuildMainDirectionLabel ( CurrentPredictionSnapshot snapshot )
+			{
+			// PredLabel в текущей модели — целое (обычно -1/0/+1).
+			// Здесь предполагается:
+			//  -1 → падение
+			//   0 → боковик
+			//  +1 → рост
+			// Если в реальной схеме кодировка другая — маппинг ниже нужно подправить.
+			var rawLabel = snapshot.PredLabel;
+			var raw = rawLabel.ToString (CultureInfo.InvariantCulture);
+			var rawTrim = raw.Trim ();
+			var rawLower = rawTrim.ToLowerInvariant ();
+
+			bool? baseFlat = null;
+			bool? baseUp = null;
+
+			// Базовая интерпретация по числовому коду
+			if (rawLabel == 0)
 				{
-				bool skipped = !hasDir || isRiskDay;
-				var plan = skipped ? null : BuildTradePlan (rec, goLong, lev, walletBalanceUsd);
-
-				table.Rows.Add (BuildRow (
-					policyName,
-					"BASE",
-					isRiskDay,
-					hasDir,
-					skipped,
-					direction,
-					lev,
-					rec.Entry,
-					plan));
+				baseFlat = true;
+				}
+			else if (rawLabel > 0)
+				{
+				baseFlat = false;
+				baseUp = true;
+				}
+			else if (rawLabel < 0)
+				{
+				baseFlat = false;
+				baseUp = false;
 				}
 
-			// ANTI-D ветка: торгует только рискованные дни.
+			// Доп. обработка текстовых вариантов, если когда-нибудь PredLabel станет строкой
+			if (rawLower.IndexOf ("flat", StringComparison.Ordinal) >= 0
+				|| rawLower.IndexOf ("флэт", StringComparison.Ordinal) >= 0
+				|| rawLower.IndexOf ("sideways", StringComparison.Ordinal) >= 0)
 				{
-				bool skipped = !hasDir || !isRiskDay;
-				var plan = skipped ? null : BuildTradePlan (rec, goLong, lev, walletBalanceUsd);
-
-				table.Rows.Add (BuildRow (
-					policyName,
-					"ANTI-D",
-					isRiskDay,
-					hasDir,
-					skipped,
-					direction,
-					lev,
-					rec.Entry,
-					plan));
-				}
-			}
-
-		private sealed class TradePlan
-			{
-			public double SlPct { get; init; }
-			public double TpPct { get; init; }
-			public double SlPrice { get; init; }
-			public double TpPrice { get; init; }
-			public double? PositionUsd { get; init; }
-			public double? PositionQty { get; init; }
-			public double? LiqPrice { get; init; }
-			public double? LiqDistPct { get; init; }
-			}
-
-		private static TradePlan BuildTradePlan (
-			PredictionRecord rec,
-			bool goLong,
-			double leverage,
-			double walletBalanceUsd )
-			{
-			double entry = rec.Entry;
-			if (entry <= 0.0)
-				throw new InvalidOperationException ("Entry <= 0 — нельзя построить торговый план.");
-
-			double baseMinMove = rec.MinMove > 0.0 ? rec.MinMove : 0.02;
-			double slPct = baseMinMove;
-			if (slPct < 0.01) slPct = 0.01;
-			else if (slPct > 0.04) slPct = 0.04;
-
-			double tpPct = slPct * 1.5;
-			if (tpPct < 0.015) tpPct = 0.015;
-
-			double slPrice = goLong
-				? entry * (1.0 - slPct)
-				: entry * (1.0 + slPct);
-
-			double tpPrice = goLong
-				? entry * (1.0 + tpPct)
-				: entry * (1.0 - tpPct);
-
-			double? posUsd = null;
-			double? posQty = null;
-			double? liqPrice = null;
-			double? liqDistPct = null;
-
-			if (walletBalanceUsd > 0.0)
-				{
-				posUsd = walletBalanceUsd * leverage;
-				posQty = posUsd / entry;
-
-				if (leverage > 1.0)
-					{
-					const double mmr = 0.004;
-
-					if (goLong)
-						liqPrice = entry * (leverage - 1.0) / (leverage * (1.0 - mmr));
-					else
-						liqPrice = entry * (1.0 + leverage) / (leverage * (1.0 + mmr));
-
-					if (liqPrice.HasValue)
-						{
-						liqDistPct = goLong
-							? (entry - liqPrice.Value) / entry * 100.0
-							: (liqPrice.Value - entry) / entry * 100.0;
-						}
-					}
+				baseFlat ??= true;
 				}
 
-			return new TradePlan
+			if (rawLower.IndexOf ("up", StringComparison.Ordinal) >= 0
+				|| rawLower.IndexOf ("long", StringComparison.Ordinal) >= 0
+				|| rawLower.IndexOf ("рост", StringComparison.Ordinal) >= 0)
 				{
-				SlPct = slPct * 100.0,
-				TpPct = tpPct * 100.0,
-				SlPrice = slPrice,
-				TpPrice = tpPrice,
-				PositionUsd = posUsd,
-				PositionQty = posQty,
-				LiqPrice = liqPrice,
-				LiqDistPct = liqDistPct
-				};
+				baseUp ??= true;
+				}
+
+			if (rawLower.IndexOf ("down", StringComparison.Ordinal) >= 0
+				|| rawLower.IndexOf ("short", StringComparison.Ordinal) >= 0
+				|| rawLower.IndexOf ("пад", StringComparison.Ordinal) >= 0)
+				{
+				baseUp ??= false;
+				}
+
+			// Микро-модель: используем для уточнения боковика
+			var micro = snapshot.MicroDisplay?.ToLowerInvariant () ?? string.Empty;
+			bool microUp = micro.Contains ("up") || micro.Contains ("рост");
+			bool microDown = micro.Contains ("down") || micro.Contains ("пад");
+
+			if (baseFlat == true)
+				{
+				if (microUp)
+					return "Боковик-Рост";
+				if (microDown)
+					return "Боковик-Падение";
+				return "Боковик";
+				}
+
+			if (baseUp == true)
+				return "Рост";
+
+			if (baseUp == false)
+				return "Падение";
+
+			// Фолбэк: показываем сырой код, если ничего не распознали
+			return string.IsNullOrWhiteSpace (rawTrim) ? "нет данных" : rawTrim;
 			}
 
-		private static List<string> BuildRow (
-			string policyName,
-			string branch,
-			bool isRiskDay,
-			bool hasDirection,
-			bool skipped,
-			string direction,
-			double leverage,
-			double entry,
-			TradePlan? plan )
+		/// <summary>
+		/// Человекочитаемое описание решения SL-модели.
+		/// Тип SlHighDecision заранее неизвестен, поэтому работаем через ToString.
+		/// Для bool / 0/1 возвращаем внятный текст, для остальных значений — сырой вывод.
+		/// </summary>
+		private static string FormatSlDecision ( object? slDecision )
 			{
-			string F ( double? v, string fmt ) => v.HasValue ? v.Value.ToString (fmt) : "-";
+			if (slDecision == null)
+				return "нет данных";
 
-			return new List<string>
-			{
-				policyName,
-				branch,
-				isRiskDay.ToString(),
-				hasDirection.ToString(),
-				skipped.ToString(),
-				direction,
-				leverage.ToString("0.##"),
-				entry.ToString("0.0000"),
-				plan != null ? plan.SlPct.ToString("0.0")      : "-",
-				plan != null ? plan.TpPct.ToString("0.0")      : "-",
-				F(plan?.SlPrice,     "0.0000"),
-				F(plan?.TpPrice,     "0.0000"),
-				F(plan?.PositionUsd, "0.00"),
-				F(plan?.PositionQty, "0.000"),
-				F(plan?.LiqPrice,    "0.0000"),
-				F(plan?.LiqDistPct,  "0.0")
-			};
-			}
+			var raw = slDecision.ToString () ?? string.Empty;
+			var lower = raw.Trim ().ToLowerInvariant ();
 
-		private static bool TryGetDirection (
-			PredictionRecord rec,
-			out bool goLong,
-			out bool goShort )
-			{
-			goLong = rec.PredLabel == 2 || rec.PredLabel == 1 && rec.PredMicroUp;
-			goShort = rec.PredLabel == 0 || rec.PredLabel == 1 && rec.PredMicroDown;
-			return goLong || goShort;
-			}
+			if (lower == "true" || lower == "1" || lower == "high")
+				return "Высокий риск: стопы стоит усилить";
 
-		private static string FormatMicro ( PredictionRecord r )
-			{
-			if (r.PredLabel != 1) return "не используется (не flat)";
-			if (r.PredMicroUp) return "micro UP";
-			if (r.PredMicroDown) return "micro DOWN";
-			return "—";
+			if (lower == "false" || lower == "0" || lower == "ok")
+				return "Нормальный риск по стопам";
+
+			// Если это какой-то специфический enum/строка — показываем как есть.
+			return raw;
 			}
 		}
 	}

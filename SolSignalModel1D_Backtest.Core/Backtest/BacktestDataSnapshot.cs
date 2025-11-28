@@ -24,7 +24,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		public IReadOnlyList<PredictionRecord> Records { get; init; } = Array.Empty<PredictionRecord> ();
 
 		/// <summary>
-		/// 1m-свечи SOLUSDT, которые используются PnL-движком.
+		/// 1m-свечи SOL/USDT, которые используются PnL-движком.
 		/// Должны покрывать весь период сигналов в Records/Mornings.
 		/// </summary>
 		public IReadOnlyList<Candle1m> Candles1m { get; init; } = Array.Empty<Candle1m> ();

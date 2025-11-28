@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Core.Infra
+﻿namespace SolSignalModel1D_Backtest.Core.Infra
 	{
 	/// <summary>
 	/// Утилиты для таймзон, используемых в моделях.

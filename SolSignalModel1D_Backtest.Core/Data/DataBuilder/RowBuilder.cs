@@ -4,10 +4,6 @@ using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-
 namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 	{
 	/// <summary>

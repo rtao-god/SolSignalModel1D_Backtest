@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
+﻿namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 	{
 	public sealed class DataRow
 		{

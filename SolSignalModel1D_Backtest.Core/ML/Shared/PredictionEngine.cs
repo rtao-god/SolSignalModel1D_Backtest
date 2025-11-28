@@ -1,6 +1,4 @@
-﻿using System;
-using System.Linq;
-using Microsoft.ML;
+﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
@@ -12,7 +10,6 @@ namespace SolSignalModel1D_Backtest.Core.ML
 	/// Обёртка над натрененным бандлом:
 	/// 1) дневной двухшаговый пайплайн (move + dir),
 	/// 2) микро-модель, которая срабатывает только при дневном flat.
-	/// Без эвристик и ручных подмен предсказаний.
 	/// </summary>
 	public sealed class PredictionEngine
 		{

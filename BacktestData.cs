@@ -88,7 +88,7 @@ namespace SolSignalModel1D_Backtest
 			sol1m = ReadAll1m (solSym);
 			Console.WriteLine ($"[1m] SOL count = {sol1m.Count}");
 			if (sol1m.Count == 0)
-				throw new InvalidOperationException ("[init] Нет 1m свечей SOLUSDT в cache/candles.");
+				throw new InvalidOperationException ("[init] Нет 1m свечей SOL/USDT в cache/candles.");
 
 			// --- 3. диапазон дат и индикаторы ---
 			var lastUtc = solAll6h.Max (c => c.OpenTimeUtc);

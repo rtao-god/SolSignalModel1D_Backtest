@@ -1,6 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.ML.Shared;
-
-namespace SolSignalModel1D_Backtest.Core.ML.Shared
+﻿namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
 	/// <summary>
 	/// Имена признаков для дневной / микро-модели.

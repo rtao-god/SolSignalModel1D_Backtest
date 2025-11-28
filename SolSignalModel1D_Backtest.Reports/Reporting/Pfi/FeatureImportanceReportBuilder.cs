@@ -29,7 +29,7 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Pfi
 				{
 				// Человекочитаемый заголовок для конкретной модели:
 				// включаем туда тег и baseline AUC, чтобы на UI сразу было понятно, что за модель.
-				var title = $"PFI по фичам: {snap.Tag} (AUC={snap.BaselineAuc:F4})";
+				var title = $"{snap.Tag} (AUC={snap.BaselineAuc:F4})";
 
 				var table = MetricTableBuilder.BuildTable (
 					FeatureImportanceTableDefinitions.PerModelFeatureStats,

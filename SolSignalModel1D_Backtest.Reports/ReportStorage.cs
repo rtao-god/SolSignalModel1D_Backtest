@@ -110,6 +110,15 @@ namespace SolSignalModel1D_Backtest.Reports
 			}
 
 		/// <summary>
+		/// Загружает последний по времени отчёт с модельными статистиками бэктеста.
+		/// Можно использовать для /api/backtest/model-stats
+		/// </summary>
+		public ReportDocument? LoadLatestBacktestModelStats ()
+			{
+			return LoadLatestByKind ("backtest_model_stats");
+			}
+
+		/// <summary>
 		/// Универсальный загрузчик "последнего" JSON по kind для произвольного типа.
 		/// Например:
 		///   LoadLatest&lt;BacktestBaselineSnapshot&gt;("backtest_baseline")
