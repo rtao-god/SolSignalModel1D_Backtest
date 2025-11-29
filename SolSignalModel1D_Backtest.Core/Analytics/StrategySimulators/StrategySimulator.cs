@@ -9,144 +9,37 @@ using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 	{
 	/// <summary>
-	/// Агрегированная статистика по стратегии:
-	/// - PnL по сценариям (1..4);
-	/// - общие метрики по дням;
-	/// - разрез по PredLabel;
-	/// - серии по сценариям и по дням, где срабатывает SL хеджа.
-	/// </summary>
-	public sealed class StrategyStats
-		{
-		// --- Капитал и объёмы ---
-
-		/// <summary>Стартовый баланс кошелька (в начале прогона).</summary>
-		public double StartBalance { get; set; }
-
-		/// <summary>Финальный баланс после всех сделок (учёт только убытков, профит выводится).</summary>
-		public double EndBalance { get; set; }
-
-		/// <summary>Минимальный баланс в процессе (для расчёта просадки).</summary>
-		public double MinBalance { get; set; }
-
-		/// <summary>Максимальная просадка в абсолюте (StartBalance - MinBalance).</summary>
-		public double MaxDrawdownAbs { get; set; }
-
-		/// <summary>Максимальная просадка в долях от стартового баланса.</summary>
-		public double MaxDrawdownPct { get; set; }
-
-		/// <summary>Общий риск на сделку в день 1 (в долларах).</summary>
-		public double StartTotalStake { get; set; }
-
-		/// <summary>Минимальный общий риск на сделку (в долларах) по мере падения капитала.</summary>
-		public double MinTotalStake { get; set; }
-
-		/// <summary>Сколько денег всего было выведено с профитных дней.</summary>
-		public double TotalWithdrawnProfit { get; set; }
-
-		// --- Общие метрики по дням ---
-
-		/// <summary>Всего "дней-сделок", по которым удалось что-то посчитать.</summary>
-		public int TradesCount { get; set; }
-
-		/// <summary>Количество прибыльных дней (PnL &gt; 0).</summary>
-		public int ProfitTradesCount { get; set; }
-
-		/// <summary>Количество убыточных дней (PnL &lt; 0).</summary>
-		public int LossTradesCount { get; set; }
-
-		/// <summary>Суммарный чистый PnL по всем дням (profit + loss).</summary>
-		public double TotalPnlNet { get; set; }
-
-		/// <summary>Суммарный валовый профит (только плюс).</summary>
-		public double TotalProfitGross { get; set; }
-
-		/// <summary>Суммарный валовый убыток (отрицательное число).</summary>
-		public double TotalLossGross { get; set; }
-
-		// --- Сценарии (как в описании стратегии) ---
-
-		public int Scenario1Count { get; set; }
-		public double Scenario1Pnl { get; set; }
-
-		public int Scenario2Count { get; set; }
-		public double Scenario2Pnl { get; set; }
-
-		public int Scenario3Count { get; set; }
-		public double Scenario3Pnl { get; set; }
-
-		public int Scenario4Count { get; set; }
-		public double Scenario4Pnl { get; set; }
-
-		// --- Серии по сценариям ---
-
-		public int MaxScenario1Streak { get; set; }
-		public int MaxScenario2Streak { get; set; }
-		public int MaxScenario3Streak { get; set; }
-		public int MaxScenario4Streak { get; set; }
-
-		/// <summary>Максимальная серия дней, когда стоп шорта срабатывал (сценарии 3 или 4).</summary>
-		public int MaxHedgeSlStreak { get; set; }
-
-		// --- Разрез по PredLabel ---
-
-		/// <summary>PredLabel = 2 (up).</summary>
-		public int TotalPredUpCount { get; set; }
-		public double TotalPredUpPnl { get; set; }
-
-		/// <summary>PredLabel = 0 (down).</summary>
-		public int TotalPredDownCount { get; set; }
-		public double TotalPredDownPnl { get; set; }
-
-		/// <summary>PredLabel = 1 (flat).</summary>
-		public int TotalPredFlatCount { get; set; }
-		public double TotalPredFlatPnl { get; set; }
-		}
-
-	/// <summary>
-	/// Симуляция стратегии на основе прогнозов модели и минутных свечей.
-	/// Важно:
-	/// - стратегия не использует PnL-движок, только PredictionRecord + 1m;
-	/// - стейк берётся как доля текущего капитала;
-	/// - профитные дни выводятся (капитал не растёт);
-	/// - убытки уменьшают капитал → последующие сделки идут меньшим объёмом.
+	/// Симуляция сценарной стратегии на основе дневных прогнозов модели и минутных свечей.
+	/// Ключевые моменты:
+	/// - PredLabel определяет направление дня (up/flat → лонг, down → шорт);
+	/// - риск в день = доля капитала из параметров (TotalRiskFractionPerTrade);
+	/// - профит выводится, убытки уменьшают баланс;
+	/// - сценарии:
+	///   1) базовый TP без хеджа;
+	///   2) хедж заработал и закрыл базу+хедж в плюс;
+	///   3) хедж выбило по SL, открыли вторую ногу по тренду, и рынок ушёл в нашу сторону (в т.ч. новый TP=5$);
+	///   4) хедж выбило, открыли вторую ногу и нас выбило по слабому откату против тренда.
 	/// </summary>
 	public static class StrategySimulator
 		{
-		// Параметры стратегии (в долларах).
-		// Эти числа задают "форму" сценариев, а не абсолютный риск:
-		// реальные объёмы считаются как доля капитала и масштабируются.
-		private const double BaseStakeUsd = 1200.0;    // первая нога (первый лонг/шорт)
-		private const double HedgeStakeUsd = 2200.0;   // вторая нога (шорт/лонг-hedge и второй вход)
-
-		// Смещения по цене (в долларах от точки входа).
-		private const double BaseTpOffsetUsd = 3.0;         // TP базовой позиции
-		private const double HedgeTriggerOffsetUsd = 2.0;   // триггер открытия хеджа
-		private const double HedgeStopOffsetUsd = 1.0;      // SL хеджа
-		private const double HedgeTpOffsetUsd = 5.0;        // TP хеджа
-		private const double SecondLegStopOffsetUsd = 0.5;  // SL для "двойного" входа
-
-		// Параметры risk-management.
-		private const double InitialBalanceUsd = 10_000.0;       // стартовый баланс кошелька
-		private const double TotalRiskFractionPerTrade = 0.30;   // доля капитала на сделку (30%)
-
-		private static readonly double BaseStakeFraction =
-			BaseStakeUsd / (BaseStakeUsd + HedgeStakeUsd);
-
-		private static readonly double HedgeStakeFraction =
-			HedgeStakeUsd / (BaseStakeUsd + HedgeStakeUsd);
-
 		/// <summary>
-		/// Запуск симуляции стратегии на сигнальных днях.
-		/// mornings и records используются по минимальной длине, если длины не совпадают.
+		/// Основной вход симулятора.
+		/// Внешний код управляет только:
+		/// - списком дней (mornings),
+		/// - списком PredictionRecord,
+		/// - минутными свечами,
+		/// - набором параметров StrategyParameters.
 		/// </summary>
 		public static StrategyStats Run (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<PredictionRecord> records,
-			IReadOnlyList<Candle1m> candles1m )
+			IReadOnlyList<Candle1m> candles1m,
+			StrategyParameters parameters )
 			{
 			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
 			if (records == null) throw new ArgumentNullException (nameof (records));
 			if (candles1m == null) throw new ArgumentNullException (nameof (candles1m));
+			if (parameters == null) throw new ArgumentNullException (nameof (parameters));
 
 			var stats = new StrategyStats ();
 
@@ -161,8 +54,17 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 					$"использую первые {days} точек для симуляции.");
 				}
 
+			// Предрасчитываем доли стейка между базовой ногой и хеджем,
+			// чтобы не повторять одну и ту же математику в каждом дне.
+			double totalStakeShape = parameters.BaseStakeUsd + parameters.HedgeStakeUsd;
+			if (totalStakeShape <= 0.0)
+				throw new InvalidOperationException ("[strategy] BaseStakeUsd + HedgeStakeUsd must be > 0.");
+
+			double baseStakeFraction = parameters.BaseStakeUsd / totalStakeShape;
+			double hedgeStakeFraction = parameters.HedgeStakeUsd / totalStakeShape;
+
 			// Текущий баланс и базовые метрики по капиталу.
-			double balance = InitialBalanceUsd;
+			double balance = parameters.InitialBalanceUsd;
 			stats.StartBalance = balance;
 			stats.MinBalance = balance;
 
@@ -193,11 +95,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 
 				bool isLongBase = dirSign > 0;   // Pred up/flat → базовый лонг; Pred down → базовый шорт.
 
-				// Время входа — дата дневной строки (NY-утро).
-				DateTime entryTime = row.Date;
+				// Время входа — дата дневной строки (NY-утро вью).
+				DateTime entryTimeUtc = row.Date;
 
 				// Находим первую минутную свечу не раньше entryTime.
-				var entryCandle = candles1m.FirstOrDefault (c => c.OpenTimeUtc >= entryTime);
+				var entryCandle = candles1m.FirstOrDefault (c => c.OpenTimeUtc >= entryTimeUtc);
 				if (entryCandle == null)
 					{
 					// Нет минутных данных — этот день пропускаем.
@@ -208,26 +110,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				if (entryPrice <= 0.0)
 					continue;
 
-				// Рассчитываем время выхода: следующее NY-утро 08:00 - 2 минуты.
-				var entryLocal = TimeZoneInfo.ConvertTimeFromUtc (entryTime, nyTz);
-				var exitDateLocal = entryLocal.Date.AddDays (1);
-
-				if (exitDateLocal.DayOfWeek == DayOfWeek.Saturday)
-					exitDateLocal = exitDateLocal.AddDays (2);
-				else if (exitDateLocal.DayOfWeek == DayOfWeek.Sunday)
-					exitDateLocal = exitDateLocal.AddDays (1);
-
-				var exitLocal = new DateTime (
-					exitDateLocal.Year,
-					exitDateLocal.Month,
-					exitDateLocal.Day,
-					8, 0, 0);
-
-				DateTime exitUtc = TimeZoneInfo.ConvertTimeToUtc (exitLocal, nyTz)
-					.AddMinutes (-2);
+				// Окно торговли: [entryTime; exitUtc).
+				DateTime exitUtc = ComputeExitWindow (entryTimeUtc, nyTz);
 
 				// Расчёт общего объёма риска на сделку и разбиение на две ноги.
-				double totalStake = balance * TotalRiskFractionPerTrade;
+				double totalStake = balance * parameters.TotalRiskFractionPerTrade;
 				if (totalStake <= 0.0)
 					continue;
 
@@ -243,8 +130,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 						stats.MinTotalStake = totalStake;
 					}
 
-				double baseStake = totalStake * BaseStakeFraction;
-				double hedgeStake = totalStake * HedgeStakeFraction;
+				double baseStake = totalStake * baseStakeFraction;
+				double hedgeStake = totalStake * hedgeStakeFraction;
 
 				double qtyBase = baseStake / entryPrice;
 
@@ -267,12 +154,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				double lastPrice = entryCandle.Close;
 
 				// Предрасчитанные уровни для базовой позиции.
-				double baseTpPrice = entryPrice + dirSign * BaseTpOffsetUsd;
-				double hedgeTriggerPrice = entryPrice - dirSign * HedgeTriggerOffsetUsd;
+				double baseTpPrice = entryPrice + dirSign * parameters.BaseTpOffsetUsd;
+				double hedgeTriggerPrice = entryPrice - dirSign * parameters.HedgeTriggerOffsetUsd;
 
 				foreach (var c in candles1m)
 					{
-					if (c.OpenTimeUtc < entryTime || c.OpenTimeUtc >= exitUtc)
+					if (c.OpenTimeUtc < entryTimeUtc || c.OpenTimeUtc >= exitUtc)
 						continue;
 
 					lastPrice = c.Close;
@@ -282,6 +169,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 						{
 						if (HitTakeProfit (isLongBase, baseTpPrice, c))
 							{
+							// Классический сценарий 1: один лонг/шорт до TP=+3$.
 							double pnlBase = ComputePnl (isLongBase, qtyBase, entryPrice, baseTpPrice);
 							dayPnl = pnlBase;
 							scenario = 1;
@@ -307,9 +195,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 					if (hedgeOpen && !secondOpen)
 						{
 						double hedgeTpPrice =
-							hedgeEntryPrice + (-dirSign) * HedgeTpOffsetUsd;
-						double hedgeSlPrice =
-							hedgeEntryPrice - (-dirSign) * HedgeStopOffsetUsd;
+							hedgeEntryPrice + (-dirSign) * parameters.HedgeTpOffsetUsd;
+
+						// SL хеджа и точка входа второй ноги совпадают с исходной ценой входа дня.
+						// Это даёт паттерн 200 → 198 → 200:
+						//   - на 198 открыли шорт-хедж;
+						//   - на 200 закрыли хедж и открыли второй лонг.
+						double hedgeSlPrice = entryPrice;
 
 						// 3.1) TP хеджа (сценарий 2): закрываем базу и хедж по цене TP хеджа.
 						if (HitTakeProfit (isLongHedge, hedgeTpPrice, c))
@@ -327,11 +219,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 							}
 
 						// 3.2) SL хеджа (сценарий 3): фиксируем убыток по хеджу,
-						// открываем вторую ногу в направлении базовой позиции.
+						// открываем вторую ногу в направлении базовой позиции по той же цене (entryPrice).
 						if (HitStopLoss (isLongHedge, hedgeSlPrice, c))
 							{
 							double pnlHedge = ComputePnl (isLongHedge, hedgeQty, hedgeEntryPrice, hedgeSlPrice);
-							dayPnl += pnlHedge; // как правило, отрицательный.
+							dayPnl += pnlHedge; // обычно отрицательный PnL
 
 							hedgeOpen = false;
 
@@ -340,7 +232,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 							secondEntryPrice = hedgeSlPrice;
 							secondQty = hedgeStake / secondEntryPrice;
 
-							// Минимум сценарий 3 (SL хеджа). Если потом сработает стоп двойного входа — станет сценарий 4.
 							if (scenario == 0)
 								scenario = 3;
 
@@ -348,11 +239,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 							}
 						}
 
-					// 4) Вторая нога открыта — проверяем слабый откат против направления (сценарий 4).
+					// 4) Вторая нога открыта — сначала проверяем SL, затем TP двойной позиции.
 					if (secondOpen)
 						{
+						// SL второй ноги: «шум» против тренда, сценарий 4.
 						double secondStopPrice =
-							secondEntryPrice - dirSign * SecondLegStopOffsetUsd;
+							secondEntryPrice - dirSign * parameters.SecondLegStopOffsetUsd;
 
 						if (HitStopLoss (isLongSecond, secondStopPrice, c))
 							{
@@ -363,6 +255,27 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 							scenario = 4;
 							closedByScenario = true;
 
+							baseOpen = false;
+							secondOpen = false;
+							break;
+							}
+
+						// TP двойной позиции: рынок переобулся и прошёл дальше.
+						// ОБА лонга/шорта закрываем по более далёкой цели (+5$ от первой точки).
+						double doubleTpPrice = entryPrice + dirSign * parameters.DoublePositionTpOffsetUsd;
+
+						if (HitTakeProfit (isLongSecond, doubleTpPrice, c))
+							{
+							double pnlBase = ComputePnl (isLongBase, qtyBase, entryPrice, doubleTpPrice);
+							double pnlSecond = ComputePnl (isLongSecond, secondQty, secondEntryPrice, doubleTpPrice);
+
+							dayPnl += pnlBase + pnlSecond;
+
+							// Логически это развитие сценария 3 (хедж выбило, потом рынок пошёл как надо).
+							if (scenario == 0)
+								scenario = 3;
+
+							closedByScenario = true;
 							baseOpen = false;
 							secondOpen = false;
 							break;
@@ -513,7 +426,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 					dirSign = -1;
 					return true;
 
-				case 1: // flat → пока трактуем как лонг
+				case 1: // flat → трактуем как лонг
 					dirSign = +1;
 					return true;
 
@@ -558,6 +471,30 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 			return dirSign > 0
 				? c.Low <= triggerPrice
 				: c.High >= triggerPrice;
+			}
+
+		/// <summary>
+		/// Вычисляет время выхода: следующее NY-утро 08:00 (минус 2 минуты).
+		/// Логика совпадает с тем, что у тебя уже было в коде.
+		/// </summary>
+		private static DateTime ComputeExitWindow ( DateTime entryTimeUtc, TimeZoneInfo nyTz )
+			{
+			var entryLocal = TimeZoneInfo.ConvertTimeFromUtc (entryTimeUtc, nyTz);
+			var exitDateLocal = entryLocal.Date.AddDays (1);
+
+			if (exitDateLocal.DayOfWeek == DayOfWeek.Saturday)
+				exitDateLocal = exitDateLocal.AddDays (2);
+			else if (exitDateLocal.DayOfWeek == DayOfWeek.Sunday)
+				exitDateLocal = exitDateLocal.AddDays (1);
+
+			var exitLocal = new DateTime (
+				exitDateLocal.Year,
+				exitDateLocal.Month,
+				exitDateLocal.Day,
+				8, 0, 0);
+
+			return TimeZoneInfo.ConvertTimeToUtc (exitLocal, nyTz)
+				.AddMinutes (-2);
 			}
 		}
 	}

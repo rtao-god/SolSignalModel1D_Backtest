@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest
 		/// <summary>
 		/// Глобальная граница train-периода для дневной модели.
 		/// Всё, что ≤ этой даты, используется только для обучения.
-		/// Всё, что &gt; этой даты, идёт в PredictionRecords и метрики.
+		/// Всё, что &gt; этой даты, считается OOS (для логов/аналитики).
 		/// </summary>
 		private static DateTime _trainUntilUtc;
 
@@ -36,7 +36,7 @@ namespace SolSignalModel1D_Backtest
 			DateTime maxDate = ordered.Last ().Date;
 
 			// Простой временной hold-out: последние N дней не участвуют в обучении,
-			// чтобы модели не видели самые свежие дни, по которым считаются метрики.
+			// чтобы модели не видели самые свежие дни, по которым считаются forward-метрики.
 			const int HoldoutDays = 120;
 
 			DateTime trainUntil = maxDate.AddDays (-HoldoutDays);
@@ -59,7 +59,7 @@ namespace SolSignalModel1D_Backtest
 				_trainUntilUtc = trainUntil;
 
 				Console.WriteLine (
-					$"[engine] training on rows &lt;= {trainUntil:yyyy-MM-dd} " +
+					$"[engine] training on rows <= {trainUntil:yyyy-MM-dd} " +
 					$"({trainRows.Count} из {ordered.Count}, диапазон [{minDate:yyyy-MM-dd}; {trainUntil:yyyy-MM-dd}])");
 				}
 
@@ -84,9 +84,11 @@ namespace SolSignalModel1D_Backtest
 			}
 
 		/// <summary>
-		/// Строит PredictionRecord'ы ТОЛЬКО для out-of-sample дней:
-		/// для тех mornings, у которых r.Date &gt; _trainUntilUtc.
-		/// Train-период используется только для обучения и не попадает в метрики.
+		/// Строит PredictionRecord'ы для ВСЕХ mornings (train + OOS).
+		/// Граница _trainUntilUtc:
+		/// - по-прежнему задаёт разделение train/OOS;
+		/// - используется в логах и последующей аналитике,
+		///   но не режет список для стратегий/бэктеста.
 		/// </summary>
 		private static async Task<List<PredictionRecord>> LoadPredictionRecordsAsync (
 			IReadOnlyList<DataRow> mornings,
@@ -112,22 +114,28 @@ namespace SolSignalModel1D_Backtest
 			if (sorted6h.Count == 0)
 				throw new InvalidOperationException ("[forward] Пустая серия 6h для SOL");
 
-			// OOS-морнинги: только дни, которые НЕ использовались в обучении дневной модели.
-			var oosMornings = mornings
-				.Where (r => r.Date > _trainUntilUtc)
+			// Все mornings по времени.
+			var orderedMornings = mornings
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			if (oosMornings.Count == 0)
+			int oosCount = orderedMornings.Count (r => r.Date > _trainUntilUtc);
+
+			Console.WriteLine (
+				$"[forward] mornings total = {orderedMornings.Count}, " +
+				$"OOS (Date > trainUntil={_trainUntilUtc:yyyy-MM-dd}) = {oosCount}");
+
+			if (oosCount == 0)
 				{
 				Console.WriteLine (
-					$"[forward] нет out-of-sample mornings: все дни &lt;= trainUntil={_trainUntilUtc:O}. " +
-					"Метрики будут пустые/некорректные.");
+					$"[forward] предупреждение: нет out-of-sample mornings " +
+					$"(все дни <= trainUntil={_trainUntilUtc:O}). " +
+					"Стратегические метрики будут train-like.");
 				}
 
-			var list = new List<PredictionRecord> (oosMornings.Count);
+			var list = new List<PredictionRecord> (orderedMornings.Count);
 
-			foreach (var r in oosMornings)
+			foreach (var r in orderedMornings)
 				{
 				// Предсказание только через PredictionEngine (дневная модель + микро).
 				// Никаких эвристик и ручных подмен.
@@ -176,7 +184,7 @@ namespace SolSignalModel1D_Backtest
 				if (exitIdx <= entryIdx)
 					{
 					throw new InvalidOperationException (
-						$"[forward] exitIdx {exitIdx} &lt;= entryIdx {entryIdx} для entry {entryUtc:O}");
+						$"[forward] exitIdx {exitIdx} <= entryIdx {entryIdx} для entry {entryUtc:O}");
 					}
 
 				double entryPrice = sorted6h[entryIdx].Close;

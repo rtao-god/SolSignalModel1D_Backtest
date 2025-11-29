@@ -1,12 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+﻿using System;
+using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Backtest.Snapshots;
 using SolSignalModel1D_Backtest.Reports.Model;
-using SolSignalModel1D_Backtest.Reports.Reporting;
-using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
-using System;
-using System.Collections.Generic;
 
-namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
+namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 	{
 	/// <summary>
 	/// Строит ReportDocument с модельными статистиками бэктеста
@@ -64,21 +61,8 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 
 			doc.KeyValueSections.Add (metaSection);
 
-			// === Daily confusion: simple / technical ===
-			var dailySimple = MetricTableBuilder.BuildTable (
-				BacktestModelStatsTableDefinitions.DailyConfusion,
-				snapshot.Daily.Rows,
-				TableDetailLevel.Simple,
-				explicitTitle: "Daily confusion (упрощённо)");
-
-			var dailyTechnical = MetricTableBuilder.BuildTable (
-				BacktestModelStatsTableDefinitions.DailyConfusion,
-				snapshot.Daily.Rows,
-				TableDetailLevel.Technical,
-				explicitTitle: "Daily confusion (технически)");
-
-			doc.TableSections.Add (dailySimple);
-			doc.TableSections.Add (dailyTechnical);
+			// === Daily confusion: бизнес (summary) + технарь (матрица) ===
+			AddDailyConfusionSections (doc, snapshot.Daily);
 
 			// === Trend-direction confusion: simple / technical ===
 			var trendSimple = MetricTableBuilder.BuildTable (
@@ -206,6 +190,247 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 				}
 
 			return doc;
+			}
+
+		/// <summary>
+		/// Добавляет в документ две секции по дневной путанице:
+		/// - бизнес-режим (человеческое summary по классам);
+		/// - технарский режим (матрица TRUE x PRED, как confusion).
+		/// </summary>
+		private static void AddDailyConfusionSections ( ReportDocument doc, DailyConfusionStats daily )
+			{
+			if (doc == null) throw new ArgumentNullException (nameof (doc));
+			if (daily == null) throw new ArgumentNullException (nameof (daily));
+
+			// Бизнес-режим: компактные текстовые summary по каждому классу.
+			var summarySection = BuildDailyBusinessSummarySection (daily);
+			if (summarySection != null)
+				{
+				doc.TableSections.Add (summarySection);
+				}
+
+			// Технарский режим: нормальная confusion-матрица с процентами и количеством.
+			var matrixSection = BuildDailyTechnicalMatrixSection (daily);
+			if (matrixSection != null)
+				{
+				doc.TableSections.Add (matrixSection);
+				}
+			}
+
+		/// <summary>
+		/// Строит "человеческое" описание по классам в виде таблицы:
+		/// Class + Summary.
+		/// </summary>
+		private static TableSection? BuildDailyBusinessSummarySection ( DailyConfusionStats daily )
+			{
+			if (daily.Rows == null || daily.Rows.Count == 0)
+				return null;
+
+			var section = new TableSection
+				{
+				Title = "Daily label summary (business)"
+				};
+
+			section.Columns.AddRange (new[]
+			{
+				"Class",
+				"Summary"
+			});
+
+			var down = FindDailyRowByLabel (daily.Rows, 0);
+			var flat = FindDailyRowByLabel (daily.Rows, 1);
+			var up = FindDailyRowByLabel (daily.Rows, 2);
+
+			if (down != null && down.Total > 0)
+				{
+				section.Rows.Add (new List<string>
+					{
+					"DOWN",
+					BuildDailyClassSummary (
+						total: down.Total,
+						correct: down.Correct,
+						missToDown: 0,
+						missToFlat: down.Pred1,
+						missToUp: down.Pred2)
+					});
+				}
+
+			if (flat != null && flat.Total > 0)
+				{
+				section.Rows.Add (new List<string>
+					{
+					"FLAT",
+					BuildDailyClassSummary (
+						total: flat.Total,
+						correct: flat.Correct,
+						missToDown: flat.Pred0,
+						missToFlat: 0,
+						missToUp: flat.Pred2)
+					});
+				}
+
+			if (up != null && up.Total > 0)
+				{
+				section.Rows.Add (new List<string>
+					{
+					"UP",
+					BuildDailyClassSummary (
+						total: up.Total,
+						correct: up.Correct,
+						missToDown: up.Pred0,
+						missToFlat: up.Pred1,
+						missToUp: 0)
+					});
+				}
+
+			// Общий summary по всем классам.
+			if (daily.OverallTotal > 0)
+				{
+				var overallSummary =
+					$"Всего {daily.OverallTotal} дней. " +
+					$"Попаданий: {daily.OverallCorrect} ({daily.OverallAccuracyPct:0.0}%).";
+
+				section.Rows.Add (new List<string>
+					{
+					"Overall",
+					overallSummary
+					});
+				}
+
+			return section;
+			}
+
+		/// <summary>
+		/// Строит технарскую confusion-матрицу TRUE x PRED с процентами и количеством.
+		/// </summary>
+		private static TableSection? BuildDailyTechnicalMatrixSection ( DailyConfusionStats daily )
+			{
+			if (daily.Rows == null || daily.Rows.Count == 0)
+				return null;
+
+			var section = new TableSection
+				{
+				Title = "Daily label confusion (3-class, technical)"
+				};
+
+			section.Columns.AddRange (new[]
+			{
+				"TRUE",
+				"Pred DOWN",
+				"Pred FLAT",
+				"Pred UP",
+				"Hit %"
+			});
+
+			var down = FindDailyRowByLabel (daily.Rows, 0);
+			var flat = FindDailyRowByLabel (daily.Rows, 1);
+			var up = FindDailyRowByLabel (daily.Rows, 2);
+
+			if (down != null && down.Total > 0)
+				{
+				section.Rows.Add (BuildMatrixRow ("DOWN", down));
+				}
+
+			if (flat != null && flat.Total > 0)
+				{
+				section.Rows.Add (BuildMatrixRow ("FLAT", flat));
+				}
+
+			if (up != null && up.Total > 0)
+				{
+				section.Rows.Add (BuildMatrixRow ("UP", up));
+				}
+
+			// Общий accuracy по всем классам.
+			if (daily.OverallTotal > 0)
+				{
+				var overall = $"{daily.OverallAccuracyPct:0.0}% ({daily.OverallCorrect} / {daily.OverallTotal})";
+
+				section.Rows.Add (new List<string>
+					{
+					"Overall accuracy",
+					string.Empty,
+					string.Empty,
+					string.Empty,
+					overall
+					});
+				}
+
+			return section;
+			}
+
+		/// <summary>
+		/// Находит строку дневной статистики по true label (0/1/2).
+		/// </summary>
+		private static DailyClassStatsRow? FindDailyRowByLabel ( IReadOnlyList<DailyClassStatsRow> rows, int trueLabel )
+			{
+			for (int i = 0; i < rows.Count; i++)
+				{
+				var row = rows[i];
+				if (row.TrueLabel == trueLabel)
+					return row;
+				}
+
+			return null;
+			}
+
+		/// <summary>
+		/// Формирует человеческое summary по одному классу:
+		/// всего дней, попадания, промахи и куда уезжают промахи.
+		/// </summary>
+		private static string BuildDailyClassSummary (
+			int total,
+			int correct,
+			int missToDown,
+			int missToFlat,
+			int missToUp )
+			{
+			if (total <= 0)
+				return "Недостаточно данных по этому классу.";
+
+			int misses = total - correct;
+
+			double accPct = (double) correct / total * 100.0;
+			double missPct = 100.0 - accPct;
+
+			double missDownPct = (double) missToDown / total * 100.0;
+			double missFlatPct = (double) missToFlat / total * 100.0;
+			double missUpPct = (double) missToUp / total * 100.0;
+
+			return
+				$"Всего {total} дней. " +
+				$"Попаданий: {correct} ({accPct:0.0}%). " +
+				$"Промахов: {misses} ({missPct:0.0}%). " +
+				$"Ошибки: " +
+				$"DOWN {missDownPct:0.0}% ({missToDown}), " +
+				$"FLAT {missFlatPct:0.0}% ({missToFlat}), " +
+				$"UP {missUpPct:0.0}% ({missToUp}).";
+			}
+
+		/// <summary>
+		/// Формирует строку матрицы TRUE x PRED для одного класса.
+		/// </summary>
+		private static List<string> BuildMatrixRow ( string trueName, DailyClassStatsRow row )
+			{
+			int total = row.Total;
+
+			string Format ( int count )
+				{
+				if (total <= 0)
+					return "—";
+
+				double pct = (double) count / total * 100.0;
+				return $"{pct:0.0}% ({count})";
+				}
+
+			return new List<string>
+				{
+				trueName,
+				Format (row.Pred0),
+				Format (row.Pred1),
+				Format (row.Pred2),
+				$"{row.AccuracyPct:0.0}%"
+				};
 			}
 		}
 	}

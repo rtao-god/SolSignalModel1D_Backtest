@@ -17,13 +17,29 @@ namespace SolSignalModel1D_Backtest
 			List<Candle6h> paxgAll6h,
 			List<Candle1m> sol1m )
 			{
-			var histFrom = fromUtc.AddDays (-90);
+			// Вместо "fromUtc - 90 дней" берём максимально ранний момент,
+			// с которого у ВСЕХ трёх инструментов (SOL/BTC/PAXG) есть 6h-свечи.
+			// Это даёт максимум истории, но фактический старт всё равно ограничен
+			// требованиями к индикаторам (ret30, RSI, 200SMA и т.п.) внутри RowBuilder.
+			var earliestSolUtc = solAll6h.Min (c => c.OpenTimeUtc);
+			var earliestBtcUtc = btcAll6h.Min (c => c.OpenTimeUtc);
+			var earliestPaxgUtc = paxgAll6h.Min (c => c.OpenTimeUtc);
 
-			var solWinTrainRaw = solAll6h.Where (c => c.OpenTimeUtc >= histFrom && c.OpenTimeUtc <= toUtc).ToList ();
-			var btcWinTrainRaw = btcAll6h.Where (c => c.OpenTimeUtc >= histFrom && c.OpenTimeUtc <= toUtc).ToList ();
-			var paxgWinTrainRaw = paxgAll6h.Where (c => c.OpenTimeUtc >= histFrom && c.OpenTimeUtc <= toUtc).ToList ();
+			// Старт истории — общая точка, где гарантированно есть данные по всем трём.
+			var histFrom = new[] { earliestSolUtc, earliestBtcUtc, earliestPaxgUtc }.Max ();
 
-			Console.WriteLine ($"[win6h:raw] sol={solWinTrainRaw.Count}, btc={btcWinTrainRaw.Count}, paxg={paxgWinTrainRaw.Count}");
+			var solWinTrainRaw = solAll6h
+				.Where (c => c.OpenTimeUtc >= histFrom && c.OpenTimeUtc <= toUtc)
+				.ToList ();
+			var btcWinTrainRaw = btcAll6h
+				.Where (c => c.OpenTimeUtc >= histFrom && c.OpenTimeUtc <= toUtc)
+				.ToList ();
+			var paxgWinTrainRaw = paxgAll6h
+				.Where (c => c.OpenTimeUtc >= histFrom && c.OpenTimeUtc <= toUtc)
+				.ToList ();
+
+			Console.WriteLine (
+				$"[win6h:raw] sol={solWinTrainRaw.Count}, btc={btcWinTrainRaw.Count}, paxg={paxgWinTrainRaw.Count}");
 
 			// Тройное выравнивание: SOL ∩ BTC ∩ PAXG
 			var common = solWinTrainRaw.Select (c => c.OpenTimeUtc)
@@ -35,9 +51,11 @@ namespace SolSignalModel1D_Backtest
 			var btcWinTrain = btcWinTrainRaw.Where (c => common.Contains (c.OpenTimeUtc)).ToList ();
 			var paxgWinTrain = paxgWinTrainRaw.Where (c => common.Contains (c.OpenTimeUtc)).ToList ();
 
-			Console.WriteLine ($"[win6h:aligned] sol={solWinTrain.Count}, btc={btcWinTrain.Count}, paxg={paxgWinTrain.Count}, common={common.Count}");
+			Console.WriteLine (
+				$"[win6h:aligned] sol={solWinTrain.Count}, btc={btcWinTrain.Count}, paxg={paxgWinTrain.Count}, common={common.Count}");
 
-			// Индикаторы
+			// Индикаторы по дневному диапазону: покрытие с histFrom до toUtc.
+			// Если FNG/DXY есть с 2021 года, то и строки строятся с 2021.
 			var fngDict = indicatorsUpdater.LoadFngDict (histFrom.Date, toUtc.Date);
 			var dxyDict = indicatorsUpdater.LoadDxyDict (histFrom.Date, toUtc.Date);
 			indicatorsUpdater.EnsureCoverageOrFail (histFrom.Date, toUtc.Date);
@@ -59,12 +77,15 @@ namespace SolSignalModel1D_Backtest
 			Console.WriteLine ($"[rows] total built = {rows.Count}");
 			DumpNyHourHistogram (rows);
 
+			// ВАЖНО: больше НЕ режем mornings по fromUtc.
+			// Здесь собираем ВСЮ историю утренних NY-окон,
+			// чтобы стратегия и бэктест могли работать "с 2021".
 			var mornings = rows
-				.Where (r => r.IsMorning && r.Date >= fromUtc && r.Date < toUtc)
+				.Where (r => r.IsMorning)
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			Console.WriteLine ($"[rows] mornings after filter = {mornings.Count}");
+			Console.WriteLine ($"[rows] mornings total (all history) = {mornings.Count}");
 
 			var lastSolTime = solWinTrain.Max (c => c.OpenTimeUtc);
 			Console.WriteLine ($"[rows] last SOL 6h = {lastSolTime:O}");
@@ -90,8 +111,11 @@ namespace SolSignalModel1D_Backtest
 				hist[ny.Hour] = cnt + 1;
 				}
 
-			Console.WriteLine ("[rows] NY hour histogram (all 6h rows, до утреннего фильтра): " +
-				string.Join (", ", hist.OrderBy (kv => kv.Key).Select (kv => $"{kv.Key:D2}:{kv.Value}")));
+			Console.WriteLine (
+				"[rows] NY hour histogram (all 6h rows, до утреннего фильтра): " +
+				string.Join (", ", hist
+					.OrderBy (kv => kv.Key)
+					.Select (kv => $"{kv.Key:D2}:{kv.Value}")));
 			}
 		}
 	}

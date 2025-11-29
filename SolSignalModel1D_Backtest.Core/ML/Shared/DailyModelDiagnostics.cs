@@ -2,11 +2,9 @@
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 
-namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.Daily
+namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
 	/// <summary>
 	/// Диагностика дневных моделей (move / dir-normal / dir-down / micro-flat):

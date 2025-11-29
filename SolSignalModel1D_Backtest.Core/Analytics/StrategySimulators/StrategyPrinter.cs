@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
+﻿namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 	{
 	/// <summary>
 	/// Печать результатов симуляции стратегии в консоль:
@@ -30,8 +28,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				{
 				double stakeDropPct =
 					(1.0 - stats.MinTotalStake / stats.StartTotalStake) * 100.0;
+
 				Console.WriteLine (
-					$"Stake: start -> min        : {stats.StartTotalStake,12:F2} → {stats.MinTotalStake,12:F2} USD (-{stakeDropPct,6:F2} %)");
+					$"Stake: start -> min        : {stats.StartTotalStake,12:F2} \u2192 {stats.MinTotalStake,12:F2} USD (-{stakeDropPct,6:F2} %)");
 				}
 
 			Console.WriteLine ();
@@ -39,7 +38,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 			// --- Общие метрики по дням ---
 			Console.WriteLine ("-- Общие результаты по дням --");
 			Console.WriteLine ($"Trades total               : {stats.TradesCount,6}");
-
 			Console.WriteLine ($"  profitable               : {stats.ProfitTradesCount,6}");
 			Console.WriteLine ($"  lossy                    : {stats.LossTradesCount,6}");
 

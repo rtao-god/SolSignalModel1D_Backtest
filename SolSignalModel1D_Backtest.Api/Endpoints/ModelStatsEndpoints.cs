@@ -4,7 +4,7 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 	{
 	/// <summary>
 	/// Эндпоинты для отдачи отчётов по статистике ML-моделей.
-	/// Работают поверх ReportStorage и kind = "ml_model_stats".
+	/// Работают поверх ReportStorage и kind = "backtest_model_stats".
 	/// </summary>
 	internal static class ModelStatsEndpoints
 		{
@@ -13,14 +13,14 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 			// GET /api/ml/stats/per-model
 			app.MapGet ("/api/ml/stats/per-model", ( ReportStorage storage ) =>
 			{
-				// Берём последний отчёт по kind = "ml_model_stats"
-				var report = storage.LoadLatestByKind ("ml_model_stats");
+				// Берём последний отчёт по kind = "backtest_model_stats"
+				var report = storage.LoadLatestBacktestModelStats ();
 				if (report == null)
 					{
 					return Results.NotFound (new
 						{
-						error = "ml_model_stats_not_found",
-						message = "Нет сохранённого отчёта по статистике моделей."
+						error = "backtest_model_stats_not_found",
+						message = "Нет сохранённого отчёта по статистике моделей бэктеста."
 						});
 					}
 

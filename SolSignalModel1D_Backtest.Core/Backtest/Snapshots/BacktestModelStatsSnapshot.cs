@@ -237,7 +237,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest.Snapshots
 	/// Внутренний билдёр снимка модельных статистик.
 	/// Никакого вывода, только расчёты.
 	/// </summary>
-	internal static class BacktestModelStatsSnapshotBuilder
+	public static class BacktestModelStatsSnapshotBuilder
 		{
 		private sealed class SlThresholdDay
 			{

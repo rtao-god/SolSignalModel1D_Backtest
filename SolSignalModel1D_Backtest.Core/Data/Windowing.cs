@@ -1,8 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Infra;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
@@ -10,97 +8,26 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		{
 		/// <summary>
 		/// Единый таймзон Нью-Йорка для всех расчётов окон (таргеты, PnL, delayed).
-		/// Ищет как IANA ("America/New_York"), так и Windows ("Eastern Standard Time").
-		/// Если не найдено — бросает ошибку, чтобы не молча свалиться в UTC.
+		/// Алиас к TimeZones.NewYork, чтобы был один источник правды.
 		/// </summary>
-		public static readonly TimeZoneInfo NyTz = ResolveNyTimeZone ();
-
-		private static TimeZoneInfo ResolveNyTimeZone ()
-			{
-			foreach (var tz in TimeZoneInfo.GetSystemTimeZones ())
-				{
-				if (tz.Id == "America/New_York" || tz.Id == "Eastern Standard Time")
-					return tz;
-				}
-			throw new InvalidOperationException (
-				"Cannot resolve New York timezone for Windowing.NyTz. " +
-				"Adjust resolver (America/New_York / Eastern Standard Time) for target platform.");
-			}
+		public static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
 		/// <summary>
-		/// Удобная обёртка: baseline-выход при фиксированном NY таймзоне.
-		/// Используется в PnL и delayed-логике, чтобы жить в том же мире, что и таргеты.
+		/// Основной удобный API: вычисляет момент базового выхода для дневной сделки
+		/// в фиксированной NY-таймзоне.
 		/// </summary>
 		public static DateTime ComputeBaselineExitUtc ( DateTime entryUtc )
 			{
-			// Внутри вызываем старую версию, где таймзона передаётся явно.
 			return ComputeBaselineExitUtc (entryUtc, NyTz);
 			}
 
 		/// <summary>
-		/// Фильтрует 6h-свечи, оставляя только окна, которые попадают
-		/// в обучающие NY-окна (утро/день) в рабочие дни.
-		/// </summary>
-		public static List<Candle6h> FilterNyTrainWindows ( List<Candle6h> all, TimeZoneInfo nyTz )
-			{
-			var res = new List<Candle6h> ();
-			foreach (var c in all)
-				{
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (c.OpenTimeUtc, nyTz);
-				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) continue;
-				bool isDst = nyTz.IsDaylightSavingTime (ny);
-				if (isDst)
-					{
-					if (ny.Hour == 8 || ny.Hour == 14) res.Add (c);
-					}
-				else
-					{
-					if (ny.Hour == 7 || ny.Hour == 13) res.Add (c);
-					}
-				}
-			return res.OrderBy (c => c.OpenTimeUtc).ToList ();
-			}
-
-		/// <summary>
-		/// Фильтрует 6h-свечи, оставляя только утренние NY-окна
-		/// в рабочие дни (по текущей логике 7/8 часов в зависимости от DST).
-		/// </summary>
-		public static List<Candle6h> FilterNyMorningOnly ( List<Candle6h> all, TimeZoneInfo nyTz )
-			{
-			var res = new List<Candle6h> ();
-			foreach (var c in all)
-				{
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (c.OpenTimeUtc, nyTz);
-				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) continue;
-				bool isDst = nyTz.IsDaylightSavingTime (ny);
-				if (isDst)
-					{
-					if (ny.Hour == 8) res.Add (c);
-					}
-				else
-					{
-					if (ny.Hour == 7) res.Add (c);
-					}
-				}
-			return res.OrderBy (c => c.OpenTimeUtc).ToList ();
-			}
-
-		/// <summary>
-		/// Проверяет, является ли момент utc утренним NY-окном
-		/// (будний день и 7/8 часов в зависимости от DST).
-		/// </summary>
-		public static bool IsNyMorning ( DateTime utc, TimeZoneInfo nyTz )
-			{
-			var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, nyTz);
-			if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) return false;
-			bool isDst = nyTz.IsDaylightSavingTime (ny);
-			return isDst ? ny.Hour == 8 : ny.Hour == 7;
-			}
-
-		/// <summary>
-		/// Вычисляет момент базового выхода для дневной сделки:
-		/// следующая рабочая NY-утренняя граница 08:00 локального времени,
-		/// с небольшим смещением на 2 минуты назад.
+		/// Низкоуровневая версия с явной таймзоной.
+		/// Используется, если нужно посчитать exit относительно другой tz
+		/// или в тестах/экспериментах.
+		/// Вычисляет:
+		/// - следующую рабочую NY-утреннюю границу 08:00 локального времени;
+		/// - с небольшим смещением на 2 минуты назад.
 		/// </summary>
 		public static DateTime ComputeBaselineExitUtc ( DateTime entryUtc, TimeZoneInfo nyTz )
 			{
@@ -141,6 +68,76 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			}
 
 		/// <summary>
+		/// Фильтрует 6h-свечи, оставляя только окна, которые попадают
+		/// в обучающие NY-окна (утро/день) в рабочие дни.
+		/// </summary>
+		public static List<Candle6h> FilterNyTrainWindows ( List<Candle6h> all, TimeZoneInfo nyTz )
+			{
+			var res = new List<Candle6h> ();
+			foreach (var c in all)
+				{
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (c.OpenTimeUtc, nyTz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) continue;
+
+				bool isDst = nyTz.IsDaylightSavingTime (ny);
+				if (isDst)
+					{
+					if (ny.Hour == 8 || ny.Hour == 14)
+						res.Add (c);
+					}
+				else
+					{
+					if (ny.Hour == 7 || ny.Hour == 13)
+						res.Add (c);
+					}
+				}
+
+			return res.OrderBy (c => c.OpenTimeUtc).ToList ();
+			}
+
+		/// <summary>
+		/// Фильтрует 6h-свечи, оставляя только утренние NY-окна
+		/// в рабочие дни (по текущей логике 7/8 часов в зависимости от DST).
+		/// </summary>
+		public static List<Candle6h> FilterNyMorningOnly ( List<Candle6h> all, TimeZoneInfo nyTz )
+			{
+			var res = new List<Candle6h> ();
+			foreach (var c in all)
+				{
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (c.OpenTimeUtc, nyTz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) continue;
+
+				bool isDst = nyTz.IsDaylightSavingTime (ny);
+				if (isDst)
+					{
+					if (ny.Hour == 8)
+						res.Add (c);
+					}
+				else
+					{
+					if (ny.Hour == 7)
+						res.Add (c);
+					}
+				}
+
+			return res.OrderBy (c => c.OpenTimeUtc).ToList ();
+			}
+
+		/// <summary>
+		/// Проверяет, является ли момент utc утренним NY-окном
+		/// (будний день и 7/8 часов в зависимости от DST).
+		/// </summary>
+		public static bool IsNyMorning ( DateTime utc, TimeZoneInfo nyTz )
+			{
+			var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, nyTz);
+			if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+				return false;
+
+			bool isDst = nyTz.IsDaylightSavingTime (ny);
+			return isDst ? ny.Hour == 8 : ny.Hour == 7;
+			}
+
+		/// <summary>
 		/// Строит spaced-test: берёт несколько блоков из конца ряда с пропусками между блоками.
 		/// </summary>
 		public static List<DataRow> BuildSpacedTest ( List<DataRow> rows, int take, int skip, int blocks )
@@ -148,25 +145,36 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			var res = new List<DataRow> ();
 			int n = rows.Count;
 			int end = n;
+
 			for (int b = 0; b < blocks; b++)
 				{
 				int start = end - take;
-				if (start < 0) start = 0;
-				var part = rows.Skip (start).Take (end - start).ToList ();
+				if (start < 0)
+					start = 0;
+
+				var part = rows
+					.Skip (start)
+					.Take (end - start)
+					.ToList ();
+
 				res.AddRange (part);
+
 				end = start - skip;
-				if (end <= 0) break;
+				if (end <= 0)
+					break;
 				}
+
 			return res.OrderBy (r => r.Date).ToList ();
 			}
 
 		/// <summary>
-		/// Группирует строки по блокам фиксированного размера.
+		/// Группирует строки по блокам фиксированного размера (по дате).
 		/// </summary>
 		public static IEnumerable<List<DataRow>> GroupByBlocks ( List<DataRow> rows, int blockSize )
 			{
 			var sorted = rows.OrderBy (r => r.Date).ToList ();
 			var cur = new List<DataRow> ();
+
 			foreach (var r in sorted)
 				{
 				cur.Add (r);
@@ -176,7 +184,9 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					cur = new List<DataRow> ();
 					}
 				}
-			if (cur.Count > 0) yield return cur;
+
+			if (cur.Count > 0)
+				yield return cur;
 			}
 		}
 	}
