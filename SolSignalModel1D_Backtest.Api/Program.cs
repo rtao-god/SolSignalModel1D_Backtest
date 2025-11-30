@@ -8,58 +8,75 @@ using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 
-var builder = WebApplication.CreateBuilder (args);
-
-builder.Services.AddRouting ();
-
-// CORS: в dev пускаем всех
-builder.Services.AddCors (options =>
-{
-	options.AddDefaultPolicy (policy =>
+namespace SolSignalModel1D_Backtest.Api
 	{
-		policy
-			.AllowAnyOrigin ()
-			.AllowAnyHeader ()
-			.AllowAnyMethod ();
-	});
-});
+	/// <summary>
+	/// Здесь настраиваются DI-контейнер, middleware и endpoint-группы.
+	/// </summary>
+	public class Program
+		{
+		public static void Main ( string[] args )
+			{
+			var builder = WebApplication.CreateBuilder (args);
 
-builder.Services.AddEndpointsApiExplorer ();
-builder.Services.AddSwaggerGen ();
+			builder.Services.AddRouting ();
 
-// файловое хранилище отчётов
-builder.Services.AddSingleton<ReportStorage> ();
+			// CORS: в dev-режиме разрешаем любые источники/методы/заголовки
+			builder.Services.AddCors (options =>
+			{
+				options.AddDefaultPolicy (policy =>
+				{
+					policy
+						.AllowAnyOrigin ()
+						.AllowAnyHeader ()
+						.AllowAnyMethod ();
+				});
+			});
 
-// лёгкое хранилище baseline-снапшота бэктеста
-builder.Services.AddSingleton<BacktestBaselineStorage> ();
+			builder.Services.AddEndpointsApiExplorer ();
+			builder.Services.AddSwaggerGen ();
 
-// превью-бэктест (PnL-движок без консольного вывода)
-builder.Services.AddSingleton<BacktestPreviewService> ();
+			// Файловое хранилище отчётов
+			builder.Services.AddSingleton<ReportStorage> ();
 
-// провайдер данных для бэктеста/превью
-builder.Services.AddSingleton<IBacktestDataProvider, BacktestDataProvider> ();
+			// Хранилище baseline-снапшота бэктеста
+			builder.Services.AddSingleton<BacktestBaselineStorage> ();
 
-// репозиторий профилей бэктеста (JSON)
-builder.Services.AddSingleton<IBacktestProfileRepository, JsonBacktestProfileRepository> ();
+			// Превью-бэктест (PnL-движок без консольного вывода)
+			builder.Services.AddSingleton<BacktestPreviewService> ();
 
-var app = builder.Build ();
+			// Провайдер данных для бэктеста/превью
+			builder.Services.AddSingleton<IBacktestDataProvider, BacktestDataProvider> ();
 
-if (app.Environment.IsDevelopment ())
-	{
-	app.UseSwagger ();
-	app.UseSwaggerUI (c =>
-	{
-		c.SwaggerEndpoint ("/swagger/v1/swagger.json", "SolSignalModel1D API v1");
-	});
+			// Репозиторий профилей бэктеста (JSON)
+			builder.Services.AddSingleton<IBacktestProfileRepository, JsonBacktestProfileRepository> ();
+
+			// Построение приложения
+			var app = builder.Build ();
+
+			// Swagger только в Dev-окружении
+			if (app.Environment.IsDevelopment ())
+				{
+				app.UseSwagger ();
+				app.UseSwaggerUI (c =>
+				{
+					c.SwaggerEndpoint ("/swagger/v1/swagger.json", "SolSignalModel1D API v1");
+				});
+				}
+
+			// Подключаем middleware маршрутизации и CORS
+			app.UseRouting ();
+			app.UseCors ();
+
+			// Регистрация endpoint-групп
+			app.MapCurrentPredictionEndpoints ();
+			app.MapBacktestEndpoints ();
+			app.MapPfiEndpoints ();
+			app.MapModelStatsEndpoints ();
+			app.MapBacktestPolicyRatiosEndpoints ();
+
+			// Запуск HTTP-хоста (блокирующий вызов)
+			app.Run ();
+			}
+		}
 	}
-
-app.UseRouting ();
-app.UseCors ();
-
-// Группы эндпоинтов
-app.MapCurrentPredictionEndpoints ();
-app.MapBacktestEndpoints ();
-app.MapPfiEndpoints ();
-app.MapModelStatsEndpoints ();
-
-app.Run ();

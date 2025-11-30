@@ -1,4 +1,7 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using SolSignalModel1D_Backtest.Reports.Model;
 
@@ -19,9 +22,6 @@ namespace SolSignalModel1D_Backtest.Reports
 
 		public ReportStorage ()
 			{
-			// Общий корень для ВСЕХ отчётов:
-			//   <repo>/cache/reports
-			// repo вычисляется внутри PathConfig.CacheRoot
 			_rootDir = Path.Combine (
 				Core.Infra.PathConfig.CacheRoot,
 				"reports");
@@ -33,14 +33,14 @@ namespace SolSignalModel1D_Backtest.Reports
 				PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 				WriteIndented = true,
 				Converters =
-		{
-			new JsonStringEnumConverter()
-		}
+				{
+					new JsonStringEnumConverter()
+				}
 				};
 			}
 
 		/// <summary>
-		/// Сохраняет ReportDocument как JSON.
+		/// Legacy-сохранение ReportDocument как JSON.
 		/// Путь: {root}/{kind}/{id}.json
 		/// </summary>
 		public void Save ( ReportDocument document )
@@ -58,6 +58,29 @@ namespace SolSignalModel1D_Backtest.Reports
 			var fullPath = Path.Combine (kindDir, fileName);
 
 			var json = JsonSerializer.Serialize (document, _jsonOptions);
+			File.WriteAllText (fullPath, json);
+			}
+
+		/// <summary>
+		/// Сохранение типизированного DTO без обёртки ReportDocument.
+		/// kind/id управляются вызывающим кодом.
+		/// </summary>
+		public void SaveTyped<T> ( string kind, string id, T payload )
+			where T : class
+			{
+			if (string.IsNullOrWhiteSpace (kind))
+				throw new ArgumentException ("Kind must be non-empty.", nameof (kind));
+			if (string.IsNullOrWhiteSpace (id))
+				throw new ArgumentException ("Id must be non-empty.", nameof (id));
+			if (payload == null) throw new ArgumentNullException (nameof (payload));
+
+			var kindDir = GetKindDir (kind);
+			Directory.CreateDirectory (kindDir);
+
+			var fileName = $"{id}.json";
+			var fullPath = Path.Combine (kindDir, fileName);
+
+			var json = JsonSerializer.Serialize (payload, _jsonOptions);
 			File.WriteAllText (fullPath, json);
 			}
 
@@ -88,6 +111,31 @@ namespace SolSignalModel1D_Backtest.Reports
 			return LoadLatest<ReportDocument> (kind);
 			}
 
+		/// <summary>
+		/// Загрузка типизированного DTO по kind/id.
+		/// Например: LoadByKindAndId&lt;PolicyRatiosReportDto&gt;("policy_ratios", "baseline")
+		/// </summary>
+		public T? LoadByKindAndId<T> ( string kind, string id )
+			where T : class
+			{
+			if (string.IsNullOrWhiteSpace (kind))
+				throw new ArgumentException ("Kind must be non-empty.", nameof (kind));
+			if (string.IsNullOrWhiteSpace (id))
+				throw new ArgumentException ("Id must be non-empty.", nameof (id));
+
+			var kindDir = GetKindDir (kind);
+			if (!Directory.Exists (kindDir))
+				return null;
+
+			var fileName = $"{id}.json";
+			var fullPath = Path.Combine (kindDir, fileName);
+			if (!File.Exists (fullPath))
+				return null;
+
+			var json = File.ReadAllText (fullPath);
+			return JsonSerializer.Deserialize<T> (json, _jsonOptions);
+			}
+
 		public BacktestBaselineSnapshot? LoadLatestBacktestBaseline ()
 			{
 			const string kind = "backtest_baseline";
@@ -109,10 +157,6 @@ namespace SolSignalModel1D_Backtest.Reports
 			return JsonSerializer.Deserialize<BacktestBaselineSnapshot> (json, _jsonOptions);
 			}
 
-		/// <summary>
-		/// Загружает последний по времени отчёт с модельными статистиками бэктеста.
-		/// Можно использовать для /api/backtest/model-stats
-		/// </summary>
 		public ReportDocument? LoadLatestBacktestModelStats ()
 			{
 			return LoadLatestByKind ("backtest_model_stats");
@@ -120,8 +164,6 @@ namespace SolSignalModel1D_Backtest.Reports
 
 		/// <summary>
 		/// Универсальный загрузчик "последнего" JSON по kind для произвольного типа.
-		/// Например:
-		///   LoadLatest&lt;BacktestBaselineSnapshot&gt;("backtest_baseline")
 		/// </summary>
 		public T? LoadLatest<T> ( string kind )
 			where T : class
@@ -137,7 +179,6 @@ namespace SolSignalModel1D_Backtest.Reports
 			if (files.Length == 0)
 				return null;
 
-			// Берём последний по дате изменения файл.
 			var latestFile = files
 				.Select (f => new FileInfo (f))
 				.OrderByDescending (fi => fi.LastWriteTimeUtc)

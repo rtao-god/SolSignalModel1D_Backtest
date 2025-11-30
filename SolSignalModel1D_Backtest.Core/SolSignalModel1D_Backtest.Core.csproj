@@ -13,8 +13,4 @@
 		<PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
 	</ItemGroup>
 
-	<ItemGroup>
-	  <Folder Include="ML\Diagnostics\Daily\" />
-	</ItemGroup>
-
 </Project>

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 

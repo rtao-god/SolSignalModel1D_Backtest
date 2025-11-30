@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
@@ -18,7 +19,7 @@ namespace SolSignalModel1D_Backtest
 			try
 				{
 				var profileRepo =
-					new Core.Backtest.Services.JsonBacktestProfileRepository ();
+					new JsonBacktestProfileRepository ();
 
 				// Достаточно один раз прочитать все профили — baseline создастся автоматически.
 				await profileRepo.GetAllAsync ();

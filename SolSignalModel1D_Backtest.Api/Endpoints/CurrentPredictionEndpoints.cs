@@ -1,7 +1,4 @@
-﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
-using SolSignalModel1D_Backtest.Reports;
+﻿using SolSignalModel1D_Backtest.Reports;
 
 namespace SolSignalModel1D_Backtest.Api.Endpoints
 	{

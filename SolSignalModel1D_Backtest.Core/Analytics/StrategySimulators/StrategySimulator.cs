@@ -93,7 +93,23 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 					continue;
 					}
 
-				bool isLongBase = dirSign > 0;   // Pred up/flat → базовый лонг; Pred down → базовый шорт.
+				// ===== Anti-direction overlay по ответу SL-модели =====
+				// SlHighDecision == true трактуем как "рискованный день".
+				// В таком дне лонги запрещаем: если базовый сигнал лонг (dirSign > 0),
+				// переворачиваем направление в шорт и помечаем AntiDirectionApplied = true.
+				// Если базовый сигнал шорт, ничего не меняем и флаг не ставим.
+				bool antiApplied = false;
+
+				if (rec.SlHighDecision && dirSign > 0)
+					{
+					dirSign = -1;
+					antiApplied = true;
+					}
+
+				rec.AntiDirectionApplied = antiApplied;
+
+				// Итоговое направление базовой ноги после возможного overlay.
+				bool isLongBase = dirSign > 0;   // +1 = лонг, -1 = шорт
 
 				// Время входа — дата дневной строки (NY-утро вью).
 				DateTime entryTimeUtc = row.Date;
@@ -102,8 +118,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				var entryCandle = candles1m.FirstOrDefault (c => c.OpenTimeUtc >= entryTimeUtc);
 				if (entryCandle == null)
 					{
-					// Нет минутных данных — этот день пропускаем.
-					continue;
+					// Нет минутных данных
 					}
 
 				double entryPrice = entryCandle.Open;

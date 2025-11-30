@@ -14,7 +14,6 @@ namespace SolSignalModel1D_Backtest
 		/// <summary>
 		/// Обновляет дневные свечи для SOL/USDT, BTC/USDT и PAXG/USDT.
 		/// При необходимости сюда можно добавить другие активы
-		/// без изменения Main.
 		/// </summary>
 		private static async Task UpdateCandlesAsync ( HttpClient http )
 			{

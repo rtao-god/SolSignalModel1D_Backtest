@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+using System.Linq;
 using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Backtest.Snapshots;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
@@ -15,25 +14,16 @@ using SolSignalModel1D_Backtest.Reports.Reporting;
 using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
-using SolSignalModel1D_Backtest.Reports; // для ReportStorage и BacktestBaselineStorage
+using SolSignalModel1D_Backtest.Reports;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
+using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 	{
-	/// <summary>
-	/// Центральное место, где собираются и сохраняются все отчёты бэктеста:
-	/// - PFI по моделям + PFI-статистика;
-	/// - backtest_summary / backtest_baseline;
-	/// - backtest_model_stats (не PFI, confusion/SL);
-	/// - current_prediction.
-	/// </summary>
 	public static class BacktestReportsOrchestrator
 		{
-		/// <summary>
-		/// Сохраняет:
-		/// - PFI per model;
-		/// - PFI-based статистику моделей (ml_model_stats).
-		/// Математика полностью совпадает с тем, что было в Program.Main.
-		/// </summary>
 		public static void SavePfiReports ()
 			{
 			try
@@ -42,7 +32,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 
 				if (pfiSnapshots != null && pfiSnapshots.Count > 0)
 					{
-					// PFI по моделям
 					var pfiReport = FeatureImportanceReportBuilder.BuildPerModelReport (
 						pfiSnapshots,
 						TableDetailLevel.Technical,
@@ -54,7 +43,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 
 					Console.WriteLine ("[pfi-report] pfi_per_model report saved.");
 
-					// PFI-статистика моделей (старый репорт, Kind = ml_model_stats)
 					var modelStatsReport = ModelStatsReportBuilder.BuildFromSnapshots (
 						pfiSnapshots,
 						explicitTitle: "Статистика моделей (PFI / AUC)"
@@ -81,7 +69,8 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// Сохраняет:
 		/// - backtest_summary (универсальный отчёт по PnL);
 		/// - backtest_baseline (упрощённый снапшот по политикам);
-		/// - backtest_model_stats (не PFI: confusion + SL-модель).
+		/// - backtest_model_stats (не PFI: confusion + SL-модель);
+		/// - policy_ratios (Sharpe/Sortino/Calmar по политикам baseline).
 		/// </summary>
 		public static void SaveBacktestReports (
 			IReadOnlyList<DataRow> mornings,
@@ -109,8 +98,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 					config: backtestConfig
 				);
 
-				// Консольный принтер сводки — как и раньше.
-				Core.Analytics.Backtest.BacktestSummaryPrinter.Print (summary);
+				BacktestSummaryPrinter.Print (summary);
 
 				var backtestReport = BacktestSummaryReportBuilder.Build (summary);
 
@@ -131,9 +119,11 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 				}
 
 			// --- backtest_baseline ---
+			List<BacktestPolicyResult>? baselineResults = null;
+
 			try
 				{
-				var baselineResults = RollingLoop.SimulateAllPolicies (
+				baselineResults = RollingLoop.SimulateAllPolicies (
 					policies: policies,
 					records: records,
 					candles1m: sol1m,
@@ -166,7 +156,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 				Console.WriteLine ($"[backtest-baseline] error while building/saving snapshot: {ex.Message}");
 				}
 
-			// --- backtest_model_stats (не PFI, confusion + SL-модель) ---
+			// --- backtest_model_stats ---
 			try
 				{
 				if (records.Count == 0)
@@ -175,9 +165,42 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 					}
 				else
 					{
-					// Используем готовый билдёр, полностью копирующий консольную логику.
+					// 1) Упорядочиваем все PredictionRecord по дате для логов и срезов.
+					var orderedRecords = records
+						.OrderBy (r => r.DateUtc)
+						.ToList ();
+
+					var minDateUtc = orderedRecords.First ().DateUtc;
+					var maxDateUtc = orderedRecords.Last ().DateUtc;
+
+					Console.WriteLine (
+						$"[backtest-model-stats] full period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
+						$"totalRecords = {orderedRecords.Count}");
+
+					// 2) Делаем рабочее окно: последние 240 календарных дней от максимальной даты.
+					const int RecentDays = 240;
+					var fromRecentUtc = maxDateUtc.AddDays (-RecentDays);
+
+					var recentRecords = orderedRecords
+						.Where (r => r.DateUtc >= fromRecentUtc)
+						.ToList ();
+
+					Console.WriteLine (
+						$"[backtest-model-stats] using recent window = last {RecentDays} days " +
+						$"(from {fromRecentUtc:yyyy-MM-dd}), recentRecords = {recentRecords.Count}");
+
+					// Если по каким-то причинам в последних 240 днях нет записей,
+					// честно логируем и возвращаемся к полной истории.
+					if (recentRecords.Count == 0)
+						{
+						Console.WriteLine (
+							"[backtest-model-stats] no records in recent 240-day window, " +
+							"falling back to full history for model stats.");
+						recentRecords = orderedRecords;
+						}
+
 					var statsSnapshot = BacktestModelStatsSnapshotBuilder.Compute (
-						records: records,
+						records: recentRecords,
 						sol1m: sol1m,
 						dailyTpPct: backtestConfig.DailyTpPct,
 						dailySlPct: backtestConfig.DailyStopPct,
@@ -196,11 +219,51 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 				{
 				Console.WriteLine ($"[backtest-model-stats] error while building/saving report: {ex.Message}");
 				}
+
+			// --- backtest_policy_ratios (baseline) ---
+			try
+				{
+				if (baselineResults == null || baselineResults.Count == 0)
+					{
+					Console.WriteLine ("[backtest-policy-ratios] no baseline results, report not built.");
+					}
+				else
+					{
+					// baseline → считаем, что backtestId = "baseline"
+					const string backtestId = "baseline";
+
+					var ratiosSnapshot = PolicyRatiosSnapshotBuilder.Build (
+						baselineResults,
+						backtestId: backtestId
+					);
+
+					DateTime? fromDateUtc = null;
+					DateTime? toDateUtc = null;
+
+					if (records.Count > 0)
+						{
+						fromDateUtc = records.Min (r => r.DateUtc);
+						toDateUtc = records.Max (r => r.DateUtc);
+						}
+
+					var ratiosReport = PolicyRatiosReportBuilder.Build (
+						ratiosSnapshot,
+						fromDateUtc,
+						toDateUtc
+					);
+
+					var storage = new ReportStorage ();
+					storage.SaveTyped ("policy_ratios", backtestId, ratiosReport);
+
+					Console.WriteLine ("[backtest-policy-ratios] policy_ratios report saved.");
+					}
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[backtest-policy-ratios] error while building/saving report: {ex.Message}");
+				}
 			}
 
-		/// <summary>
-		/// Сохраняет snapshot + отчёт по текущему прогнозу (current_prediction).
-		/// </summary>
 		public static void SaveCurrentPredictionReport (
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<ILeveragePolicy> leveragePolicies,
@@ -223,8 +286,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 					return;
 					}
 
-				// Явно указываем нужный принтер, чтобы не было неоднозначности.
-				SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction.CurrentPredictionPrinter
+				Core.Analytics.CurrentPrediction.CurrentPredictionPrinter
 					.Print (currentSnapshot);
 
 				var report = CurrentPredictionReportBuilder.Build (currentSnapshot);

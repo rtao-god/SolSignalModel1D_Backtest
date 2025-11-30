@@ -104,8 +104,6 @@ namespace SolSignalModel1D_Backtest
 			var hist = new Dictionary<int, int> ();
 			foreach (var r in rows)
 				{
-				// Для расчёта часов по Нью-Йорку используется единая таймзона NyTz.
-				// Это избавляет от локальных дубликатов TimeZones.NewYork и снижает риск рассинхронизации.
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (r.Date, NyTz);
 				if (!hist.TryGetValue (ny.Hour, out var cnt)) cnt = 0;
 				hist[ny.Hour] = cnt + 1;

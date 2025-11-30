@@ -1,7 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest

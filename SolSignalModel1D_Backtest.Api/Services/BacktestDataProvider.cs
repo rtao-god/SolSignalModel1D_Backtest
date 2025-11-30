@@ -12,7 +12,7 @@ namespace SolSignalModel1D_Backtest.Api.Services
 		{
 		public Task<BacktestDataSnapshot> LoadAsync ( CancellationToken cancellationToken = default )
 			{
-			return Program.BuildBacktestDataAsync ();
+			return SolSignalModel1D_Backtest.Program.BuildBacktestDataAsync ();
 			}
 		}
 	}
