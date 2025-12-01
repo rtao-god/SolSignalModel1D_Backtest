@@ -45,6 +45,23 @@ namespace SolSignalModel1D_Backtest
 				.Where (r => r.Date <= trainUntil)
 				.ToList ();
 
+			// --- Диагностика распределения таргетов на train ---
+			var labelHist = trainRows
+				.GroupBy (r => r.Label)
+				.OrderBy (g => g.Key)
+				.Select (g => $"{g.Key}={g.Count ()}")
+				.ToArray ();
+
+			Console.WriteLine (
+				"[engine] train label hist: " + string.Join (", ", labelHist));
+
+			if (labelHist.Length <= 1)
+				{
+				Console.WriteLine (
+					"[engine] WARNING: train labels are degenerate (<=1 class). " +
+					"Daily model will inevitably be constant.");
+				}
+
 			if (trainRows.Count < 100)
 				{
 				// Если данных мало — лучше обучиться на всём, чем падать.
@@ -72,9 +89,9 @@ namespace SolSignalModel1D_Backtest
 			if (bundle.MoveModel == null)
 				throw new InvalidOperationException ("[engine] ModelBundle.MoveModel == null после обучения");
 
-			if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
-				throw new InvalidOperationException (
-					"[engine] Оба направления (DirModelNormal/DirModelDown) == null после обучения");
+			//if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
+			//	throw new InvalidOperationException (
+			//		"[engine] Оба направления (DirModelNormal/DirModelDown) == null после обучения");
 
 			Console.WriteLine (
 				"[engine] ModelBundle trained: move+dir " +

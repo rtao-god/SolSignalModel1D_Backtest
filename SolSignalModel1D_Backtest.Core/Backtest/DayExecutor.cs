@@ -41,9 +41,11 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 
 			var fwd = BacktestHelpers.GetForwardInfo (dayRow.Date, sol6hDict);
 			double entry = fwd.entry;
-
-			bool goLong = predCls == 2 || (predCls == 1 && micro.ConsiderUp);
-			bool goShort = predCls == 0 || (predCls == 1 && micro.ConsiderDown);
+			// Вариант БЕЗ влияния микро-слоя на направление:
+			// - торгуем только по основному классу (0 = down, 2 = up);
+			// - класс 1 (flat) вообще не даёт сделки. потом добавить || (predCls == 1 && micro.ConsiderUp);   и || (predCls == 1 && micro.ConsiderDown);
+			bool goLong = predCls == 2;
+			bool goShort = predCls == 0;
 			bool hasDir = goLong || goShort;
 
 			var rec = new PredictionRecord
@@ -100,7 +102,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				strong
 			);
 
-			// SL-фичи по 1h (каузально, как и раньше)
+			// SL-фичи по 1h
 			if (slState.Engine != null && sol1h.Count > 0)
 				{
 				var slFeats = SlFeatureBuilder.Build (

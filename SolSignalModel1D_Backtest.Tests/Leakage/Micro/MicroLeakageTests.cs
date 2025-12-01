@@ -41,14 +41,25 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 		[Fact]
 		public void BuildMicroFlatModel_ReturnsModel_WhenEnoughMicroDays ()
 			{
-			// Arrange: 40 микро-дней (>= 30).
+			// Arrange: 40 микро-дней (>= 30), фичи чуть-чуть различаются по дням.
 			var rows = new List<DataRow> ();
 			for (int i = 0; i < 40; i++)
 				{
+				var baseDate = new DateTime (2025, 1, 1);
+
 				rows.Add (new DataRow
 					{
-					Date = new DateTime (2025, 1, 1).AddDays (i),
-					Features = new[] { 0.1, 0.2, 0.3 },
+					Date = baseDate.AddDays (i),
+
+					// Делаем фичи слегка зависящими от i,
+					// чтобы не было полностью константного датасета.
+					Features = new[]
+					{
+					0.1 + i * 0.001,
+					0.2 + i * 0.001,
+					0.3 + i * 0.001
+					},
+
 					FactMicroUp = i % 2 == 0,
 					FactMicroDown = i % 2 == 1
 					});

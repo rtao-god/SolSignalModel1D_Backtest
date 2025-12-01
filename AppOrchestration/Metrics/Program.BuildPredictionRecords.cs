@@ -22,6 +22,7 @@ namespace SolSignalModel1D_Backtest
 
 			// Загрузка forward-метрик по утренним точкам на основе 6h-свечей.
 			var records = await LoadPredictionRecordsAsync (mornings, solAll6h, engine);
+			DumpDailyPredHistograms (records, _trainUntilUtc);
 
 			Console.WriteLine ($"[records] built = {records.Count}");
 

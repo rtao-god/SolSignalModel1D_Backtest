@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest
 		/// Флажок: гонять ли self-check'и при старте приложения.
 		/// При false поведение полностью совпадает с текущим.
 		/// </summary>
-		private const bool RunSelfChecksOnStartup = false;
+		private static readonly bool RunSelfChecksOnStartup = true;
 
 		/// <summary>
 		/// Глобальная таймзона Нью-Йорка для всех расчётов.
@@ -80,6 +80,34 @@ namespace SolSignalModel1D_Backtest
 			// --- 5. Бэктест + отчёты ---
 			await EnsureBacktestProfilesInitializedAsync ();
 			RunBacktestAndReports (mornings, records, sol1m);
+			}
+
+			private static void DumpDailyPredHistograms ( List<PredictionRecord> records, DateTime trainUntilUtc )
+			{
+			if (records == null || records.Count == 0)
+				return;
+
+			var train = records.Where (r => r.DateUtc <= trainUntilUtc).ToList ();
+			var oos = records.Where (r => r.DateUtc > trainUntilUtc).ToList ();
+
+			static string Hist ( IEnumerable<int> xs )
+				{
+				return string.Join (", ",
+					xs.GroupBy (v => v)
+					  .OrderBy (g => g.Key)
+					  .Select (g => $"{g.Key}={g.Count ()}"));
+				}
+
+			Console.WriteLine ($"[daily] train size = {train.Count}, oos size = {oos.Count}");
+
+			Console.WriteLine ("[daily] train TrueLabel hist: " + Hist (train.Select (r => r.TrueLabel)));
+			Console.WriteLine ("[daily] train PredLabel hist: " + Hist (train.Select (r => r.PredLabel)));
+
+			if (oos.Count > 0)
+				{
+				Console.WriteLine ("[daily] oos TrueLabel hist: " + Hist (oos.Select (r => r.TrueLabel)));
+				Console.WriteLine ("[daily] oos PredLabel hist: " + Hist (oos.Select (r => r.PredLabel)));
+				}
 			}
 		}
 	}

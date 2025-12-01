@@ -30,6 +30,12 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 		private const int BtcEmaSlow = 200;
 
 		/// <summary>
+		/// Тестовый флаг: если включён, в фичи подмешивается заведомая утечка
+		/// (future-ret SolFwd1). В нормальном режиме ДОЛЖЕН быть false.
+		/// </summary>
+		private const bool EnableLeakageHackForTests = false;
+
+		/// <summary>
 		/// Старый удобный вход без 1m. Сейчас 1m обязательны,
 		/// поэтому этот оверлоад просто прокидывает null и улетает
 		/// в InvalidOperationException внутри нового метода.
@@ -367,6 +373,15 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					solEma50vs200,
 					btcEma50vs200
 				};
+
+				// ==== ТЕСТОВАЯ УТЕЧКА (использовать только для проверки self-check'ов) ====
+				if (EnableLeakageHackForTests)
+					{
+					// Добавляем фичу, напрямую завязанную на будущий результат сделки.
+					// Это явная утечка: модель видит SolFwd1 при обучении и в OOS.
+					feats.Add (solFwd1);
+					}
+
 
 				var row = new DataRow
 					{

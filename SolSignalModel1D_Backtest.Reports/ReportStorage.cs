@@ -30,8 +30,16 @@ namespace SolSignalModel1D_Backtest.Reports
 
 			_jsonOptions = new JsonSerializerOptions
 				{
+				// Используем camelCase для JSON-полей
 				PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+
+				// Красивое форматирование
 				WriteIndented = true,
+
+				// разрешаем NaN/Infinity как именованные литералы ("NaN", "Infinity", "-Infinity")
+				NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+
+				// Enum'ы пишем как строки
 				Converters =
 				{
 					new JsonStringEnumConverter()

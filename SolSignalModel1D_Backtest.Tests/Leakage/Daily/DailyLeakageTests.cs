@@ -1,80 +1,155 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using SolSignalModel1D_Backtest.Core.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
-using Xunit;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
+using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
 	/// <summary>
-	/// Базовый smoke-тест для DailyLeakageChecks:
-	/// - конструируется маленький train+OOS датасет;
-	/// - проверяется, что RunFirstBlock возвращает метрики и не падает.
+	/// Тесты для DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle:
+	/// - сценарий без проблем;
+	/// - сценарий с подозрительно высокой точностью на OOS;
+	/// - сценарий без OOS-части.
 	/// </summary>
-	public sealed class DailyLeakageTests
+	public sealed class DailyLeakageChecksTests
 		{
 		[Fact]
-		public void RunFirstBlock_ReturnsMetricsAndSuccess_OnReasonableData ()
+		public void CheckDailyTrainVsOosAndShuffle_ReturnsSuccess_OnReasonableMetrics ()
 			{
-			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
+			// Здесь строится выборка с умеренной точностью (~60%)
+			// как на train, так и на OOS. Ошибок быть не должно.
 
-			var rows = new List<DataRow> ();
 			var records = new List<PredictionRecord> ();
 
-			// 4 train-дня с идеальным попаданием.
-			for (int i = 0; i < 4; i++)
-				{
-				var dt = start.AddDays (i);
+			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
 
-				rows.Add (new DataRow
-					{
-					Date = dt,
-					IsMorning = true,
-					Label = i % 3
-					});
+			for (int i = 0; i < 200; i++)
+				{
+				int trueLabel = i % 3;
+
+				// Простейшая схема: 60% попаданий, 40% мимо.
+				// Через i % 10 < 6 задаётся примерно 6 из 10 совпадений.
+				int predLabel = (i % 10 < 6)
+					? trueLabel
+					: (trueLabel + 1) % 3;
 
 				records.Add (new PredictionRecord
 					{
-					DateUtc = dt,
-					TrueLabel = i % 3,
-					PredLabel = i % 3
+					DateUtc = start.AddDays (i),
+					TrueLabel = trueLabel,
+					PredLabel = predLabel
 					});
 				}
 
-			// 4 OOS-дня с чуть худшими предсказаниями.
-			for (int i = 4; i < 8; i++)
-				{
-				var dt = start.AddDays (i);
+			// Первые 150 дней считаем train, остальные 50 — OOS.
+			var trainUntilUtc = start.AddDays (149);
 
-				rows.Add (new DataRow
-					{
-					Date = dt,
-					IsMorning = true,
-					Label = i % 3
-					});
-
-				records.Add (new PredictionRecord
-					{
-					DateUtc = dt,
-					TrueLabel = i % 3,
-					PredLabel = (i + 1) % 3
-					});
-				}
-
-			// Первые 4 дня считаем train.
-			var trainUntilUtc = start.AddDays (3);
-
-			var result = DailyLeakageChecks.RunFirstBlock (rows, records, trainUntilUtc);
+			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
+				records,
+				trainUntilUtc);
 
 			Assert.NotNull (result);
-			Assert.Equal ("daily", result.CheckName);
+			Assert.True (result.Success);
 
-			// Базовые метрики должны присутствовать.
-			Assert.True (result.Metrics.ContainsKey ("train.count"));
-			Assert.True (result.Metrics.ContainsKey ("oos.count"));
-			Assert.True (result.Metrics.ContainsKey ("train.acc"));
-			Assert.True (result.Metrics.ContainsKey ("oos.acc"));
+			// В этом сценарии не должно быть жёстких ошибок.
+			Assert.Empty (result.Errors);
+
+			// Дополнительно проверяем, что метрики вообще есть.
+			Assert.False (double.IsNaN (result.Metrics["daily.acc_all"]));
+			Assert.False (double.IsNaN (result.Metrics["daily.acc_train"]));
+			Assert.False (double.IsNaN (result.Metrics["daily.acc_oos"]));
+			}
+
+		[Fact]
+		public void CheckDailyTrainVsOosAndShuffle_FlagsLeak_WhenOosAccuracySuspiciouslyHigh ()
+			{
+			// Сценарий: train нормальный, OOS почти идеальный.
+			// Должна появиться ошибка про подозрительно высокую точность на OOS.
+
+			var records = new List<PredictionRecord> ();
+			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
+
+			for (int i = 0; i < 200; i++)
+				{
+				int trueLabel = i % 3;
+
+				int predLabel;
+				if (i < 100)
+					{
+					// Train: те же 60% попаданий, как в предыдущем тесте.
+					predLabel = (i % 10 < 6)
+						? trueLabel
+						: (trueLabel + 1) % 3;
+					}
+				else
+					{
+					// OOS: почти идеальная модель (100% попаданий).
+					predLabel = trueLabel;
+					}
+
+				records.Add (new PredictionRecord
+					{
+					DateUtc = start.AddDays (i),
+					TrueLabel = trueLabel,
+					PredLabel = predLabel
+					});
+				}
+
+			var trainUntilUtc = start.AddDays (99);
+
+			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
+				records,
+				trainUntilUtc);
+
+			Assert.NotNull (result);
+
+			// В этом сценарии Success должен быть false из-за ошибки по OOS.
+			Assert.False (result.Success);
+
+			Assert.Contains (
+				result.Errors,
+				e => e.Contains ("OOS accuracy", StringComparison.OrdinalIgnoreCase)
+				|| e.Contains ("OOS accuracy", StringComparison.Ordinal));
+			}
+
+		[Fact]
+		public void CheckDailyTrainVsOosAndShuffle_Warns_WhenNoOosPart ()
+			{
+			// Сценарий: все дни попадают в train-часть, OOS нет.
+			// Должно быть предупреждение про пустую OOS-часть.
+
+			var records = new List<PredictionRecord> ();
+			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
+
+			for (int i = 0; i < 50; i++)
+				{
+				int label = i % 3;
+
+				records.Add (new PredictionRecord
+					{
+					DateUtc = start.AddDays (i),
+					TrueLabel = label,
+					PredLabel = label
+					});
+				}
+
+			// trainUntil ставим после последнего дня — OOS не будет.
+			var trainUntilUtc = start.AddDays (1000);
+
+			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
+				records,
+				trainUntilUtc);
+
+			Assert.NotNull (result);
+			Assert.True (result.Success);
+
+			// Должен быть warning про пустую OOS-часть.
+			Assert.Contains (
+				result.Warnings,
+				w => w.Contains ("OOS-часть пуста", StringComparison.OrdinalIgnoreCase)
+				|| w.Contains ("OOS-часть пуста", StringComparison.Ordinal));
 			}
 		}
 	}

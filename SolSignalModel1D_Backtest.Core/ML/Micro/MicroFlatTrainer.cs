@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Microsoft.ML;
+﻿using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Micro
@@ -32,57 +28,136 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				.OrderBy (r => r.Date)
 				.ToList ();
 
+			// Это нормальная ситуация на сырой истории: микро-датасет ещё не набрался.
+			// Здесь не считаем это «проблемой пайплайна», просто микро-слой не строится.
 			if (flats.Count < 30)
 				{
 				Console.WriteLine ($"[2stage-micro] мало микро-дней ({flats.Count}), скипаем обучение микро-слоя");
 				return null;
 				}
 
-			// Жёсткая балансировка up/down: берём одинаковое количество.
+			// Балансируем up/down.
 			var up = flats.Where (r => r.FactMicroUp).ToList ();
 			var dn = flats.Where (r => r.FactMicroDown).ToList ();
-			int take = Math.Min (up.Count, dn.Count);
 
-			if (take > 0)
+			// А вот одноклассовый датасет — это уже реальная проблема (разметка / RowBuilder).
+			if (up.Count == 0 || dn.Count == 0)
 				{
-				up = up
-					.Take (take)
-					.OrderBy (r => r.Date)
-					.ToList ();
-
-				dn = dn
-					.Take (take)
-					.OrderBy (r => r.Date)
-					.ToList ();
-
-				flats = up
-					.Concat (dn)
-					.OrderBy (r => r.Date)
-					.ToList ();
+				throw new InvalidOperationException (
+					$"[2stage-micro] датасет микро-дней одноклассовый (up={up.Count}, down={dn.Count}). " +
+					"Проверь разметку FactMicroUp/FactMicroDown и path-based labeling."
+				);
 				}
 
-			var data = ml.Data.LoadFromEnumerable (
-				flats.Select (r => new MlSampleBinary
+			int take = Math.Min (up.Count, dn.Count);
+
+			up = up
+				.OrderBy (r => r.Date)
+				.Take (take)
+				.ToList ();
+
+			dn = dn
+				.OrderBy (r => r.Date)
+				.Take (take)
+				.ToList ();
+
+			flats = up
+				.Concat (dn)
+				.OrderBy (r => r.Date)
+				.ToList ();
+
+			// === ЖЁСТКАЯ ВАЛИДАЦИЯ ФИЧЕЙ ПЕРЕД LightGBM ===
+
+			var samples = new List<MlSampleBinary> (flats.Count);
+			int? featureDim = null;
+			bool hasNaN = false;
+			bool hasInf = false;
+
+			foreach (var r in flats)
+				{
+				var feats = MlTrainingUtils.ToFloatFixed (r.Features);
+
+				if (feats == null)
+					{
+					throw new InvalidOperationException (
+						"[2stage-micro] ToFloatFixed вернул null-массив признаков для микро-дня."
+					);
+					}
+
+				if (featureDim == null)
+					{
+					featureDim = feats.Length;
+					if (featureDim <= 0)
+						{
+						throw new InvalidOperationException (
+							"[2stage-micro] длина вектора признаков для микро-слоя равна 0."
+						);
+						}
+					}
+				else if (feats.Length != featureDim.Value)
+					{
+					throw new InvalidOperationException (
+						$"[2stage-micro] неконсистентная длина признаков: ожидалось {featureDim.Value}, " +
+						$"получено {feats.Length}."
+					);
+					}
+
+				for (int i = 0; i < feats.Length; i++)
+					{
+					if (float.IsNaN (feats[i])) hasNaN = true;
+					else if (float.IsInfinity (feats[i])) hasInf = true;
+					}
+
+				samples.Add (new MlSampleBinary
 					{
 					Label = r.FactMicroUp, // true => microUp, false => microDown
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
-					})
-			);
-
-			var pipe = ml.BinaryClassification.Trainers.LightGbm (
-				new LightGbmBinaryTrainer.Options
-					{
-					NumberOfLeaves = 12,
-					NumberOfIterations = 70,
-					LearningRate = 0.07f,
-					MinimumExampleCountPerLeaf = 15,
-					Seed = 42,
-					NumberOfThreads = 1
+					Features = feats
 					});
+				}
 
-			var model = pipe.Fit (data);
-			Console.WriteLine ($"[2stage-micro] обучено на {flats.Count} REAL микро-днях");
-			return model;
+			if (hasNaN || hasInf)
+				{
+				throw new InvalidOperationException (
+					$"[2stage-micro] датасет микро-слоя содержит некорректные значения признаков " +
+					$"(NaN={hasNaN}, Inf={hasInf})."
+				);
+				}
+
+			var data = ml.Data.LoadFromEnumerable (samples);
+
+			var options = new LightGbmBinaryTrainer.Options
+				{
+				NumberOfLeaves = 12,
+				NumberOfIterations = 70,
+				LearningRate = 0.07f,
+				MinimumExampleCountPerLeaf = 15,
+				Seed = 42,
+				NumberOfThreads = 1
+				};
+
+			try
+				{
+				var pipe = ml.BinaryClassification.Trainers.LightGbm (options);
+				var model = pipe.Fit (data);
+
+				Console.WriteLine (
+					$"[2stage-micro] обучено на {flats.Count} REAL микро-днях " +
+					$"(up={up.Count}, down={dn.Count}, featDim={featureDim})"
+				);
+
+				return model;
+				}
+			catch (Exception ex)
+				{
+				// Любой сбой LightGBM — это уже «проблема» и пробрасывается наверх
+				// с максимальным количеством контекста.
+				throw new InvalidOperationException (
+					"[2stage-micro] LightGBM не смог обучить микро-модель. " +
+					$"flats={flats.Count}, up={up.Count}, down={dn.Count}, featDim={featureDim ?? -1}. " +
+					"См. InnerException для деталей.",
+					ex
+				);
+				}
 			}
 		}
 	}

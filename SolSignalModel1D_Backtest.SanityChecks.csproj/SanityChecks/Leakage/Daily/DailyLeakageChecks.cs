@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
+using SolSignalModel1D_Backtest.SanityChecks;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 	{
@@ -69,8 +69,16 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 				Success = errors.Count == 0,
 				Summary = summary
 				};
+
 			result.Errors.AddRange (errors);
 			result.Warnings.AddRange (warnings);
+
+			// Метрики, которые будут использоваться тестами и для логов.
+			result.Metrics["daily.acc_all"] = allAcc;
+			result.Metrics["daily.acc_train"] = trainAcc;
+			result.Metrics["daily.acc_oos"] = oosAcc;
+			result.Metrics["daily.acc_shuffle"] = shuffleAcc;
+
 			return result;
 			}
 

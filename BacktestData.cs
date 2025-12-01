@@ -20,9 +20,6 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		public static async Task<BacktestDataSnapshot> BuildBacktestDataAsync ()
 			{
-			Console.WriteLine ($"[paths] CandlesDir    = {PathConfig.CandlesDir}");
-			Console.WriteLine ($"[paths] IndicatorsDir = {PathConfig.IndicatorsDir}");
-
 			using var http = new HttpClient ();
 
 			// --- 1. обновляем свечи (сетевой блок) ---
