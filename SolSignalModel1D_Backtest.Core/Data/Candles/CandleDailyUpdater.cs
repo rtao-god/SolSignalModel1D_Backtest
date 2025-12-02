@@ -39,43 +39,13 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 		/// Если файла нет — берём fromUtc и тянем до сейчас.
 		/// Если файл есть — только догоняем.
 		/// </summary>
-		public async Task UpdateAllAsync ( DateTime? fullBackfillFromUtc = null )
-			{
-			// Было: три await подряд → сетевая и файловая работа идут строго последовательно.
-			// Стало: три задачи параллельно.
-			// Важно: разные TF пишут в разные файлы, поэтому гонок нет.
-			var tasks = new[]
-				{
-				UpdateOneAsync ("1m", TimeSpan.FromMinutes (1), fullBackfillFromUtc),
-				UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc),
-				UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc)
-				};
-
-			await Task.WhenAll (tasks);
-			}
-
-		public async Task UpdateSelectiveAsync ( IEnumerable<string> intervals, DateTime? fullBackfillFromUtc = null )
-			{
-			// Здесь можно тоже распараллелить через Task.WhenAll, но лучше оставить
-			// последовательное поведение, если этот метод используется для дебага
-			// или точечных апдейтов.
-			foreach (var iv in intervals)
-				{
-				switch (iv)
-					{
-					case "1m": await UpdateOneAsync ("1m", TimeSpan.FromMinutes (1), fullBackfillFromUtc); break;
-					case "1h": await UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc); break;
-					case "6h": await UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc); break;
-					default: throw new ArgumentException ($"unsupported interval: {iv}");
-					}
-				}
-			}
-
 		private async Task UpdateOneAsync ( string binanceInterval, TimeSpan tf, DateTime? fullBackfillFromUtc = null )
 			{
-			var store = new CandleNdjsonStore (BuildPath (binanceInterval));
+			var path = BuildPath (binanceInterval);
+			Console.WriteLine ($"[candle-updater] {_symbol} {binanceInterval}: path={path}");
 
-			// если файл есть — докачиваем с последней свечи; если нет — полный бэкофилл с fullBackfillFromUtc (если задан)
+			var store = new CandleNdjsonStore (path);
+
 			DateTime? last = store.TryGetLastTimestampUtc ();
 			DateTime fromUtc;
 			if (last.HasValue)
@@ -87,9 +57,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 
 			DateTime toUtc = DateTime.UtcNow;
 
-			// ограничение догонки по дням — только если НЕ полный бэкофилл
 			if (!fullBackfillFromUtc.HasValue && (toUtc.Date - fromUtc.Date).TotalDays > _catchupDays)
 				fromUtc = toUtc.Date.AddDays (-_catchupDays);
+
+			Console.WriteLine ($"[candle-updater] {_symbol} {binanceInterval}: last={last?.ToString ("yyyy-MM-dd HH:mm") ?? "null"}, from={fromUtc:yyyy-MM-dd HH:mm}, to={toUtc:yyyy-MM-dd HH:mm}");
 
 			var raw = await DataLoading.GetBinanceKlinesRange (_http, _symbol, binanceInterval, fromUtc, toUtc);
 			if (raw.Count == 0) return;
@@ -97,7 +68,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			var filtered = new List<CandleNdjsonStore.CandleLine> (raw.Count);
 			foreach (var r in raw)
 				{
-				if (r.openUtc.IsWeekendUtc ()) continue; // выкидываем выходные
+				if (r.openUtc.IsWeekendUtc ()) continue;
 				filtered.Add (new CandleNdjsonStore.CandleLine (r.openUtc, r.open, r.high, r.low, r.close));
 				}
 			if (filtered.Count == 0) return;
@@ -106,18 +77,18 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			Console.WriteLine ($"[candle-updater] {_symbol} {binanceInterval}: appended {filtered.Count} candles ({fromUtc:yyyy-MM-dd HH:mm} .. {toUtc:yyyy-MM-dd HH:mm} UTC)");
 			}
 
-		public async Task UpdateSelectiveAsync ( IEnumerable<string> intervals )
+		public async Task UpdateAllAsync ( DateTime? fullBackfillFromUtc = null )
 			{
-			foreach (var iv in intervals)
-				{
-				switch (iv)
-					{
-					case "1m": await UpdateOneAsync ("1m", TimeSpan.FromMinutes (1)); break;
-					case "1h": await UpdateOneAsync ("1h", TimeSpan.FromHours (1)); break;
-					case "6h": await UpdateOneAsync ("6h", TimeSpan.FromHours (6)); break;
-					default: throw new ArgumentException ($"unsupported interval: {iv}");
-					}
-				}
+			Console.WriteLine ($"[candle-updater] symbol={_symbol}, baseDir={_baseDir}, fullBackfillFrom={fullBackfillFromUtc:yyyy-MM-dd HH:mm}");
+
+			var tasks = new[]
+			{
+		UpdateOneAsync ("1m", TimeSpan.FromMinutes (1), fullBackfillFromUtc),
+		UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc),
+		UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc)
+	};
+
+			await Task.WhenAll (tasks);
 			}
 		}
 	}

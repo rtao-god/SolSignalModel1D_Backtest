@@ -1,21 +1,75 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Reports.Model;
+using System;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 	{
 	/// <summary>
 	/// Строит ReportDocument с модельными статистиками бэктеста
-	/// на основе BacktestModelStatsSnapshot.
+	/// на основе BacktestModelStatsSnapshot / BacktestModelStatsMultiSnapshot.
 	/// Никакой новой математики не добавляет — только форматирует данные
 	/// для фронта в виде key-value и таблиц (simple/technical).
 	/// </summary>
 	public static class BacktestModelStatsReportBuilder
 		{
 		/// <summary>
-		/// Строит отчёт по модельным статистикам.
-		/// Предполагается, что снимок получен через BacktestModelStatsSnapshotBuilder.Compute(...).
+		/// Новый вход: мульти-снимок по сегментам (Full/Train/OOS/Recent).
+		/// Используется для фронта, где нужно выбирать сегмент.
+		/// </summary>
+		public static ReportDocument Build ( BacktestModelStatsMultiSnapshot multi )
+			{
+			if (multi == null) throw new ArgumentNullException (nameof (multi));
+
+			var now = DateTime.UtcNow;
+
+			var doc = new ReportDocument
+				{
+				Id = $"backtest-model-stats-{now:yyyyMMdd_HHmmss}",
+				Kind = "backtest_model_stats",
+				Title = "Модельные статистики бэктеста (multi-segment, SOLUSDT)",
+				GeneratedAtUtc = now
+				};
+
+			// === Глобальная мета по запуску (RunKind, HasOos, счётчики) ===
+			var globalMeta = BuildMultiMetaSection (multi);
+			if (globalMeta != null)
+				{
+				doc.KeyValueSections.Add (globalMeta);
+				}
+
+			// === По каждому сегменту: своя мета + те же блоки, что и раньше ===
+			foreach (var segment in multi.Segments)
+				{
+				if (segment == null || segment.Stats == null)
+					continue;
+
+				var prefix = GetSegmentTitlePrefix (segment); // например: "[OOS] "
+
+				// Мета конкретного сегмента (границы, размер).
+				var segMeta = BuildSegmentMetaSection (segment, prefix);
+				if (segMeta != null)
+					{
+					doc.KeyValueSections.Add (segMeta);
+					}
+
+				// Daily confusion (business + technical).
+				AddDailyConfusionSections (doc, segment.Stats.Daily, prefix);
+
+				// Trend-direction confusion: simple / technical.
+				AddTrendSections (doc, segment.Stats.Trend, prefix);
+
+				// SL-модель: confusion + metrics + threshold sweep.
+				AddSlSections (doc, segment.Stats.Sl, prefix);
+				}
+
+			return doc;
+			}
+
+		/// <summary>
+		/// Старый вход: односегментный снимок.
+		/// Поведение сохранено, сигнатура не меняется.
 		/// </summary>
 		public static ReportDocument Build ( BacktestModelStatsSnapshot snapshot )
 			{
@@ -62,155 +116,169 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			doc.KeyValueSections.Add (metaSection);
 
 			// === Daily confusion: бизнес (summary) + технарь (матрица) ===
-			AddDailyConfusionSections (doc, snapshot.Daily);
+			AddDailyConfusionSections (doc, snapshot.Daily, titlePrefix: null);
 
 			// === Trend-direction confusion: simple / technical ===
-			var trendSimple = MetricTableBuilder.BuildTable (
-				BacktestModelStatsTableDefinitions.TrendConfusion,
-				snapshot.Trend.Rows,
-				TableDetailLevel.Simple,
-				explicitTitle: "Trend-direction confusion (упрощённо)");
+			AddTrendSections (doc, snapshot.Trend, titlePrefix: null);
 
-			var trendTechnical = MetricTableBuilder.BuildTable (
-				BacktestModelStatsTableDefinitions.TrendConfusion,
-				snapshot.Trend.Rows,
-				TableDetailLevel.Technical,
-				explicitTitle: "Trend-direction confusion (технически)");
-
-			doc.TableSections.Add (trendSimple);
-			doc.TableSections.Add (trendTechnical);
-
-			// === SL confusion (аналог консольной таблицы) ===
-			var slConf = snapshot.Sl.Confusion;
-
-			var slConfSection = new TableSection
-				{
-				Title = "SL-model confusion (runtime, path-based)"
-				};
-
-			slConfSection.Columns.AddRange (new[]
-			{
-				"day type",
-				"pred LOW",
-				"pred HIGH"
-			});
-
-			slConfSection.Rows.Add (new List<string>
-			{
-				"TP-day",
-				slConf.TpLow.ToString(),
-				slConf.TpHigh.ToString()
-			});
-
-			slConfSection.Rows.Add (new List<string>
-			{
-				"SL-day",
-				slConf.SlLow.ToString(),
-				slConf.SlHigh.ToString()
-			});
-
-			slConfSection.Rows.Add (new List<string>
-			{
-				"SL saved (potential)",
-				slConf.SlSaved.ToString(),
-				string.Empty
-			});
-
-			doc.TableSections.Add (slConfSection);
-
-			// === SL metrics (как в консоли) ===
-			var slMetrics = snapshot.Sl.Metrics;
-
-			var slMetricsSection = new TableSection
-				{
-				Title = "SL-model metrics (runtime)"
-				};
-
-			slMetricsSection.Columns.AddRange (new[]
-			{
-				"metric",
-				"value"
-			});
-
-			slMetricsSection.Rows.Add (new List<string>
-			{
-				"coverage (scored / signal days)",
-				$"{slMetrics.Coverage * 100.0:0.0}%  ({slConf.ScoredDays}/{slConf.TotalSignalDays})"
-			});
-
-			slMetricsSection.Rows.Add (new List<string>
-			{
-				"TPR / Recall (SL-day)",
-				$"{slMetrics.Tpr * 100.0:0.0}%"
-			});
-
-			slMetricsSection.Rows.Add (new List<string>
-			{
-				"FPR (TP-day)",
-				$"{slMetrics.Fpr * 100.0:0.0}%"
-			});
-
-			slMetricsSection.Rows.Add (new List<string>
-			{
-				"Precision (SL-day)",
-				$"{slMetrics.Precision * 100.0:0.0}%"
-			});
-
-			slMetricsSection.Rows.Add (new List<string>
-			{
-				"F1 (SL-day)",
-				$"{slMetrics.F1:0.000}"
-			});
-
-			slMetricsSection.Rows.Add (new List<string>
-			{
-				"PR-AUC (approx)",
-				$"{slMetrics.PrAuc:0.000}"
-			});
-
-			doc.TableSections.Add (slMetricsSection);
-
-			// === SL threshold sweep: simple / technical (если есть данные) ===
-			if (snapshot.Sl.Thresholds.Count > 0)
-				{
-				var thrSimple = MetricTableBuilder.BuildTable (
-					BacktestModelStatsTableDefinitions.SlThresholdSweep,
-					snapshot.Sl.Thresholds,
-					TableDetailLevel.Simple,
-					explicitTitle: "SL threshold sweep (упрощённо)");
-
-				var thrTechnical = MetricTableBuilder.BuildTable (
-					BacktestModelStatsTableDefinitions.SlThresholdSweep,
-					snapshot.Sl.Thresholds,
-					TableDetailLevel.Technical,
-					explicitTitle: "SL threshold sweep (технически)");
-
-				doc.TableSections.Add (thrSimple);
-				doc.TableSections.Add (thrTechnical);
-				}
+			// === SL confusion + metrics + threshold sweep ===
+			AddSlSections (doc, snapshot.Sl, titlePrefix: null);
 
 			return doc;
 			}
+
+		// ====== META: multi-snapshot ======
+
+		private static KeyValueSection? BuildMultiMetaSection ( BacktestModelStatsMultiSnapshot multi )
+			{
+			if (multi.Meta == null)
+				return null;
+
+			var meta = multi.Meta;
+
+			var section = new KeyValueSection
+				{
+				Title = "Параметры модельных статистик (multi-segment)"
+				};
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "RunKind",
+				Value = meta.RunKind.ToString ()
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "HasOos",
+				Value = meta.HasOos.ToString ()
+				});
+
+			if (meta.TrainUntilUtc.HasValue)
+				{
+				section.Items.Add (new KeyValueItem
+					{
+					Key = "TrainUntilUtc",
+					Value = meta.TrainUntilUtc.Value.ToString ("O")
+					});
+				}
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "TrainRecordsCount",
+				Value = meta.TrainRecordsCount.ToString ()
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "OosRecordsCount",
+				Value = meta.OosRecordsCount.ToString ()
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "TotalRecordsCount",
+				Value = meta.TotalRecordsCount.ToString ()
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "RecentDays",
+				Value = meta.RecentDays.ToString ()
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "RecentRecordsCount",
+				Value = meta.RecentRecordsCount.ToString ()
+				});
+
+			return section;
+			}
+
+		private static KeyValueSection BuildSegmentMetaSection (
+			BacktestModelStatsSegmentSnapshot segment,
+			string segmentTitlePrefix )
+			{
+			var section = new KeyValueSection
+				{
+				Title = $"{segmentTitlePrefix}Сегмент модельных статистик"
+				};
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "SegmentKind",
+				Value = segment.Kind.ToString ()
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "Label",
+				Value = segment.Label ?? string.Empty
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "FromDateUtc",
+				Value = segment.FromDateUtc.ToString ("O")
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "ToDateUtc",
+				Value = segment.ToDateUtc.ToString ("O")
+				});
+
+			section.Items.Add (new KeyValueItem
+				{
+				Key = "RecordsCount",
+				Value = segment.RecordsCount.ToString ()
+				});
+
+			return section;
+			}
+
+		private static string GetSegmentKey ( BacktestModelStatsSegmentSnapshot segment )
+			{
+			return segment.Kind switch
+				{
+					ModelStatsSegmentKind.FullHistory => "FULL",
+					ModelStatsSegmentKind.TrainOnly => "TRAIN",
+					ModelStatsSegmentKind.OosOnly => "OOS",
+					ModelStatsSegmentKind.RecentWindow => "RECENT",
+					_ => segment.Kind.ToString ()
+					};
+			}
+
+		private static string GetSegmentTitlePrefix ( BacktestModelStatsSegmentSnapshot segment )
+			{
+			// Префикс вида "[OOS] " или "[TRAIN] " для однозначного парсинга на фронте.
+			var key = GetSegmentKey (segment);
+			return $"[{key}] ";
+			}
+
+		// ===== 1) Daily confusion =====
 
 		/// <summary>
 		/// Добавляет в документ две секции по дневной путанице:
 		/// - бизнес-режим (человеческое summary по классам);
 		/// - технарский режим (матрица TRUE x PRED, как confusion).
+		/// Для multi-сегментов добавляется префикс к Title (например "[OOS] ").
 		/// </summary>
-		private static void AddDailyConfusionSections ( ReportDocument doc, DailyConfusionStats daily )
+		private static void AddDailyConfusionSections (
+			ReportDocument doc,
+			DailyConfusionStats daily,
+			string? titlePrefix )
 			{
 			if (doc == null) throw new ArgumentNullException (nameof (doc));
 			if (daily == null) throw new ArgumentNullException (nameof (daily));
 
-			// Бизнес-режим: компактные текстовые summary по каждому классу.
-			var summarySection = BuildDailyBusinessSummarySection (daily);
+			var summarySection = BuildDailyBusinessSummarySection (daily, titlePrefix);
 			if (summarySection != null)
 				{
 				doc.TableSections.Add (summarySection);
 				}
 
-			// Технарский режим: нормальная confusion-матрица с процентами и количеством.
-			var matrixSection = BuildDailyTechnicalMatrixSection (daily);
+			var matrixSection = BuildDailyTechnicalMatrixSection (daily, titlePrefix);
 			if (matrixSection != null)
 				{
 				doc.TableSections.Add (matrixSection);
@@ -221,14 +289,20 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 		/// Строит "человеческое" описание по классам в виде таблицы:
 		/// Class + Summary.
 		/// </summary>
-		private static TableSection? BuildDailyBusinessSummarySection ( DailyConfusionStats daily )
+		private static TableSection? BuildDailyBusinessSummarySection (
+			DailyConfusionStats daily,
+			string? titlePrefix )
 			{
 			if (daily.Rows == null || daily.Rows.Count == 0)
 				return null;
 
+			var title = titlePrefix == null
+				? "Daily label summary (business)"
+				: $"{titlePrefix}Daily label summary (business)";
+
 			var section = new TableSection
 				{
-				Title = "Daily label summary (business)"
+				Title = title
 				};
 
 			section.Columns.AddRange (new[]
@@ -283,7 +357,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 					});
 				}
 
-			// Общий summary по всем классам.
 			if (daily.OverallTotal > 0)
 				{
 				var overallSummary =
@@ -303,14 +376,20 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 		/// <summary>
 		/// Строит технарскую confusion-матрицу TRUE x PRED с процентами и количеством.
 		/// </summary>
-		private static TableSection? BuildDailyTechnicalMatrixSection ( DailyConfusionStats daily )
+		private static TableSection? BuildDailyTechnicalMatrixSection (
+			DailyConfusionStats daily,
+			string? titlePrefix )
 			{
 			if (daily.Rows == null || daily.Rows.Count == 0)
 				return null;
 
+			var title = titlePrefix == null
+				? "Daily label confusion (3-class, technical)"
+				: $"{titlePrefix}Daily label confusion (3-class, technical)";
+
 			var section = new TableSection
 				{
-				Title = "Daily label confusion (3-class, technical)"
+				Title = title
 				};
 
 			section.Columns.AddRange (new[]
@@ -341,7 +420,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				section.Rows.Add (BuildMatrixRow ("UP", up));
 				}
 
-			// Общий accuracy по всем классам.
 			if (daily.OverallTotal > 0)
 				{
 				var overall = $"{daily.OverallAccuracyPct:0.0}% ({daily.OverallCorrect} / {daily.OverallTotal})";
@@ -359,9 +437,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			return section;
 			}
 
-		/// <summary>
-		/// Находит строку дневной статистики по true label (0/1/2).
-		/// </summary>
 		private static DailyClassStatsRow? FindDailyRowByLabel ( IReadOnlyList<DailyClassStatsRow> rows, int trueLabel )
 			{
 			for (int i = 0; i < rows.Count; i++)
@@ -374,10 +449,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			return null;
 			}
 
-		/// <summary>
-		/// Формирует человеческое summary по одному классу:
-		/// всего дней, попадания, промахи и куда уезжают промахи.
-		/// </summary>
 		private static string BuildDailyClassSummary (
 			int total,
 			int correct,
@@ -407,9 +478,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				$"UP {missUpPct:0.0}% ({missToUp}).";
 			}
 
-		/// <summary>
-		/// Формирует строку матрицы TRUE x PRED для одного класса.
-		/// </summary>
 		private static List<string> BuildMatrixRow ( string trueName, DailyClassStatsRow row )
 			{
 			int total = row.Total;
@@ -431,6 +499,174 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				Format (row.Pred2),
 				$"{row.AccuracyPct:0.0}%"
 				};
+			}
+
+		// ===== 2) Trend-direction confusion =====
+
+		private static void AddTrendSections (
+			ReportDocument doc,
+			TrendDirectionStats trend,
+			string? titlePrefix )
+			{
+			if (doc == null) throw new ArgumentNullException (nameof (doc));
+			if (trend == null) throw new ArgumentNullException (nameof (trend));
+
+			var titleSimple = titlePrefix == null
+				? "Trend-direction confusion (упрощённо)"
+				: $"{titlePrefix}Trend-direction confusion (упрощённо)";
+
+			var titleTechnical = titlePrefix == null
+				? "Trend-direction confusion (технически)"
+				: $"{titlePrefix}Trend-direction confusion (технически)";
+
+			var trendSimple = MetricTableBuilder.BuildTable (
+				BacktestModelStatsTableDefinitions.TrendConfusion,
+				trend.Rows,
+				TableDetailLevel.Simple,
+				explicitTitle: titleSimple);
+
+			var trendTechnical = MetricTableBuilder.BuildTable (
+				BacktestModelStatsTableDefinitions.TrendConfusion,
+				trend.Rows,
+				TableDetailLevel.Technical,
+				explicitTitle: titleTechnical);
+
+			doc.TableSections.Add (trendSimple);
+			doc.TableSections.Add (trendTechnical);
+			}
+
+		// ===== 3) SL-модель =====
+
+		private static void AddSlSections (
+			ReportDocument doc,
+			SlStats sl,
+			string? titlePrefix )
+			{
+			if (doc == null) throw new ArgumentNullException (nameof (doc));
+			if (sl == null) throw new ArgumentNullException (nameof (sl));
+
+			var slConf = sl.Confusion;
+
+			var confTitle = titlePrefix == null
+				? "SL-model confusion (runtime, path-based)"
+				: $"{titlePrefix}SL-model confusion (runtime, path-based)";
+
+			var slConfSection = new TableSection
+				{
+				Title = confTitle
+				};
+
+			slConfSection.Columns.AddRange (new[]
+			{
+				"day type",
+				"pred LOW",
+				"pred HIGH"
+			});
+
+			slConfSection.Rows.Add (new List<string>
+			{
+				"TP-day",
+				slConf.TpLow.ToString(),
+				slConf.TpHigh.ToString()
+			});
+
+			slConfSection.Rows.Add (new List<string>
+			{
+				"SL-day",
+				slConf.SlLow.ToString(),
+				slConf.SlHigh.ToString()
+			});
+
+			slConfSection.Rows.Add (new List<string>
+			{
+				"SL saved (potential)",
+				slConf.SlSaved.ToString(),
+				string.Empty
+			});
+
+			doc.TableSections.Add (slConfSection);
+
+			var slMetrics = sl.Metrics;
+
+			var metricsTitle = titlePrefix == null
+				? "SL-model metrics (runtime)"
+				: $"{titlePrefix}SL-model metrics (runtime)";
+
+			var slMetricsSection = new TableSection
+				{
+				Title = metricsTitle
+				};
+
+			slMetricsSection.Columns.AddRange (new[]
+			{
+				"metric",
+				"value"
+			});
+
+			slMetricsSection.Rows.Add (new List<string>
+			{
+				"coverage (scored / signal days)",
+				$"{slMetrics.Coverage * 100.0:0.0}%  ({slConf.ScoredDays}/{slConf.TotalSignalDays})"
+			});
+
+			slMetricsSection.Rows.Add (new List<string>
+			{
+				"TPR / Recall (SL-day)",
+				$"{slMetrics.Tpr * 100.0:0.0}%"
+			});
+
+			slMetricsSection.Rows.Add (new List<string>
+			{
+				"FPR (TP-day)",
+				$"{slMetrics.Fpr * 100.0:0.0}%"
+			});
+
+			slMetricsSection.Rows.Add (new List<string>
+			{
+				"Precision (SL-day)",
+				$"{slMetrics.Precision * 100.0:0.0}%"
+			});
+
+			slMetricsSection.Rows.Add (new List<string>
+			{
+				"F1 (SL-day)",
+				$"{slMetrics.F1:0.000}"
+			});
+
+			slMetricsSection.Rows.Add (new List<string>
+			{
+				"PR-AUC (approx)",
+				$"{slMetrics.PrAuc:0.000}"
+			});
+
+			doc.TableSections.Add (slMetricsSection);
+
+			// Threshold sweep: simple / technical (если есть данные)
+			if (sl.Thresholds.Count > 0)
+				{
+				var thrSimpleTitle = titlePrefix == null
+					? "SL threshold sweep (упрощённо)"
+					: $"{titlePrefix}SL threshold sweep (упрощённо)";
+
+				var thrTechnicalTitle = titlePrefix == null
+					? "SL threshold sweep (технически)"
+					: $"{titlePrefix}SL threshold sweep (технически)";
+
+				var thrSimple = MetricTableBuilder.BuildTable (
+					BacktestModelStatsTableDefinitions.SlThresholdSweep,
+					sl.Thresholds,
+					TableDetailLevel.Simple,
+					explicitTitle: thrSimpleTitle);
+
+				var thrTechnical = MetricTableBuilder.BuildTable (
+					BacktestModelStatsTableDefinitions.SlThresholdSweep,
+					sl.Thresholds,
+					TableDetailLevel.Technical,
+					explicitTitle: thrTechnicalTitle);
+
+				doc.TableSections.Add (thrSimple);
+				doc.TableSections.Add (thrTechnical);
+				}
 			}
 		}
 	}

@@ -75,6 +75,48 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 
 			var nyTz = TimeZones.NewYork;
 
+			// ===== Оптимизация по производительности =====
+			// Вместо того, чтобы для каждого дня перебирать все 1m-свечи,
+			// заранее считаем для каждого дня диапазон индексов [start; end)
+			// по candles1m, попадающий в окно [entry; exit).
+			//
+			// Предпосылки:
+			// - mornings идут по датам по возрастанию;
+			// - candles1m отсортированы по OpenTimeUtc по возрастанию.
+			//
+			// В результате каждая 1m-свеча участвует максимум в одном дне,
+			// и общий цикл становится O(days + candles1m) вместо O(days * candles1m).
+			int candleCount = candles1m.Count;
+			if (candleCount == 0)
+				return stats;
+
+			var dayRanges = new (int StartIndex, int EndIndex)[days];
+
+			int idxEntry = 0;
+			int idxExit = 0;
+
+			for (int i = 0; i < days; i++)
+				{
+				var row = mornings[i];
+				DateTime entryTimeUtc = row.Date;
+				DateTime exitUtc = ComputeExitWindow (entryTimeUtc, nyTz);
+
+				// Сдвигаем указатель входа до первой свечи с t >= entryTimeUtc.
+				while (idxEntry < candleCount && candles1m[idxEntry].OpenTimeUtc < entryTimeUtc)
+					{
+					idxEntry++;
+					}
+
+				// Сдвигаем указатель выхода до первой свечи с t >= exitUtc.
+				while (idxExit < candleCount && candles1m[idxExit].OpenTimeUtc < exitUtc)
+					{
+					idxExit++;
+					}
+
+				dayRanges[i] = (idxEntry, idxExit);
+				}
+
+			// ===== Основной цикл по дням =====
 			for (int i = 0; i < days; i++)
 				{
 				if (balance <= 0.0)
@@ -114,19 +156,26 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				// Время входа — дата дневной строки (NY-утро вью).
 				DateTime entryTimeUtc = row.Date;
 
-				// Находим первую минутную свечу не раньше entryTime.
-				var entryCandle = candles1m.FirstOrDefault (c => c.OpenTimeUtc >= entryTimeUtc);
-				if (entryCandle == null)
+				// Индексы минуток для текущего дня.
+				var (startIndex, endIndex) = dayRanges[i];
+
+				// Если вообще нет минутных свечей после entryTime — дальше смысла нет:
+				// следующих дней тоже не получится симулировать.
+				if (startIndex >= candleCount)
 					{
-					// Нет минутных данных
+					break;
 					}
+
+				// Первая свеча дня — как и раньше: первая с t >= entryTimeUtc.
+				var entryCandle = candles1m[startIndex];
 
 				double entryPrice = entryCandle.Open;
 				if (entryPrice <= 0.0)
 					continue;
 
-				// Окно торговли: [entryTime; exitUtc).
-				DateTime exitUtc = ComputeExitWindow (entryTimeUtc, nyTz);
+				// Окно торговли теперь задаётся индексами [startIndex; endIndex),
+				// поэтому повторно ComputeExitWindow не вызываем и по времени
+				// выходим из цикла через границу endIndex.
 
 				// Расчёт общего объёма риска на сделку и разбиение на две ноги.
 				double totalStake = balance * parameters.TotalRiskFractionPerTrade;
@@ -172,10 +221,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				double baseTpPrice = entryPrice + dirSign * parameters.BaseTpOffsetUsd;
 				double hedgeTriggerPrice = entryPrice - dirSign * parameters.HedgeTriggerOffsetUsd;
 
-				foreach (var c in candles1m)
+				// Цикл только по минуткам текущего дня: [startIndex; endIndex).
+				for (int ci = startIndex; ci < endIndex; ci++)
 					{
-					if (c.OpenTimeUtc < entryTimeUtc || c.OpenTimeUtc >= exitUtc)
-						continue;
+					var c = candles1m[ci];
 
 					lastPrice = c.Close;
 
@@ -490,7 +539,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 
 		/// <summary>
 		/// Вычисляет время выхода: следующее NY-утро 08:00 (минус 2 минуты).
-		/// Логика совпадает с тем, что у тебя уже было в коде.
+		/// Логика совпадает с тем, что уже используется в backtest-окнах.
 		/// </summary>
 		private static DateTime ComputeExitWindow ( DateTime entryTimeUtc, TimeZoneInfo nyTz )
 			{

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Infra;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Candles
@@ -9,6 +8,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 	/// <summary>
 	/// Ресэмплер: собирает 6h из 1h или 1m NDJSON.
 	/// Пишет в cache/candles/{SYMBOL}-6h.ndjson.
+	/// Используется как fallback, если 6h-файл ещё не построен напрямую.
 	/// </summary>
 	public static class CandleResampler
 		{
@@ -16,20 +16,16 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 		private static string Path1h ( string symbol ) => CandlePaths.File (symbol, "1h");
 		private static string Path1m ( string symbol ) => CandlePaths.File (symbol, "1m");
 
-		/// <summary>
-		/// Гарантирует наличие {symbol}-6h.ndjson.
-		/// Если файла нет или он пуст — пробуем собрать из 1h, иначе из 1m.
-		/// Если исходников нет — бросаем исключение с понятным путём.
-		/// </summary>
 		public static void Ensure6hAvailable ( string symbol )
 			{
 			Directory.CreateDirectory (PathConfig.CandlesDir);
 
 			var p6 = Path6h (symbol);
 			if (File.Exists (p6) && new FileInfo (p6).Length > 0)
-				return; // уже есть
+				{
+				return;
+				}
 
-			// Пробуем из 1h
 			var p1h = Path1h (symbol);
 			if (File.Exists (p1h) && new FileInfo (p1h).Length > 0)
 				{
@@ -39,7 +35,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				return;
 				}
 
-			// Пробуем из 1m
 			var p1m = Path1m (symbol);
 			if (File.Exists (p1m) && new FileInfo (p1m).Length > 0)
 				{
@@ -50,7 +45,8 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				}
 
 			throw new InvalidOperationException (
-				$"[resample] Нет ни 1h, ни 1m свечей для {symbol} в {PathConfig.CandlesDir}. Ожидались: {Path.GetFileName (p1h)} или {Path.GetFileName (p1m)}");
+				$"[resample] Нет ни 1h, ни 1m свечей для {symbol} в {PathConfig.CandlesDir}. " +
+				$"Ожидались файлы: {Path.GetFileName (p1h)} или {Path.GetFileName (p1m)}");
 			}
 
 		private static List<CandleNdjsonStore.CandleLine> ReadAllLines ( string path )
@@ -61,16 +57,11 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 
 		private static void WriteAll ( string path, IEnumerable<CandleNdjsonStore.CandleLine> lines )
 			{
-			// Перепишем файл целиком
 			if (File.Exists (path)) File.Delete (path);
 			var store = new CandleNdjsonStore (path);
 			store.Append (lines);
 			}
 
-		/// <summary>
-		/// Универсальный ресэмпл в 6 часов из 1h или 1m.
-		/// Группируем по якорю: 00,06,12,18 UTC.
-		/// </summary>
 		private static List<CandleNdjsonStore.CandleLine> ResampleTo6h (
 			List<CandleNdjsonStore.CandleLine> src,
 			bool sourceIsOneHour )
@@ -100,12 +91,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				{
 				var a = Anchor6h (c.OpenTimeUtc);
 
-				// Разрешаем только допустимые 1h слоты внутри окна [anchor..anchor+6h)
 				if (a != curAnchor)
 					{
-					// завершили предыдущее окно
 					FlushIfAny ();
-					// старт нового
 					curAnchor = a;
 					open = c.Open;
 					high = c.High;
@@ -114,7 +102,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 					}
 				else
 					{
-					// накапливаем экстремумы и последний close
 					if (c.High > high) high = c.High;
 					if (c.Low < low) low = c.Low;
 					close = c.Close;

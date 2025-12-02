@@ -20,9 +20,11 @@
 			using var http = new HttpClient ();
 
 			// --- 1. Обновление свечей (сетевой блок) ---
-			await UpdateCandlesAsync (http);
+			await MeasureAsync ("UpdateCandlesAsync", () => UpdateCandlesAsync (http));
 
 			// --- 2. Загрузка всех таймфреймов и окна бэктеста ---
+			// ВАЖНО: оставляем out var прямо в вызове, без лямбды,
+			// чтобы компилятор видел, что все переменные точно инициализированы.
 			LoadAllCandlesAndWindow (
 				out var solAll6h,
 				out var btcAll6h,
@@ -34,17 +36,23 @@
 			);
 
 			// --- 3. Индикаторы ---
-			var indicators = await BuildIndicatorsAsync (http, fromUtc, toUtc);
+			var indicators = await MeasureAsync (
+				"BuildIndicatorsAsync",
+				() => BuildIndicatorsAsync (http, fromUtc, toUtc)
+			);
 
 			// --- 4. Дневные строки (allRows + mornings) ---
-			var rowsBundle = await BuildDailyRowsBundleAsync (
-				indicators,
-				fromUtc,
-				toUtc,
-				solAll6h,
-				btcAll6h,
-				paxgAll6h,
-				sol1m
+			var rowsBundle = await MeasureAsync (
+				"BuildDailyRowsBundleAsync",
+				() => BuildDailyRowsBundleAsync (
+					indicators,
+					fromUtc,
+					toUtc,
+					solAll6h,
+					btcAll6h,
+					paxgAll6h,
+					sol1m
+				)
 			);
 
 			// Собираем всё в один объект, чтобы не плодить out/ref.

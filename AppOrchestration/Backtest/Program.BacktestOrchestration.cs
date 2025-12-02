@@ -66,7 +66,8 @@ namespace SolSignalModel1D_Backtest
 				records: records,
 				candles1m: sol1m,
 				policies: policies,
-				config: backtestConfig
+				config: backtestConfig,
+				trainUntilUtc: _trainUntilUtc
 			);
 
 			// Бэктест + сохранение отчётов.
@@ -76,7 +77,8 @@ namespace SolSignalModel1D_Backtest
 				sol1m: sol1m,
 				policies: policies,
 				backtestConfig: backtestConfig,
-				nyTz: NyTz
+				nyTz: NyTz,
+				trainUntilUtc: _trainUntilUtc
 			);
 
 			// --- Сценарные стратегии по дневной модели ---

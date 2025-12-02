@@ -1,4 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
@@ -18,13 +20,16 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// <summary>
 		/// Запускает бэктест по готовым данным и заранее собранным PolicySpec.
 		/// Все "магические числа" (SL/TP, набор политик) приходят через BacktestConfig.
+		/// Граница trainUntilUtc передаётся снаружи (из Program), чтобы Core не зависел
+		/// от верхнего проекта.
 		/// </summary>
 		public void Run (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
-			BacktestConfig config )
+			BacktestConfig config,
+			DateTime trainUntilUtc )
 			{
 			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
 			if (records == null) throw new ArgumentNullException (nameof (records));
@@ -38,7 +43,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				candles1m,
 				config.DailyTpPct,
 				config.DailyStopPct,
-				NyTz);
+				NyTz,
+				trainUntilUtc);
 
 			// 2) Запуск PnL/Delayed/окон по политикам
 			var loop = new RollingLoop ();

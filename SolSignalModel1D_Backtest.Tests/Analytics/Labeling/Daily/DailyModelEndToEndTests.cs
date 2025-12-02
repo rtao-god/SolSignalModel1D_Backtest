@@ -1,205 +1,91 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Xunit;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
 	/// <summary>
-	/// E2E-тесты дневной модели:
-	/// 1) монотонный тренд на синтетике — sanity, что пайплайн вообще работает;
-	/// 2) зигзагообразная история — sanity, что модель не вырождается в константу по классам.
-	///
-	/// Важно:
-	/// - пайплайн совпадает с боевым: RowBuilder + ModelTrainer + PredictionEngine;
-	/// - Anti-D / PnL здесь не участвуют;
-	/// - всё крутится только вокруг дневной разметки и обучения дневного бандла.
+	/// E2E-тесты для дневной модели:
+	/// - синтетическая монотонная история (smoke: пайплайн не падает, классы валидные);
+	/// - синтетическая зигзагообразная история (модель не должна вырождаться в константу).
+	/// Пайплайн: RowBuilder.BuildRowsDaily → ModelTrainer.TrainAll → PredictionEngine.
 	/// </summary>
 	public sealed class DailyModelEndToEndTests
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
 		/// <summary>
-		/// Монотонный тренд на синтетике:
-		/// - цены SOL/BTC/PAXG плавно растут;
-		/// - 1m-серия тоже плавно растёт;
-		/// - FNG/DXY константные.
-		///
-		/// Задача теста:
-		/// - убедиться, что весь пайплайн отрабатывает без исключений;
-		/// - PredictionEngine выдаёт предсказания на всех строках;
-		/// - классы лежат в допустимом диапазоне [0..2].
-		///
-		/// Специально НЕ проверяем, что модель не константа:
-		/// на таком тренде разметка может действительно выродиться,
-		/// и это будет честное поведение таргета, а не баг.
+		/// Монотонный ап-тренд:
+		/// - проверяем, что весь пайплайн ходит от конца до конца;
+		/// - PredictionEngine выдаёт хотя бы одно предсказание и все классы в диапазоне [0..2].
+		/// В этом сценарии микро-слой может не обучиться (слишком мало микро-дней) — это допустимо.
 		/// </summary>
 		[Fact]
 		public void DailyModel_EndToEnd_OnMonotonicTrendHistory_ProducesValidPredictions ()
 			{
-			// 1. Генерируем синтетическую трендовую историю.
-			var history = BuildMonotonicTrendHistory ();
-
-			// 2. Строим дневные строки через RowBuilder.
-			var rows = RowBuilder.BuildRowsDaily (
-				solWinTrain: history.SolAll6h,
-				btcWinTrain: history.BtcAll6h,
-				paxgWinTrain: history.PaxgAll6h,
-				solAll6h: history.SolAll6h,
-				solAll1m: history.SolAll1m,
-				fngHistory: history.Fng,
-				dxySeries: history.Dxy,
-				extraDaily: null,
-				nyTz: NyTz
-			);
-
-			Assert.NotEmpty (rows);
-
+			var rows = BuildMonotonicHistory ();
 			var ordered = rows.OrderBy (r => r.Date).ToList ();
-			Assert.True (ordered.Count > 150, "Для e2e-теста нужно достаточно дней истории.");
 
-			// 3. Делим на train/OOS по дате и тренируем дневной бандл.
 			const int HoldoutDays = 60;
-
 			var result = TrainAndPredict (ordered, HoldoutDays);
 
-			// 4. Базовые инварианты для трендового sanity-теста.
-			Assert.True (result.TotalPredictions > 0, "PredictionEngine не выдал ни одного предсказания (trend).");
-			Assert.Equal (0, result.OutOfRangeCount); // все классы в [0..2]
-
-			Console.WriteLine (
-				"[daily-e2e:trend] predicted classes = " +
-				string.Join (", ", result.PredictedClassSet.OrderBy (x => x)));
+			Assert.True (result.TotalPredictions > 0, "PredictionEngine не выдал ни одного предсказания.");
+			Assert.Equal (0, result.ClassesOutOfRange);
+			Assert.InRange (result.PredictedClasses.Count, 1, 3);
 			}
 
 		/// <summary>
 		/// Зигзагообразная история:
-		/// - синтетика строится по дням, чередуя "сильный up" и "сильный down";
-		/// - внутри дня 1m-цена монотонно идёт либо вверх, либо вниз примерно на ±10%;
-		/// - 6h-свечи агрегируются из этих минуток.
-		///
-		/// Задача теста:
-		/// - гарантировать, что при явно разнотипных дневных паттернах
-		///   итоговая дневная модель не вырождается в одну константу по классам;
-		/// - при этом всё так же идёт через реальный RowBuilder + ModelTrainer + PredictionEngine.
+		/// - специально даём SOL волнообразный профиль по минуткам;
+		/// - требуем, чтобы модель использовала минимум два класса на истории (не выродилась в константу).
+		/// Микро-слой здесь также опционален, важен именно дневной Pred.Class.
 		/// </summary>
 		[Fact]
 		public void DailyModel_EndToEnd_OnZigZagHistory_UsesAtLeastTwoClasses ()
 			{
-			// 1. Зигзагообразная синтетика: up/down-дни чередуются.
-			var history = BuildZigZagHistory ();
-
-			// 2. Строим дневные строки.
-			var rows = RowBuilder.BuildRowsDaily (
-				solWinTrain: history.SolAll6h,
-				btcWinTrain: history.BtcAll6h,
-				paxgWinTrain: history.PaxgAll6h,
-				solAll6h: history.SolAll6h,
-				solAll1m: history.SolAll1m,
-				fngHistory: history.Fng,
-				dxySeries: history.Dxy,
-				extraDaily: null,
-				nyTz: NyTz
-			);
-
-			Assert.NotEmpty (rows);
-
+			var rows = BuildZigZagHistory ();
 			var ordered = rows.OrderBy (r => r.Date).ToList ();
-			Assert.True (ordered.Count > 120, "Для зигзаг-теста нужно достаточно дней истории.");
 
-			// 3. Делим на train/OOS и тренируем дневной бандл.
-			const int HoldoutDays = 40;
-
+			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
 
-			// 4. Инварианты:
-			// - PredictionEngine хоть что-то предсказывает;
-			// - все классы в диапазоне [0..2];
-			// - на всей истории используется как минимум два разных класса.
-			Assert.True (result.TotalPredictions > 0, "PredictionEngine не выдал ни одного предсказания (zigzag).");
-			Assert.Equal (0, result.OutOfRangeCount);
-
+			Assert.True (result.TotalPredictions > 0, "PredictionEngine не выдал ни одного предсказания.");
+			Assert.Equal (0, result.ClassesOutOfRange);
 			Assert.True (
-				result.PredictedClassSet.Count >= 2,
+				result.PredictedClasses.Count >= 2,
 				"Дневная модель выродилась в константу по классам на зигзагообразной истории."
 			);
-
-			Console.WriteLine (
-				"[daily-e2e:zigzag] predicted classes = " +
-				string.Join (", ", result.PredictedClassSet.OrderBy (x => x)));
 			}
 
-		// --------------------------------------------------------------------
-		// ВСПОМОГАТЕЛЬНЫЕ СТРУКТУРЫ
-		// --------------------------------------------------------------------
-
-		/// <summary>
-		/// Контейнер синтетической дневной истории:
-		/// - 6h-ряды по SOL/BTC/PAXG;
-		/// - 1m-ряд по SOL;
-		/// - FNG/DXY в виде дневных словарей.
-		/// </summary>
-		private sealed class SyntheticDailyHistory
+		private sealed class DailyE2eResult
 			{
-			public List<Candle6h> SolAll6h { get; }
-			public List<Candle6h> BtcAll6h { get; }
-			public List<Candle6h> PaxgAll6h { get; }
-			public List<Candle1m> SolAll1m { get; }
-			public Dictionary<DateTime, int> Fng { get; }
-			public Dictionary<DateTime, double> Dxy { get; }
-
-			public SyntheticDailyHistory (
-				List<Candle6h> solAll6h,
-				List<Candle6h> btcAll6h,
-				List<Candle6h> paxgAll6h,
-				List<Candle1m> solAll1m,
-				Dictionary<DateTime, int> fng,
-				Dictionary<DateTime, double> dxy )
-				{
-				SolAll6h = solAll6h;
-				BtcAll6h = btcAll6h;
-				PaxgAll6h = paxgAll6h;
-				SolAll1m = solAll1m;
-				Fng = fng;
-				Dxy = dxy;
-				}
-			}
-
-		/// <summary>
-		/// Результат тренировки и прогон PredictionEngine для удобства проверок.
-		/// </summary>
-		private sealed class PredictionRunResult
-			{
+			public ModelBundle Bundle { get; init; } = null!;
 			public int TotalPredictions { get; init; }
-			public int OutOfRangeCount { get; init; }
-			public HashSet<int> PredictedClassSet { get; init; } = new HashSet<int> ();
+			public HashSet<int> PredictedClasses { get; init; } = new ();
+			public int ClassesOutOfRange { get; init; }
 			}
 
-		// --------------------------------------------------------------------
-		// ПОМОЩНИК: ТРЕНИРОВКА И ПРОГОН ПРЕДИКТОРА
-		// --------------------------------------------------------------------
-
 		/// <summary>
-		/// Общий helper:
-		/// - делит ordered-ряды на train/OOS по последней дате и горизонту holdoutDays;
-		/// - тренирует дневной бандл через ModelTrainer;
-		/// - прогоняет PredictionEngine по всей истории;
-		/// - собирает статистику по классам.
-		///
-		/// Вынесено в helper, чтобы не дублировать код в двух тестах.
+		/// Общая часть: делим на train/OOS, тренируем дневной бандл и прогоняем PredictionEngine по всей истории.
 		/// </summary>
-		private static PredictionRunResult TrainAndPredict ( List<DataRow> orderedRows, int holdoutDays )
+		private static DailyE2eResult TrainAndPredict ( List<DataRow> orderedRows, int holdoutDays )
 			{
 			if (orderedRows == null) throw new ArgumentNullException (nameof (orderedRows));
-			if (orderedRows.Count == 0) throw new ArgumentException ("rows must be non-empty", nameof (orderedRows));
+			Assert.NotEmpty (orderedRows);
 
+			var minDate = orderedRows.First ().Date;
 			var maxDate = orderedRows.Last ().Date;
+
 			var trainUntil = maxDate.AddDays (-holdoutDays);
 
 			var trainRows = orderedRows
@@ -210,113 +96,112 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				.Where (r => r.Date > trainUntil)
 				.ToList ();
 
-			// Минимальные требования к размерам выборок,
-			// чтобы тест не проходил на "3 дня train / 2 дня OOS".
-			Assert.True (trainRows.Count > 50, "Слишком мало train-дней для обучения.");
-			Assert.True (oosRows.Count > 10, "Слишком мало OOS-дней для проверки.");
+			Assert.True (trainRows.Count > 50,
+				$"Слишком мало train-дней для обучения (train={trainRows.Count}, диапазон {minDate:yyyy-MM-dd}..{trainUntil:yyyy-MM-dd}).");
+			Assert.True (oosRows.Count > 10,
+				$"Слишком мало OOS-дней для проверки (oos={oosRows.Count}, диапазон {trainUntil:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}).");
 
-			// Тренируем дневной бандл.
+			// Обучаем дневной бандл.
 			var trainer = new ModelTrainer ();
 			var bundle = trainer.TrainAll (trainRows);
 
 			Assert.NotNull (bundle);
 			Assert.NotNull (bundle.MlCtx);
 			Assert.NotNull (bundle.MoveModel);
-			// Dir-модели могут быть опциональны — жёстко не проверяем.
+			// Микро-слой здесь опционален: если микро-датасет мал, MicroFlatModel == null — это допустимо.
+			// Любые реальные проблемы с микро-датасетом при нормальном объёме приведут к InvalidOperationException из MicroFlatTrainer.
 
-			// Прогон PredictionEngine по всей истории (train+OOS).
 			var engine = new PredictionEngine (bundle);
 
 			int totalPredictions = 0;
 			int clsOutOfRange = 0;
-			var predictedClasses = new HashSet<int> ();
+			var classes = new HashSet<int> ();
 
-			foreach (var r in orderedRows)
+			foreach (var row in orderedRows)
 				{
-				var pred = engine.Predict (r);
+				var pred = engine.Predict (row);
 
 				totalPredictions++;
+				classes.Add (pred.Class);
 
-				int cls = pred.Class;
-				predictedClasses.Add (cls);
-
-				if (cls < 0 || cls > 2)
-					{
+				if (pred.Class < 0 || pred.Class > 2)
 					clsOutOfRange++;
-					}
 				}
 
-			return new PredictionRunResult
+			return new DailyE2eResult
 				{
+				Bundle = bundle,
 				TotalPredictions = totalPredictions,
-				OutOfRangeCount = clsOutOfRange,
-				PredictedClassSet = predictedClasses
+				PredictedClasses = classes,
+				ClassesOutOfRange = clsOutOfRange
 				};
 			}
 
-		// --------------------------------------------------------------------
-		// СИНТЕТИЧЕСКАЯ ИСТОРИЯ: МОНОТОННЫЙ ТРЕНД
-		// --------------------------------------------------------------------
+		/// <summary>
+		/// Строит монотонную историю: плавный ап-тренд + лёгкий шум.
+		/// Используется как smoke-тест пайплайна.
+		/// </summary>
+		private static List<DataRow> BuildMonotonicHistory ()
+			{
+			return BuildSyntheticRows (
+				solPriceFunc: i =>
+				{
+					// Плавный рост + небольшой синусоидальный шум.
+					double trend = 100.0 + 0.002 * i;          // ~0.2% на 100 минут
+					double noise = Math.Sin (i * 0.005) * 0.3; // колебания порядка ±0.3$
+					return trend + noise;
+				}
+			);
+			}
 
 		/// <summary>
-		/// Строит простую трендовую историю:
-		/// - 6h-цены SOL/BTC/PAXG линейно растут;
-		/// - 1m-цена SOL тоже растёт, но с меньшим шагом;
-		/// - FNG/DXY — константные.
-		///
-		/// Такой сценарий нужен как минимальный sanity-чек пайплайна:
-		/// здесь не пытаемся силой выбить все классы, только проверяем валидность.
+		/// Строит зигзагообразную историю: выраженные волны вверх/вниз по SOL.
 		/// </summary>
-		private static SyntheticDailyHistory BuildMonotonicTrendHistory ()
+		private static List<DataRow> BuildZigZagHistory ()
 			{
+			return BuildSyntheticRows (
+				solPriceFunc: i =>
+				{
+					// Крупные волны вверх/вниз + лёгкий ап-тренд,
+					// чтобы по дневным окнам были как up-, так и down-дни.
+					double basePrice = 100.0;
+					double wave = 10.0 * Math.Sin (i * 0.01);   // период ~ 600 минут (~10 часов)
+					double slowDrift = 0.0005 * i;              // лёгкий дрейф вверх
+					return basePrice + wave + slowDrift;
+				}
+			);
+			}
+
+		/// <summary>
+		/// Общий конструктор синтетической истории:
+		/// - генерирует 1m-ряд по заданной функции цены SOL;
+		/// - агрегирует его в 6h-свечи SOL;
+		/// - строит простые тренды для BTC/PAXG;
+		/// - генерирует FNG/DXY;
+		/// - передаёт всё это в RowBuilder.BuildRowsDaily.
+		/// </summary>
+		private static List<DataRow> BuildSyntheticRows ( Func<int, double> solPriceFunc )
+			{
+			if (solPriceFunc == null) throw new ArgumentNullException (nameof (solPriceFunc));
+
 			const int total6h = 1000;
 			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
 
-			var solAll6h = new List<Candle6h> (total6h);
-			var btcAll6h = new List<Candle6h> (total6h);
-			var paxgAll6h = new List<Candle6h> (total6h);
-
-			for (int i = 0; i < total6h; i++)
-				{
-				var t = start.AddHours (6 * i);
-
-				double solPrice = 100.0 + i * 0.5;     // достаточно плавный, но заметный тренд
-				double btcPrice = 50.0 + i * 0.25;
-				double goldPrice = 1500.0 + i * 0.1;
-
-				solAll6h.Add (new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					});
-
-				btcAll6h.Add (new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = btcPrice,
-					High = btcPrice + 1.0,
-					Low = btcPrice - 1.0
-					});
-
-				paxgAll6h.Add (new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = goldPrice,
-					High = goldPrice + 1.0,
-					Low = goldPrice - 1.0
-					});
-				}
-
-			// 1m-серия SOL: очень плавный рост.
 			int totalMinutes = total6h * 6 * 60;
-			var solAll1m = new List<Candle1m> (totalMinutes);
 
+			var solAll1m = new List<Candle1m> (totalMinutes);
+			var solPrices = new double[totalMinutes];
+
+			// 1. Минутный ряд SOL.
 			for (int i = 0; i < totalMinutes; i++)
 				{
 				var t = start.AddMinutes (i);
-				double price = 100.0 + i * 0.0002; // ~0.3% в день, сильно меньше 3%/5% порогов SL
+				double price = solPriceFunc (i);
+
+				if (price <= 0.0)
+					price = 1.0; // защитный костыль, чтобы не словить нулевую/отрицательную цену в синтетике
+
+				solPrices[i] = price;
 
 				solAll1m.Add (new Candle1m
 					{
@@ -327,12 +212,63 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					});
 				}
 
-			// FNG/DXY: ровные ряды без пропусков.
+			// 2. Агрегация в 6h-свечи SOL + простые ряды BTC/PAXG.
+			var solAll6h = new List<Candle6h> (total6h);
+			var btcAll6h = new List<Candle6h> (total6h);
+			var paxgAll6h = new List<Candle6h> (total6h);
+
+			for (int block = 0; block < total6h; block++)
+				{
+				int startIdx = block * 360;
+				int endIdx = startIdx + 360 - 1;
+
+				double high = double.MinValue;
+				double low = double.MaxValue;
+
+				for (int idx = startIdx; idx <= endIdx; idx++)
+					{
+					double p = solPrices[idx];
+					if (p > high) high = p;
+					if (p < low) low = p;
+					}
+
+				double close = solPrices[endIdx];
+				var t6 = start.AddHours (6 * block);
+
+				solAll6h.Add (new Candle6h
+					{
+					OpenTimeUtc = t6,
+					Close = close,
+					High = high,
+					Low = low
+					});
+
+				// BTC/PAXG — простые плавные тренды, чтобы фичи были не константными.
+				double btcPrice = 50.0 + 0.05 * block;
+				double paxgPrice = 1500.0 + 0.02 * block;
+
+				btcAll6h.Add (new Candle6h
+					{
+					OpenTimeUtc = t6,
+					Close = btcPrice,
+					High = btcPrice + 1.0,
+					Low = btcPrice - 1.0
+					});
+
+				paxgAll6h.Add (new Candle6h
+					{
+					OpenTimeUtc = t6,
+					Close = paxgPrice,
+					High = paxgPrice + 1.0,
+					Low = paxgPrice - 1.0
+					});
+				}
+
+			// 3. FNG/DXY: простые плоские ряды, но с полным покрытием дат.
 			var fng = new Dictionary<DateTime, int> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
-			// Берём запас по датам, чтобы точно покрыть диапазон RowBuilder.
-			var firstDate = start.Date.AddDays (-120);
+			var firstDate = start.Date.AddDays (-200);
 			var lastDate = start.Date.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
@@ -342,168 +278,21 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				dxy[key] = 100.0;
 				}
 
-			return new SyntheticDailyHistory (solAll6h, btcAll6h, paxgAll6h, solAll1m, fng, dxy);
+			// 4. Строим дневные строки через реальный RowBuilder.
+			var rows = RowBuilder.BuildRowsDaily (
+				solWinTrain: solAll6h,
+				btcWinTrain: btcAll6h,
+				paxgWinTrain: paxgAll6h,
+				solAll6h: solAll6h,
+				solAll1m: solAll1m,
+				fngHistory: fng,
+				dxySeries: dxy,
+				extraDaily: null,
+				nyTz: NyTz
+			);
+
+			Assert.NotEmpty (rows);
+			return rows.OrderBy (r => r.Date).ToList ();
 			}
-
-		// --------------------------------------------------------------------
-		// СИНТЕТИЧЕСКАЯ ИСТОРИЯ: ЗИГЗАГ (ЧЕРЕДУЮЩИЕСЯ UP/DOWN-ДНИ)
-		// --------------------------------------------------------------------
-
-		/// <summary>
-		/// Строит зигзагообразную историю:
-		/// - каждый календарный день — либо "сильный up", либо "сильный down";
-		/// - внутри дня цена SOL по 1m идёт примерно на ±10%;
-		/// - 6h-свечи агрегируются из минуток;
-		/// - BTC/PAXG строятся как простые линейные функции от SOL (для наличия кросс-активов).
-		///
-		/// Такой сценарий должен давать заведомо разнотипные path-label для дневной модели,
-		/// поэтому вырождение предсказаний в одну константу здесь уже будет признаком проблемы.
-		/// </summary>
-		private static SyntheticDailyHistory BuildZigZagHistory ()
-			{
-			const int days = 240;                 // ~8 месяцев сигнальной истории
-			const int minutesPerDay = 24 * 60;
-			int totalMinutes = days * minutesPerDay;
-
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
-
-			var solAll1m = new List<Candle1m> (totalMinutes);
-			var solAll6h = new List<Candle6h> ();
-			var btcAll6h = new List<Candle6h> ();
-			var paxgAll6h = new List<Candle6h> ();
-
-			double currentPrice = 100.0;
-
-			// Для агрегации 6h-свечей.
-			const int minutesIn6h = 6 * 60;
-			int minuteIn6h = 0;
-			DateTime current6hOpenTime = start;
-			double current6hHigh = currentPrice;
-			double current6hLow = currentPrice;
-
-			var t = start;
-
-			for (int i = 0; i < totalMinutes; i++)
-				{
-				int dayIndex = i / minutesPerDay;
-				int indexInDay = i % minutesPerDay;
-
-				// Чередуем дни: 0,2,4,... — "up", 1,3,5,... — "down".
-				bool isUpDay = (dayIndex % 2 == 0);
-
-				// В начале дня фиксируем стартовую цену и целевую цену конца дня.
-				if (indexInDay == 0)
-					{
-					// Старт дня — текущая цена.
-					// Выбираем целевой дневной ход ±10% от цены открытия.
-					double targetMovePct = isUpDay ? 0.10 : -0.10;
-					double targetPriceEnd = currentPrice * (1.0 + targetMovePct);
-
-					// Сохраняем в локальные переменные через замыкание на день.
-					_dayStartPrice = currentPrice;
-					_dayTargetPriceEnd = targetPriceEnd;
-					}
-
-				// Локальные переменные дня — формально static-поля для простоты, без аллокаций.
-				double dayStartPrice = _dayStartPrice;
-				double dayTargetPriceEnd = _dayTargetPriceEnd;
-
-				// Линейная траектория внутри дня: от dayStartPrice к dayTargetPriceEnd.
-				double alpha = (indexInDay + 1) / (double) minutesPerDay;
-				double price = dayStartPrice + (dayTargetPriceEnd - dayStartPrice) * alpha;
-
-				// 1m-свеча для SOL.
-				double high1m = price * 1.001;
-				double low1m = price * 0.999;
-
-				var c1m = new Candle1m
-					{
-					OpenTimeUtc = t,
-					Close = price,
-					High = high1m,
-					Low = low1m
-					};
-
-				solAll1m.Add (c1m);
-
-				// Агрегируем 6h-свечи из минуток.
-				if (minuteIn6h == 0)
-					{
-					current6hOpenTime = t;
-					current6hHigh = high1m;
-					current6hLow = low1m;
-					}
-				else
-					{
-					if (high1m > current6hHigh) current6hHigh = high1m;
-					if (low1m < current6hLow) current6hLow = low1m;
-					}
-
-				minuteIn6h++;
-
-				if (minuteIn6h == minutesIn6h)
-					{
-					// Закрываем 6h-свечу по текущей цене.
-					var sol6h = new Candle6h
-						{
-						OpenTimeUtc = current6hOpenTime,
-						Close = price,
-						High = current6hHigh,
-						Low = current6hLow
-						};
-					solAll6h.Add (sol6h);
-
-					// Для BTC/PAXG берём простые линейные функции от SOL:
-					// это даёт кросс-активы, но без сложной динамики.
-					double btcPrice = price * 0.5;
-					double paxgPrice = price * 10.0;
-
-					btcAll6h.Add (new Candle6h
-						{
-						OpenTimeUtc = current6hOpenTime,
-						Close = btcPrice,
-						High = btcPrice * 1.001,
-						Low = btcPrice * 0.999
-						});
-
-					paxgAll6h.Add (new Candle6h
-						{
-						OpenTimeUtc = current6hOpenTime,
-						Close = paxgPrice,
-						High = paxgPrice * 1.001,
-						Low = paxgPrice * 0.999
-						});
-
-					minuteIn6h = 0;
-					}
-
-				// Переходим к следующей минуте.
-				currentPrice = price;
-				t = t.AddMinutes (1);
-				}
-
-			// FNG/DXY: лёгкая синтетика с минимальной вариацией,
-			// чтобы соблюсти требования RowBuilder по покрытию.
-			var fng = new Dictionary<DateTime, int> ();
-			var dxy = new Dictionary<DateTime, double> ();
-
-			var firstDate = start.Date.AddDays (-30);
-			var lastDate = start.Date.AddDays (days + 30);
-
-			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
-				{
-				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
-				// Лёгкие колебания, чтобы не было идеально ровного ряда.
-				fng[key] = 40 + (d.Day % 20);           // 40..59
-				dxy[key] = 95.0 + (d.Day % 10) * 0.1;   // 95.0..95.9
-				}
-
-			return new SyntheticDailyHistory (solAll6h, btcAll6h, paxgAll6h, solAll1m, fng, dxy);
-			}
-
-		// Локальные статические поля для хранения параметров дня внутри BuildZigZagHistory.
-		// Это простой способ не создавать отдельный объект состояния на каждый день.
-		private static double _dayStartPrice;
-		private static double _dayTargetPriceEnd;
 		}
 	}

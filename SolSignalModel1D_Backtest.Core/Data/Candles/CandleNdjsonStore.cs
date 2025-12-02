@@ -16,6 +16,11 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 		public CandleNdjsonStore ( string path ) { _path = path; }
 		public string Path => _path;
 
+		/// <summary>
+		/// Возвращает timestamp самой последней (самой свежей) свечи в файле.
+		/// Если файл отсутствует или пуст — null.
+		/// Исключения при чтении/парсинге не подавляются.
+		/// </summary>
 		public DateTime? TryGetLastTimestampUtc ()
 			{
 			if (!File.Exists (_path)) return null;
@@ -36,23 +41,51 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			string? lastLine = sr.ReadLine ();
 			if (string.IsNullOrWhiteSpace (lastLine)) return null;
 
-			try
+			var doc = JsonDocument.Parse (lastLine);
+			if (doc.RootElement.TryGetProperty ("t", out var tEl))
 				{
-				var doc = JsonDocument.Parse (lastLine);
-				if (doc.RootElement.TryGetProperty ("t", out var tEl))
-					{
-					var dt = DateTime.Parse (
-						tEl.GetString ()!,
-						null,
-						DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+				var dt = DateTime.Parse (
+					tEl.GetString ()!,
+					null,
+					DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
 
-					return dt;
-					}
+				return dt;
 				}
-			catch
+
+			return null;
+			}
+
+		/// <summary>
+		/// Возвращает timestamp самой первой (самой старой) свечи в файле.
+		/// Если файл отсутствует или не удалось найти ни одной валидной строки — null.
+		/// Исключения при чтении/парсинге не подавляются.
+		/// </summary>
+		public DateTime? TryGetFirstTimestampUtc ()
+			{
+			if (!File.Exists (_path)) return null;
+
+			using var fs = new FileStream (_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+			if (fs.Length == 0) return null;
+
+			using var sr = new StreamReader (fs);
+			string? line;
+
+			while ((line = sr.ReadLine ()) != null)
 				{
-				// Повреждённая последняя строка — считаем, что таймстампа нет.
+				if (string.IsNullOrWhiteSpace (line)) continue;
+
+				var doc = JsonDocument.Parse (line);
+				if (!doc.RootElement.TryGetProperty ("t", out var tEl))
+					continue;
+
+				var dt = DateTime.Parse (
+					tEl.GetString ()!,
+					null,
+					DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
+				return dt;
 				}
+
 			return null;
 			}
 
@@ -62,9 +95,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			using var sw = new StreamWriter (_path, append: true);
 			foreach (var c in candles)
 				{
-				// Важно: порядок свойств стабильный -> формат строки стабилен.
-				// Это позволяет в будущем, при необходимости, заменить JsonDocument
-				// на ручной парсер без риска "заглядывания вперёд".
 				var line = JsonSerializer.Serialize (new
 					{
 					t = c.OpenTimeUtc.ToString ("o"),
@@ -87,7 +117,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			var res = new List<CandleLine> ();
 			if (!File.Exists (_path)) return res;
 
-			// Нормализуем входные границы в UTC, чтобы избежать странностей с Kind.
 			startUtc = startUtc.ToUniversalTime ();
 			endUtc = endUtc.ToUniversalTime ();
 
@@ -102,43 +131,32 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				{
 				if (string.IsNullOrWhiteSpace (line)) continue;
 
-				try
+				var doc = JsonDocument.Parse (line);
+				var root = doc.RootElement;
+
+				if (!root.TryGetProperty ("t", out var tEl)) continue;
+
+				var dt = DateTime.Parse (
+					tEl.GetString ()!,
+					null,
+					DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
+				if (dt < startUtc)
 					{
-					var doc = JsonDocument.Parse (line);
-					var root = doc.RootElement;
-
-					if (!root.TryGetProperty ("t", out var tEl)) continue;
-
-					var dt = DateTime.Parse (
-						tEl.GetString ()!,
-						null,
-						DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
-
-					// Файл отсортирован по времени:
-					// 1) если свеча раньше нужного интервала — просто пропускаем;
-					// 2) если свеча идёт ПОСЛЕ endUtc — дальше можно не читать вообще.
-					if (dt < startUtc)
-						{
-						continue;
-						}
-
-					if (dt >= endUtc)
-						{
-						// Критичная оптимизация: выходим из цикла, остальные строки ещё "позже".
-						break;
-						}
-
-					double o = root.GetProperty ("o").GetDouble ();
-					double h = root.GetProperty ("h").GetDouble ();
-					double l = root.GetProperty ("l").GetDouble ();
-					double c = root.GetProperty ("c").GetDouble ();
-
-					res.Add (new CandleLine (dt, o, h, l, c));
+					continue;
 					}
-				catch
+
+				if (dt >= endUtc)
 					{
-					// Некорректная строка — просто пропускаем.
+					break;
 					}
+
+				double o = root.GetProperty ("o").GetDouble ();
+				double h = root.GetProperty ("h").GetDouble ();
+				double l = root.GetProperty ("l").GetDouble ();
+				double c = root.GetProperty ("c").GetDouble ();
+
+				res.Add (new CandleLine (dt, o, h, l, c));
 				}
 
 			return res;

@@ -20,6 +20,16 @@ namespace SolSignalModel1D_Backtest.Core.ML
 		/// </summary>
 		private const float FlatMicroProbThresh = 0.60f;
 
+		/// <summary>
+		/// Лимит диагностических логов по микро-слою, чтобы не заспамить консоль.
+		/// </summary>
+		private const int MicroDebugMaxRows = 64;
+
+		/// <summary>
+		/// Счётчик уже выведенных диагностических строк по микро-слою.
+		/// </summary>
+		private static int _microDebugPrinted;
+
 		public readonly struct PredResult
 			{
 			public PredResult ( int cls, string reason, MicroInfo micro )
@@ -168,6 +178,29 @@ namespace SolSignalModel1D_Backtest.Core.ML
 
 			var microOut = microEng.Predict (microSample);
 			float p = microOut.Probability;
+
+			// Диагностический лог по реальным микро-дням (есть path-based разметка).
+			// Здесь видно:
+			//   - факт microUp/microDown;
+			//   - предсказанный знак;
+			//   - вероятность;
+			//   - будет ли сигнал принят порогом FlatMicroProbThresh.
+			if (_microDebugPrinted < MicroDebugMaxRows && (r.FactMicroUp || r.FactMicroDown))
+				{
+				bool accepted = p >= FlatMicroProbThresh;
+
+				Console.WriteLine (
+					"[debug-micro] {0:yyyy-MM-dd} factUp={1}, factDown={2}, predUp={3}, prob={4:0.000}, accepted={5}",
+					r.Date,
+					r.FactMicroUp,
+					r.FactMicroDown,
+					microOut.PredictedLabel,
+					p,
+					accepted
+				);
+
+				_microDebugPrinted++;
+				}
 
 			if (p < FlatMicroProbThresh)
 				{

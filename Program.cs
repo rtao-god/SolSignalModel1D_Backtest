@@ -27,16 +27,27 @@ namespace SolSignalModel1D_Backtest
 
 		public static async Task Main ( string[] args )
 			{
+			// Можно ещё залогировать версию рантайма, чтобы исключить странности среды.
+			Console.WriteLine ($".NET runtime: {Environment.Version}, 64bit={Environment.Is64BitProcess}");
+
 			// --- 1. Бутстрап свечей и дневных строк ---
 			var (allRows, mornings, solAll6h, solAll1h, sol1m) =
-				await BootstrapRowsAndCandlesAsync ();
+				await MeasureAsync (
+					"(top) BootstrapRowsAndCandlesAsync",
+					() => BootstrapRowsAndCandlesAsync ()
+				);
 
 			// --- 2. Дневная модель: PredictionEngine + forward-метрики ---
-			var records = await BuildPredictionRecordsAsync (allRows, mornings, solAll6h);
-			Console.WriteLine ($"[records] built = {records.Count}");
+			var records = await MeasureAsync (
+				"BuildPredictionRecordsAsync",
+				() => BuildPredictionRecordsAsync (allRows, mornings, solAll6h)
+			);
 
 			// --- 3. SL-модель (офлайн) поверх дневных предсказаний ---
-			RunSlModelOffline (allRows, records, solAll1h, sol1m, solAll6h);
+			Measure (
+				"RunSlModelOffline",
+				() => RunSlModelOffline (allRows, records, solAll1h, sol1m, solAll6h)
+			);
 
 			// --- 4. Self-checks (по флажку) ---
 			if (RunSelfChecksOnStartup)
@@ -53,7 +64,10 @@ namespace SolSignalModel1D_Backtest
 					NyTz = NyTz
 					};
 
-				var selfCheckResult = await SelfCheckRunner.RunAsync (selfCheckContext);
+				var selfCheckResult = await MeasureAsync (
+					"SelfCheckRunner.RunAsync",
+					() => SelfCheckRunner.RunAsync (selfCheckContext)
+				);
 
 				Console.WriteLine ($"[self-check] Success = {selfCheckResult.Success}");
 				if (selfCheckResult.Warnings.Count > 0)
@@ -78,11 +92,18 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			// --- 5. Бэктест + отчёты ---
-			await EnsureBacktestProfilesInitializedAsync ();
-			RunBacktestAndReports (mornings, records, sol1m);
+			await MeasureAsync (
+				"EnsureBacktestProfilesInitializedAsync",
+				() => EnsureBacktestProfilesInitializedAsync ()
+			);
+
+			Measure (
+				"RunBacktestAndReports",
+				() => RunBacktestAndReports (mornings, records, sol1m)
+			);
 			}
 
-			private static void DumpDailyPredHistograms ( List<PredictionRecord> records, DateTime trainUntilUtc )
+		private static void DumpDailyPredHistograms ( List<PredictionRecord> records, DateTime trainUntilUtc )
 			{
 			if (records == null || records.Count == 0)
 				return;

@@ -3,22 +3,23 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Reports;
+using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 using SolSignalModel1D_Backtest.Reports.CurrentPrediction;
 using SolSignalModel1D_Backtest.Reports.Model;
 using SolSignalModel1D_Backtest.Reports.Reporting;
 using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
-using SolSignalModel1D_Backtest.Reports;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
-using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 	{
@@ -69,7 +70,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// Сохраняет:
 		/// - backtest_summary (универсальный отчёт по PnL);
 		/// - backtest_baseline (упрощённый снапшот по политикам);
-		/// - backtest_model_stats (не PFI: confusion + SL-модель);
+		/// - backtest_model_stats (не PFI: confusion + SL-модель, теперь по сегментам Train/OOS/Recent/Full);
 		/// - policy_ratios (Sharpe/Sortino/Calmar по политикам baseline).
 		/// </summary>
 		public static void SaveBacktestReports (
@@ -78,7 +79,8 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
 			BacktestConfig backtestConfig,
-			TimeZoneInfo nyTz )
+			TimeZoneInfo nyTz,
+			DateTime? trainUntilUtc )
 			{
 			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
 			if (records == null) throw new ArgumentNullException (nameof (records));
@@ -177,37 +179,22 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 						$"[backtest-model-stats] full period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
 						$"totalRecords = {orderedRecords.Count}");
 
-					// 2) Делаем рабочее окно: последние 240 календарных дней от максимальной даты.
-					const int RecentDays = 240;
-					var fromRecentUtc = maxDateUtc.AddDays (-RecentDays);
+					// 2) Граница train/OOS:
+					// если внешняя граница не передана, считаем, что весь период — train.
+					var effectiveTrainUntilUtc = trainUntilUtc ?? maxDateUtc;
 
-					var recentRecords = orderedRecords
-						.Where (r => r.DateUtc >= fromRecentUtc)
-						.ToList ();
-
-					Console.WriteLine (
-						$"[backtest-model-stats] using recent window = last {RecentDays} days " +
-						$"(from {fromRecentUtc:yyyy-MM-dd}), recentRecords = {recentRecords.Count}");
-
-					// Если по каким-то причинам в последних 240 днях нет записей,
-					// честно логируем и возвращаемся к полной истории.
-					if (recentRecords.Count == 0)
-						{
-						Console.WriteLine (
-							"[backtest-model-stats] no records in recent 240-day window, " +
-							"falling back to full history for model stats.");
-						recentRecords = orderedRecords;
-						}
-
-					var statsSnapshot = BacktestModelStatsSnapshotBuilder.Compute (
-						records: recentRecords,
+					var multi = BacktestModelStatsMultiSnapshotBuilder.Build (
+						allRecords: records,
 						sol1m: sol1m,
+						nyTz: nyTz,
 						dailyTpPct: backtestConfig.DailyTpPct,
 						dailySlPct: backtestConfig.DailyStopPct,
-						nyTz: nyTz
+						trainUntilUtc: trainUntilUtc ?? records.Max (r => r.DateUtc),
+						recentDays: 240,
+						runKind: ModelRunKind.Analytics
 					);
 
-					var statsReport = BacktestModelStatsReportBuilder.Build (statsSnapshot);
+					var statsReport = BacktestModelStatsReportBuilder.Build (multi);
 
 					var storage = new ReportStorage ();
 					storage.Save (statsReport);

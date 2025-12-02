@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Domain;
+using System.Diagnostics;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -30,6 +28,12 @@ namespace SolSignalModel1D_Backtest
 			out DateTime toUtc
 		)
 			{
+			// Логируем время работы блока, чтобы видеть, тормозит ли он сам по себе.
+			// Альтернатива: вызывать Measure("LoadAllCandlesAndWindow", ...) снаружи,
+			// но тогда вылезают проблемы с definite assignment для out-переменных.
+			var sw = Stopwatch.StartNew ();
+			Console.WriteLine ("[perf] LoadAllCandlesAndWindow... start");
+
 			var solSym = TradingSymbols.SolUsdtInternal;
 			var btcSym = TradingSymbols.BtcUsdtInternal;
 			var paxgSym = TradingSymbols.PaxgUsdtInternal;
@@ -63,6 +67,9 @@ namespace SolSignalModel1D_Backtest
 			var lastUtc = solAll6h.Max (c => c.OpenTimeUtc);
 			fromUtc = lastUtc.Date.AddDays (-540);
 			toUtc = lastUtc.Date;
+
+			sw.Stop ();
+			Console.WriteLine ($"[perf] LoadAllCandlesAndWindow done in {sw.Elapsed.TotalSeconds:F1}s");
 			}
 		}
 	}

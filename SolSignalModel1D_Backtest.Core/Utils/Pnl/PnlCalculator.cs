@@ -1,4 +1,7 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
@@ -19,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 		// === Распределение капитала по бакетам ===
 		private const double DailyShare = 0.60;
-		private const double IntradayShare = 0.25;       // бакет зарезервирован, сейчас не торгуем
+		private const double IntradayShare = 0.25;        // бакет зарезервирован, сейчас не торгуем
 		private const double DelayedShare = 0.15;
 
 		// === Размер позиции внутри бакета (доля бакета) ===
@@ -54,9 +57,17 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			bool useAntiDirectionOverlay = false )
 			{
 			ComputePnL (
-				records, candles1m, policy, marginMode,
-				out trades, out totalPnlPct, out maxDdPct, out tradesBySource,
-				out withdrawnTotal, out bucketSnapshots, out hadLiquidation,
+				records,
+				candles1m,
+				policy,
+				marginMode,
+				out trades,
+				out totalPnlPct,
+				out maxDdPct,
+				out tradesBySource,
+				out withdrawnTotal,
+				out bucketSnapshots,
+				out hadLiquidation,
 				useDailyStopLoss: useStopLoss,
 				useDelayedIntradayStops: useStopLoss,
 				dailyTpPct: 0.03,
@@ -102,6 +113,18 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			// Сортируем минутки по времени, чтобы дальнейшие срезы работали корректно.
 			var m1 = candles1m.OrderBy (m => m.OpenTimeUtc).ToList ();
 
+			// Агрегированная статистика по Anti-D overlay за один прогон ComputePnL.
+			int antiDChecked = 0;                     // сколько дней вообще прогнали через ShouldApplyAntiDirection
+			int antiDApplied = 0;                     // сколько дней реально перевернули Anti-D
+			int[] antiDByPredLabel = new int[3];      // счётчики по PredLabel: [0] = down, [1] = flat, [2] = up
+
+			var antiDByLev = new Dictionary<double, int> (); // сколько срабатываний по каждому плечу
+
+			int antiDMinMoveCount = 0;               // сколько дней с валидным MinMove у сработавшего Anti-D
+			double antiDMinMoveSum = 0.0;            // сумма MinMove по этим дням
+			double antiDMinMoveMin = double.MaxValue;
+			double antiDMinMoveMax = 0.0;
+
 			// Журналы результатов
 			var resultTrades = new List<PnLTrade> ();
 			var resultBySource = new Dictionary<string, int> (StringComparer.OrdinalIgnoreCase);
@@ -109,7 +132,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 			double withdrawnLocal = 0.0;
 			bool anyLiquidation = false;  // факт «руин-события» хотя бы по одному бакету
-			bool globalDead = false;      // глобальная смерть аккаунта (для Cross или всех бакетов в Isolated)
+			bool globalDead = false;  // глобальная смерть аккаунта (для Cross или всех бакетов в Isolated)
 
 			// ЛОКАЛЬНАЯ ФУНКЦИЯ: регистрация трейда + обновление бакета/метрик.
 			// Здесь делается полный цикл:
@@ -198,8 +221,14 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 				// 3) Обновляем equity бакета и глобальное состояние.
 				UpdateBucketEquity (
-					marginMode, bucket, marginUsed, positionPnl, positionComm,
-					priceLiquidated, ref withdrawnLocal, out bool diedThisTrade);
+					marginMode,
+					bucket,
+					marginUsed,
+					positionPnl,
+					positionComm,
+					priceLiquidated,
+					ref withdrawnLocal,
+					out bool diedThisTrade);
 
 				if (diedThisTrade)
 					{
@@ -290,12 +319,44 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 				// Anti-D overlay: переворачиваем только фактическое направление в PnL,
 				// PredLabel / Micro остаются как есть для метрик модели.
-				if (useAntiDirectionOverlay && ShouldApplyAntiDirection (rec, lev))
+				if (useAntiDirectionOverlay)
 					{
-					bool tmp = goLong;
-					goLong = goShort;
-					goShort = tmp;
-					rec.AntiDirectionApplied = true;
+					antiDChecked++;
+
+					bool applyAnti = ShouldApplyAntiDirection (rec, lev);
+
+					if (applyAnti)
+						{
+						antiDApplied++;
+
+						// Раскладываем по PredLabel 0/1/2, если в допустимом диапазоне.
+						if (rec.PredLabel is >= 0 and <= 2)
+							{
+							antiDByPredLabel[rec.PredLabel]++;
+							}
+
+						// Раскладываем по плечу.
+						if (!antiDByLev.TryGetValue (lev, out var cnt))
+							cnt = 0;
+						antiDByLev[lev] = cnt + 1;
+
+						// Статистика по MinMove для сработавших дней.
+						var mm = rec.MinMove;
+						if (!double.IsNaN (mm) && mm > 0.0)
+							{
+							antiDMinMoveCount++;
+							antiDMinMoveSum += mm;
+
+							if (mm < antiDMinMoveMin) antiDMinMoveMin = mm;
+							if (mm > antiDMinMoveMax) antiDMinMoveMax = mm;
+							}
+
+						// Фактический разворот направления в PnL.
+						bool tmp = goLong;
+						goLong = goShort;
+						goShort = tmp;
+						rec.AntiDirectionApplied = true;
+						}
 					}
 
 				// Вход в окно таргета:
@@ -384,7 +445,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 						}
 					else
 						{
-						// Без intraday SL/TP или результат None — 
+						// Без intraday SL/TP или результат None —
 						// закрываемся по цене последней минутки в окне,
 						// но временем выхода считаем baseline-выход (dayEnd).
 						var last = delayedMinutes.Last ();
@@ -439,6 +500,53 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 			// hadLiquidation = хотя бы один бакет «умер» во время сессии.
 			hadLiquidation = anyLiquidation;
+
+			// Сводная статистика по Anti-D overlay за этот прогон PnL.
+			if (useAntiDirectionOverlay && antiDChecked > 0)
+				{
+				double appliedPct = (double) antiDApplied / antiDChecked * 100.0;
+
+				Console.WriteLine (
+					"[anti-d][summary] policy={0}, checked={1}, applied={2} ({3:0.0}%)",
+					policy.Name,
+					antiDChecked,
+					antiDApplied,
+					appliedPct
+				);
+
+				// Разбивка по PredLabel.
+				int lbl0 = antiDByPredLabel[0];
+				int lbl1 = antiDByPredLabel[1];
+				int lbl2 = antiDByPredLabel[2];
+
+				Console.WriteLine (
+					"[anti-d][labels] label0={0}, label1={1}, label2={2}",
+					lbl0, lbl1, lbl2
+				);
+
+				// Разбивка по плечу.
+				if (antiDByLev.Count > 0)
+					{
+					var parts = antiDByLev
+						.OrderBy (kv => kv.Key)
+						.Select (kv => $"{kv.Key:0.##}x:{kv.Value}");
+
+					Console.WriteLine ("[anti-d][by-lev] " + string.Join (", ", parts));
+					}
+
+				// Статистика по MinMove для сработавших дней.
+				if (antiDMinMoveCount > 0)
+					{
+					double avgMm = antiDMinMoveSum / antiDMinMoveCount;
+					Console.WriteLine (
+						"[anti-d][minMove] count={0}, avg={1:0.000}, min={2:0.000}, max={3:0.000}",
+						antiDMinMoveCount,
+						avgMm,
+						antiDMinMoveMin,
+						antiDMinMoveMax
+					);
+					}
+				}
 			}
 		}
 	}

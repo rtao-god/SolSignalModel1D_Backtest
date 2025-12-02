@@ -1,45 +1,47 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 	{
 	/// <summary>
-	/// Печать «модельных» статистик:
-	/// - дневная путаница (per-class acc + overall)
-	/// - путаница по тренду (UP vs DOWN, с учётом micro в предсказании)
-	/// - SL-модель (runtime, path-based по 1m, с теми же TP/SL%, что и в PnL)
-	///   + цветной summary по основным метрикам SL.
-	/// Все расчёты SL-исхода привязаны к окну [t0; t_exit), где
-	/// t0 = PredictionRecord.DateUtc, t_exit = Windowing.ComputeBaselineExitUtc(t0, nyTz).
-	/// Теперь расчёты вынесены в BacktestModelStatsSnapshotBuilder, а этот класс отвечает только за вывод.
+	/// Печать «модельных» статистик по дневной схеме/SL-модели в разрезе сегментов:
+	/// - Train (DateUtc <= trainUntilUtc);
+	/// - OOS (DateUtc > trainUntilUtc);
+	/// - Recent (последние N дней);
+	/// - Full history.
+	/// Вся математика расчёта вынесена в BacktestModelStatsSnapshotBuilder /
+	/// BacktestModelStatsMultiSnapshotBuilder, здесь только подготовка сегментов и вывод.
 	/// </summary>
 	public static class BacktestModelStatsPrinter
 		{
 		/// <summary>
 		/// Основная точка входа:
-		/// - Daily confusion по классам (0/1/2);
-		/// - Trend-confusion по направлению (DOWN vs UP);
-		/// - SL-model confusion + метрики (TPR/FPR/Precision/Recall/F1/PR-AUC, coverage)
-		///   + доп. sweep по порогам.
-		/// Вся математика берётся из BacktestModelStatsSnapshotBuilder.
+		/// - строит мульти-снимок по Train/OOS/Recent/Full через BacktestModelStatsMultiSnapshotBuilder;
+		/// - логирует метаданные (runKind, граница train, объёмы сегментов);
+		/// - печатает для каждого сегмента:
+		///   * дневную путаницу (3 класса),
+		///   * путаницу по тренду (DOWN vs UP),
+		///   * статистику SL-модели.
 		/// </summary>
 		public static void Print (
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> sol1m,
 			double dailyTpPct,
 			double dailySlPct,
-			TimeZoneInfo nyTz )
+			TimeZoneInfo nyTz,
+			DateTime trainUntilUtc )
 			{
 			if (records == null) throw new ArgumentNullException (nameof (records));
 			if (sol1m == null) throw new ArgumentNullException (nameof (sol1m));
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
 
-			// Общий заголовок блока
 			ConsoleStyler.WriteHeader ("==== MODEL STATS ====");
 
 			if (records.Count == 0)
@@ -49,7 +51,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 				}
 
 			// --- 0) Логируем полный период и сортируем по дате ---
-
 			var ordered = records
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
@@ -61,99 +62,95 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 				$"[model-stats] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
 				$"totalRecords = {ordered.Count}");
 
-			// --- 0a) Примерное разделение train/OOS по тем же 120 дням hold-out, что и при обучении.
-			// Это не использует _trainUntilUtc из Program, а повторяет его логику по датам records:
-			// trainUntil ≈ maxDate - 120d.
+			// --- 1) Граница train/OOS и размер recent-окна ---
+			// Берём реальную trainUntil из верхнего уровня пайплайна (Program).
+			// Это гарантирует, что train/OOS в метриках совпадает с тем, как обучалась модель.
+			const int RecentDays = 240;
+			var runKind = ModelRunKind.Analytics; // консольный Backtest-пайплайн — аналитический режим.
 
-			const int HoldoutDaysApprox = 120;
+			var multi = BacktestModelStatsMultiSnapshotBuilder.Build (
+				allRecords: ordered,
+				sol1m: sol1m,
+				nyTz: nyTz,
+				dailyTpPct: dailyTpPct,
+				dailySlPct: dailySlPct,
+				trainUntilUtc: trainUntilUtc,
+				recentDays: RecentDays,
+				runKind: runKind);
 
-			var approxTrainUntilUtc = maxDateUtc.AddDays (-HoldoutDaysApprox);
-
-			var approxTrainRecords = ordered
-				.Where (r => r.DateUtc <= approxTrainUntilUtc)
-				.ToList ();
-
-			var approxOosRecords = ordered
-				.Where (r => r.DateUtc > approxTrainUntilUtc)
-				.ToList ();
+			// --- 2) Общие метаданные запуска ---
+			var meta = multi.Meta;
 
 			Console.WriteLine (
-				$"[model-stats] approx trainUntil = {approxTrainUntilUtc:yyyy-MM-dd}, " +
-				$"trainRecords = {approxTrainRecords.Count}, " +
-				$"oosRecords = {approxOosRecords.Count}");
+				$"[model-stats] runKind={meta.RunKind}, " +
+				$"trainUntil={meta.TrainUntilUtc:yyyy-MM-dd}, " +
+				$"train={meta.TrainRecordsCount}, " +
+				$"oos={meta.OosRecordsCount}, " +
+				$"total={meta.TotalRecordsCount}, " +
+				$"recentDays={meta.RecentDays}, " +
+				$"recentRecords={meta.RecentRecordsCount}");
 
-			if (approxOosRecords.Count > 0)
-				{
-				// Считаем отдельный снапшот только по OOS-дням.
-				var oosSnapshot = BacktestModelStatsSnapshotBuilder.Compute (
-					approxOosRecords,
-					sol1m,
-					dailyTpPct,
-					dailySlPct,
-					nyTz);
-
-				Console.WriteLine (
-					"[model-stats][oos] 3-class acc = " +
-					$"{oosSnapshot.Daily.OverallAccuracyPct:0.0}% " +
-					$"(correct={oosSnapshot.Daily.OverallCorrect}, " +
-					$"total={oosSnapshot.Daily.OverallTotal})");
-				}
-			else
-				{
-				Console.WriteLine ("[model-stats][oos] no OOS records for approx boundary – skipped.");
-				}
-
-			// --- 0b) Срез последних N дней (recent window) ---
-
-			const int RecentDays = 240;
+			// --- 3) Sanity-check: shuffle accuracy на recent-окне ---
+			// Используем то же определение recent, что и билдер (last RecentDays),
+			// но только для проверки математики accuracy.
 			var fromRecentUtc = maxDateUtc.AddDays (-RecentDays);
-
 			var recentRecords = ordered
 				.Where (r => r.DateUtc >= fromRecentUtc)
 				.ToList ();
 
-			Console.WriteLine (
-				$"[model-stats] using recent window = last {RecentDays} days " +
-				$"(from {fromRecentUtc:yyyy-MM-dd}), recentRecords = {recentRecords.Count}");
-
 			if (recentRecords.Count == 0)
 				{
-				Console.WriteLine (
-					"[model-stats] no records in recent window, " +
-					"falling back to full history for model stats.");
 				recentRecords = ordered;
 				}
 
-			// --- 0c) Shuffle-sanity-тест: проверяем, не сломана ли математика accuracy ---
 			RunShuffleSanityTest (recentRecords);
 
-			// --- 1) Считаем снимок модельных статистик только по recentRecords ---
+			// --- 4) Печать сегментов в стабильном порядке:
+			// OOS → Train → Recent → Full.
+			PrintSegmentIfExists (multi, ModelStatsSegmentKind.OosOnly, "OOS segment");
+			PrintSegmentIfExists (multi, ModelStatsSegmentKind.TrainOnly, "Train segment");
+			PrintSegmentIfExists (multi, ModelStatsSegmentKind.RecentWindow, "Recent segment");
+			PrintSegmentIfExists (multi, ModelStatsSegmentKind.FullHistory, "Full-history segment");
+			}
 
-			var snapshot = BacktestModelStatsSnapshotBuilder.Compute (
-				recentRecords,
-				sol1m,
-				dailyTpPct,
-				dailySlPct,
-				nyTz);
+		private static void PrintSegmentIfExists (
+			BacktestModelStatsMultiSnapshot multi,
+			ModelStatsSegmentKind kind,
+			string segmentTitle )
+			{
+			var segment = multi.Segments
+				.FirstOrDefault (s => s.Kind == kind);
+
+			if (segment == null)
+				return;
+
+			ConsoleStyler.WriteHeader (
+				$"{segmentTitle}: {segment.Label} " +
+				$"[{segment.FromDateUtc:yyyy-MM-dd}..{segment.ToDateUtc:yyyy-MM-dd}, " +
+				$"records={segment.RecordsCount}]");
 
 			// 1) Обычная 3-классовая путаница
-			PrintDailyConfusion (snapshot.Daily);
+			PrintDailyConfusion (segment.Stats.Daily, scopeLabel: segment.Label);
 			Console.WriteLine ();
 
 			// 2) Путаница по тренду (UP vs DOWN)
-			PrintTrendDirectionConfusion (snapshot.Trend);
+			PrintTrendDirectionConfusion (segment.Stats.Trend, scopeLabel: segment.Label);
 			Console.WriteLine ();
 
-			// 3) SL-модель (path-based по 1m) в том же окне, что и таргеты/PnL
-			PrintSlStats (snapshot.Sl);
+			// 3) SL-модель (path-based по 1m)
+			PrintSlStats (segment.Stats.Sl);
 			Console.WriteLine ();
 			}
 
 		// ===== 1) Дневная путаница (3 класса) =====
 
-		private static void PrintDailyConfusion ( DailyConfusionStats daily )
+		private static void PrintDailyConfusion ( DailyConfusionStats daily, string? scopeLabel = null )
 			{
-			ConsoleStyler.WriteHeader ("Daily label confusion (3-class)");
+			var title = scopeLabel == null
+				? "Daily label confusion (3-class)"
+				: $"Daily label confusion (3-class) [{scopeLabel}]";
+
+			ConsoleStyler.WriteHeader (title);
 
 			var t = new TextTable ();
 			t.AddHeader ("true label", "pred 0", "pred 1", "pred 2", "correct", "total", "acc %");
@@ -201,9 +198,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 		/// Печать путаницы только по направлению рынка:
 		/// использует уже посчитанные TrendDirectionStats.
 		/// </summary>
-		private static void PrintTrendDirectionConfusion ( TrendDirectionStats trend )
+		private static void PrintTrendDirectionConfusion ( TrendDirectionStats trend, string? scopeLabel = null )
 			{
-			ConsoleStyler.WriteHeader ("Trend-direction confusion (DOWN vs UP)");
+			var title = scopeLabel == null
+				? "Trend-direction confusion (DOWN vs UP)"
+				: $"Trend-direction confusion (DOWN vs UP) [{scopeLabel}]";
+
+			ConsoleStyler.WriteHeader (title);
 
 			var t = new TextTable ();
 			t.AddHeader ("true trend", "pred DOWN", "pred UP", "correct", "total", "acc %");

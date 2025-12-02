@@ -1,4 +1,7 @@
-﻿using Microsoft.ML;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
@@ -7,67 +10,84 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 	{
 	/// <summary>
 	/// Тренер микро-модели для боковика.
-	/// Берёт только дни, где размечен факт микро-направления (FactMicroUp/FactMicroDown),
-	/// балансирует up/down и обучает бинарный LightGBM.
-	/// Никаких внутренних "угадываний" train/test: утечка контролируется снаружи выбором trainRows.
+	/// ВАЖНО:
+	/// - микро-слой опционален: если размеченных микро-дней мало, он просто не строится (возвращается null);
+	/// - любые реальные проблемы с датасетом при нормальном объёме истории приводят к InvalidOperationException.
 	/// </summary>
 	public static class MicroFlatTrainer
 		{
 		/// <summary>
+		/// Минимальное число размеченных микро-дней, при котором имеет смысл учить LightGBM.
+		/// Меньше этого порога — считаем, что история ещё «слишком молодая» для микро-слоя.
+		/// </summary>
+		private const int MinMicroRowsForTraining = 40;
+
+		/// <summary>
 		/// Строит микро-модель для flat-дней.
-		/// Возвращает null, если размеченных микро-дней слишком мало (меньше 30).
+		/// Возвращает null, если микро-датасета недостаточно для осмысленного обучения.
+		/// При нормальном объёме (flats >= MinMicroRowsForTraining) любые проблемы с данными (NaN/Inf,
+		/// одноклассовость, скачущая размерность, падение LightGBM) приводят к InvalidOperationException.
 		/// </summary>
 		public static ITransformer? BuildMicroFlatModel ( MLContext ml, List<DataRow> rows )
 			{
 			if (ml == null) throw new ArgumentNullException (nameof (ml));
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 
-			// Берём только дни, где есть path-based micro ground truth.
-			var flats = rows
+			// 1. Сырой датасет микро-дней (есть FactMicroUp/FactMicroDown).
+			var flatsRaw = rows
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			// Это нормальная ситуация на сырой истории: микро-датасет ещё не набрался.
-			// Здесь не считаем это «проблемой пайплайна», просто микро-слой не строится.
-			if (flats.Count < 30)
+			// Нет ни одного размеченного микро-дня — это не ошибка, просто микро-слоя быть не может.
+			if (flatsRaw.Count == 0)
 				{
-				Console.WriteLine ($"[2stage-micro] мало микро-дней ({flats.Count}), скипаем обучение микро-слоя");
+				Console.WriteLine ("[2stage-micro] нет ни одного размеченного микро-дня, микро-слой отключён.");
 				return null;
 				}
 
-			// Балансируем up/down.
-			var up = flats.Where (r => r.FactMicroUp).ToList ();
-			var dn = flats.Where (r => r.FactMicroDown).ToList ();
+			// История микро-дней есть, но её объективно мало.
+			// Учить LightGBM на 5–10 строках бессмысленно: получится шум и нестабильность.
+			if (flatsRaw.Count < MinMicroRowsForTraining)
+				{
+				Console.WriteLine (
+					$"[2stage-micro] датасет микро-дней слишком мал (flats={flatsRaw.Count}, " +
+					$"min={MinMicroRowsForTraining}), микро-слой отключён для этого прогона."
+				);
+				return null;
+				}
 
-			// А вот одноклассовый датасет — это уже реальная проблема (разметка / RowBuilder).
+			// 2. Балансируем up/down.
+			var up = flatsRaw.Where (r => r.FactMicroUp).ToList ();
+			var dn = flatsRaw.Where (r => r.FactMicroDown).ToList ();
+
+			// На «взрослом» датасете отсутствие одного из классов — уже реальная проблема разметки.
 			if (up.Count == 0 || dn.Count == 0)
 				{
 				throw new InvalidOperationException (
-					$"[2stage-micro] датасет микро-дней одноклассовый (up={up.Count}, down={dn.Count}). " +
-					"Проверь разметку FactMicroUp/FactMicroDown и path-based labeling."
+					$"[2stage-micro] датасет микро-дней одноклассовый (up={up.Count}, down={dn.Count}) " +
+					$"при flats={flatsRaw.Count}. Проверь path-based разметку FactMicroUp/FactMicroDown."
 				);
 				}
 
 			int take = Math.Min (up.Count, dn.Count);
 
-			up = up
+			var upBalanced = up
 				.OrderBy (r => r.Date)
 				.Take (take)
 				.ToList ();
 
-			dn = dn
+			var dnBalanced = dn
 				.OrderBy (r => r.Date)
 				.Take (take)
 				.ToList ();
 
-			flats = up
-				.Concat (dn)
+			var flats = upBalanced
+				.Concat (dnBalanced)
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			// === ЖЁСТКАЯ ВАЛИДАЦИЯ ФИЧЕЙ ПЕРЕД LightGBM ===
-
+			// 3. Жёсткая валидация признаков перед LightGBM.
 			var samples = new List<MlSampleBinary> (flats.Count);
 			int? featureDim = null;
 			bool hasNaN = false;
@@ -80,7 +100,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				if (feats == null)
 					{
 					throw new InvalidOperationException (
-						"[2stage-micro] ToFloatFixed вернул null-массив признаков для микро-дня."
+						"[2stage-micro] ToFloatFixed вернул null для вектора признаков микро-слоя."
 					);
 					}
 
@@ -110,7 +130,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 				samples.Add (new MlSampleBinary
 					{
-					Label = r.FactMicroUp, // true => microUp, false => microDown
+					// true => microUp, false => microDown
+					Label = r.FactMicroUp,
 					Features = feats
 					});
 				}
@@ -142,19 +163,18 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 				Console.WriteLine (
 					$"[2stage-micro] обучено на {flats.Count} REAL микро-днях " +
-					$"(up={up.Count}, down={dn.Count}, featDim={featureDim})"
+					$"(up={upBalanced.Count}, down={dnBalanced.Count}, featDim={featureDim})"
 				);
 
 				return model;
 				}
 			catch (Exception ex)
 				{
-				// Любой сбой LightGBM — это уже «проблема» и пробрасывается наверх
-				// с максимальным количеством контекста.
+				// Сюда должны попадать только реальные сбои LightGBM при уже проверенном датасете.
 				throw new InvalidOperationException (
-					"[2stage-micro] LightGBM не смог обучить микро-модель. " +
-					$"flats={flats.Count}, up={up.Count}, down={dn.Count}, featDim={featureDim ?? -1}. " +
-					"См. InnerException для деталей.",
+					"[2stage-micro] LightGBM не смог обучить микро-модель при корректном датасете. " +
+					$"flats={flats.Count}, up={upBalanced.Count}, down={dnBalanced.Count}, " +
+					$"featDim={featureDim ?? -1}. См. InnerException.",
 					ex
 				);
 				}
