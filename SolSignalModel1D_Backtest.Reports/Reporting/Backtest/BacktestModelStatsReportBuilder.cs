@@ -39,7 +39,7 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				doc.KeyValueSections.Add (globalMeta);
 				}
 
-			// === По каждому сегменту: своя мета + те же блоки, что и раньше ===
+			// === По каждому сегменту: своя мета ===
 			foreach (var segment in multi.Segments)
 				{
 				if (segment == null || segment.Stats == null)

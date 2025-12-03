@@ -166,7 +166,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 					break;
 					}
 
-				// Первая свеча дня — как и раньше: первая с t >= entryTimeUtc.
+				// Первая свеча дня — первая с t >= entryTimeUtc.
 				var entryCandle = candles1m[startIndex];
 
 				double entryPrice = entryCandle.Open;

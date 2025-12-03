@@ -12,13 +12,11 @@ namespace SolSignalModel1D_Backtest
 		/// - логирует число утренних точек и валидирует, что оно > 0.
 		/// На выходе отдаёт только то, что реально нужно моделям/бэктесту.
 		/// </summary>
-		private static async Task<(
-			List<DataRow> AllRows,
-			List<DataRow> Mornings,
-			List<Candle6h> SolAll6h,
-			List<Candle1h> SolAll1h,
-			List<Candle1m> Sol1m
-		)> BootstrapRowsAndCandlesAsync ()
+		private static async Task<(List<DataRow> AllRows,
+				List<DataRow> Mornings,
+				List<Candle6h> SolAll6h,
+				List<Candle1h> SolAll1h,
+				List<Candle1m> Sol1m)> BootstrapRowsAndCandlesAsync ()
 			{
 			// Внутри: HttpClient, обновление свечей, индикаторы, построение дневных строк.
 			var bootstrap = await BootstrapDataAsync ();
@@ -26,8 +24,8 @@ namespace SolSignalModel1D_Backtest
 			var solAll6h = bootstrap.SolAll6h;
 			var solAll1h = bootstrap.SolAll1h;
 			var sol1m = bootstrap.Sol1m;
-			var rowsBundle = bootstrap.RowsBundle;
 
+			var rowsBundle = bootstrap.RowsBundle;
 			var allRows = rowsBundle.AllRows;
 			var mornings = rowsBundle.Mornings;
 

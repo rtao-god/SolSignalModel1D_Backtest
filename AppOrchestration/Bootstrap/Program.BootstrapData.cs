@@ -1,4 +1,6 @@
-﻿namespace SolSignalModel1D_Backtest
+﻿using SolSignalModel1D_Backtest.Core.Infra.Perf;
+
+namespace SolSignalModel1D_Backtest
 	{
 	/// <summary>
 	/// Частичный класс Program: агрегирующий бутстрап приложения.
@@ -20,7 +22,10 @@
 			using var http = new HttpClient ();
 
 			// --- 1. Обновление свечей (сетевой блок) ---
-			await MeasureAsync ("UpdateCandlesAsync", () => UpdateCandlesAsync (http));
+			await PerfLogging.MeasureAsync (
+				"UpdateCandlesAsync",
+				() => UpdateCandlesAsync (http)
+			);
 
 			// --- 2. Загрузка всех таймфреймов и окна бэктеста ---
 			// ВАЖНО: оставляем out var прямо в вызове, без лямбды,
@@ -36,13 +41,13 @@
 			);
 
 			// --- 3. Индикаторы ---
-			var indicators = await MeasureAsync (
+			var indicators = await PerfLogging.MeasureAsync (
 				"BuildIndicatorsAsync",
 				() => BuildIndicatorsAsync (http, fromUtc, toUtc)
 			);
 
 			// --- 4. Дневные строки (allRows + mornings) ---
-			var rowsBundle = await MeasureAsync (
+			var rowsBundle = await PerfLogging.MeasureAsync (
 				"BuildDailyRowsBundleAsync",
 				() => BuildDailyRowsBundleAsync (
 					indicators,

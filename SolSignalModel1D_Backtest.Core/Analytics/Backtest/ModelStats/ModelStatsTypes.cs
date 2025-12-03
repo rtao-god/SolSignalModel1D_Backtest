@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats
+﻿namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats
 	{
 	public enum ModelStatsSegmentKind
 		{

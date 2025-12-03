@@ -50,7 +50,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 						else if (slFirst) slA++;
 						else closeA++;
 
-						// delayed-вход (как раньше)
+						// delayed-вход
 						double delayedPct = CalcUnlevPnlPct (r, wantLong, wantShort);
 						sumPctA += delayedPct;
 
@@ -284,7 +284,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 
 		/// <summary>
 		/// PnL% (без плеча) для delayed-входа (с учётом TP/SL/close@day),
-		/// как и раньше, в долях (0.01 = +1%).
+		/// в долях (0.01 = +1%).
 		/// </summary>
 		private static double CalcUnlevPnlPct ( PredictionRecord r, bool wantLong, bool wantShort )
 			{

@@ -1,4 +1,8 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
 
 namespace SolSignalModel1D_Backtest
@@ -15,15 +19,18 @@ namespace SolSignalModel1D_Backtest
 		private static async Task<IndicatorsDailyUpdater> BuildIndicatorsAsync (
 			HttpClient http,
 			DateTime fromUtc,
-			DateTime toUtc
-		)
+			DateTime toUtc )
 			{
 			var indicators = new IndicatorsDailyUpdater (http);
 
-			// Берём чуть расширенное окно, чтобы индикаторы были стабильными в начале интервала.
+			// Берётся чуть расширенное окно, чтобы индикаторы были стабильными в начале интервала.
 			var indicatorsFrom = fromUtc.AddDays (-90);
 
-			await indicators.UpdateAllAsync (indicatorsFrom, toUtc, IndicatorsDailyUpdater.FillMode.NeutralFill);
+			await indicators.UpdateAllAsync (
+				indicatorsFrom,
+				toUtc,
+				IndicatorsDailyUpdater.FillMode.NeutralFill);
+
 			indicators.EnsureCoverageOrFail (indicatorsFrom, toUtc);
 
 			return indicators;
@@ -41,8 +48,7 @@ namespace SolSignalModel1D_Backtest
 			List<Candle6h> solAll6h,
 			List<Candle6h> btcAll6h,
 			List<Candle6h> paxgAll6h,
-			List<Candle1m> sol1m
-		)
+			List<Candle1m> sol1m )
 			{
 			var rowsBundle = await BuildDailyRowsAsync (
 				indicators,
@@ -51,8 +57,7 @@ namespace SolSignalModel1D_Backtest
 				solAll6h,
 				btcAll6h,
 				paxgAll6h,
-				sol1m
-			);
+				sol1m);
 
 			return rowsBundle;
 			}

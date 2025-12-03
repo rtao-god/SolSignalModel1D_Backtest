@@ -8,7 +8,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 	/// - выбор последней записи;
 	/// - forward 24h (из PredictionRecord);
 	/// - торговые планы по всем политикам и веткам BASE/ANTI-D.
-	/// Никакого вывода и I/O — только математика и формирование снимка.
+	/// 
+	/// Семантика веток:
+	/// - BASE: торгует только нерискованные дни по направлению дневной модели;
+	/// - ANTI-D: берёт только рискованные дни и переворачивает направление (LONG→SHORT, SHORT→LONG).
 	/// </summary>
 	public static class CurrentPredictionSnapshotBuilder
 		{
@@ -22,7 +25,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			if (policies == null || policies.Count == 0)
 				return null;
 
-			// Берём последнюю запись по дате — как в старом коде.
+			// Берётся последняя по времени запись модели — это "текущий" прогноз.
 			var last = records
 				.OrderBy (r => r.DateUtc)
 				.Last ();
@@ -44,6 +47,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				};
 
 			// Forward 24h уже заранее посчитан в PredictionRecord при построении records.
+			// Здесь он просто перекладывается в снимок, без дополнительной математики.
 			if (last.MaxHigh24 > 0.0 && last.MinLow24 > 0.0 && last.Close24 > 0.0)
 				{
 				snapshot.Forward24h = new Forward24hSnapshot
@@ -54,7 +58,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					};
 				}
 
-			// Для каждой политики строим две ветки: BASE и ANTI-D.
+			// Для каждой политики строятся две ветки: BASE и ANTI-D.
 			foreach (var policy in policies)
 				{
 				AppendRowsForPolicy (snapshot, last, policy, walletBalanceUsd);
@@ -69,16 +73,24 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			ILeveragePolicy policy,
 			double walletBalanceUsd )
 			{
-			bool hasDir = TryGetDirection (rec, out var goLong, out _);
+			// hasDir — есть ли направленный сигнал от дневной модели (LONG или SHORT).
+			bool hasDir = TryGetDirection (rec, out var goLongModel, out _);
+
+			// isRiskDay — решение SL-модели по дню (рискованный / нерискованный).
 			bool isRiskDay = rec.SlHighDecision;
 
 			double leverage = policy.ResolveLeverage (rec);
-			// Оставляем старое поведение: имя берём из типа политики.
 			string policyName = policy.GetType ().Name;
 
-			// --- BASE branch ---
+			// --- BASE branch: торгует только нерискованные дни по направлению модели ---
 				{
+				// BASE пропускает день, если:
+				// - нет направления (hasDir == false); или
+				// - день рискованный по SL-модели.
 				bool skipped = !hasDir || isRiskDay;
+
+				// BASE никогда не переворачивает направление: строго как даёт дневная модель.
+				bool goLongBase = goLongModel;
 
 				var row = BuildRow (
 					policyName,
@@ -87,16 +99,27 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					isRiskDay: isRiskDay,
 					hasDirection: hasDir,
 					skipped: skipped,
-					goLong: goLong,
+					goLong: goLongBase,
 					leverage: leverage,
 					walletBalanceUsd: walletBalanceUsd);
 
 				snapshot.PolicyRows.Add (row);
 				}
 
-			// --- ANTI-D branch ---
+			// --- ANTI-D branch: берёт только рискованные дни и переворачивает направление ---
 				{
+				// ANTI-D активен только на рискованных днях с направлением.
 				bool skipped = !hasDir || !isRiskDay;
+
+				// По умолчанию направление такое же, как у дневной модели.
+				bool goLongAntiD = goLongModel;
+
+				// Если ветка действительно торгует (есть направление и день рискованный),
+				// переворачиваем LONG⇄SHORT.
+				if (!skipped && hasDir)
+					{
+					goLongAntiD = !goLongModel;
+					}
 
 				var row = BuildRow (
 					policyName,
@@ -105,7 +128,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					isRiskDay: isRiskDay,
 					hasDirection: hasDir,
 					skipped: skipped,
-					goLong: goLong,
+					goLong: goLongAntiD,
 					leverage: leverage,
 					walletBalanceUsd: walletBalanceUsd);
 
@@ -131,12 +154,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				IsRiskDay = isRiskDay,
 				HasDirection = hasDirection,
 				Skipped = skipped,
-				Direction = !hasDirection ? "-" : (goLong ? "LONG" : "SHORT"),
+				// Direction отражает уже итоговое направление ветки (учитывая переворот в ANTI-D).
+				Direction = (!hasDirection || skipped) ? "-" : (goLong ? "LONG" : "SHORT"),
 				Leverage = leverage,
 				Entry = rec.Entry
 				};
 
-			// Если ветка активна — считаем план сделки.
+			// Если ветка активна — считается план сделки (SL/TP, размер позиции, ликвидация).
 			if (!skipped)
 				{
 				var plan = BuildTradePlan (rec, goLong, leverage, walletBalanceUsd);
@@ -166,10 +190,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			public double? LiqDistPct { get; init; }
 			}
 
-		/// <summary>
-		/// Логика стопа/тейка и ликвидации — перенесена в builder из старого принтера.
-		/// Здесь сосредоточена математика, чтобы не дублировать её в консоли и отчёте.
-		/// </summary>
 		private static TradePlan BuildTradePlan (
 			PredictionRecord rec,
 			bool goLong,
@@ -180,7 +200,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			if (entry <= 0.0)
 				throw new InvalidOperationException ("Entry <= 0 — нельзя построить торговый план.");
 
+			// baseMinMove — минимальный ожидаемый ход, из модели.
+			// Его используют для адаптивного SL в процентах.
 			double baseMinMove = rec.MinMove > 0.0 ? rec.MinMove : 0.02;
+
 			double slPct = baseMinMove;
 			if (slPct < 0.01) slPct = 0.01;
 			else if (slPct > 0.04) slPct = 0.04;
@@ -203,9 +226,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 			if (walletBalanceUsd > 0.0)
 				{
+				// Размер позиции считается как wallet * leverage.
 				posUsd = walletBalanceUsd * leverage;
 				posQty = posUsd / entry;
 
+				// Ликвидация считается только если есть реальное плечо > 1x.
 				if (leverage > 1.0)
 					{
 					const double mmr = 0.004;
@@ -230,6 +255,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 			return new TradePlan
 				{
+				// В процентах (1.5 => 1.5%), чтобы проще печатать/репортить.
 				SlPct = slPct * 100.0,
 				TpPct = tpPct * 100.0,
 				SlPrice = slPrice,
@@ -246,8 +272,13 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			out bool goLong,
 			out bool goShort )
 			{
+			// LONG: class=2 или flat + microUp.
 			goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
+
+			// SHORT: class=0 или flat + microDown.
 			goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+
+			// Если оба false — модель flat без микросигнала (нет направления).
 			return goLong || goShort;
 			}
 

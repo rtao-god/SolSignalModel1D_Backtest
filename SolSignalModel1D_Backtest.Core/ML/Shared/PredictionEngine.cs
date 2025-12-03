@@ -1,10 +1,9 @@
 ﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 
-namespace SolSignalModel1D_Backtest.Core.ML
+namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
 	/// <summary>
 	/// Обёртка над натрененным бандлом:

@@ -77,13 +77,9 @@ namespace SolSignalModel1D_Backtest
 			if (solAll6h.Count == 0 || btcAll6h.Count == 0 || paxgAll6h.Count == 0)
 				throw new InvalidOperationException ("[init] Пустые 6h серии: SOL/BTC/PAXG. Проверь cache/candles/*.ndjson");
 
-			Console.WriteLine ($"[6h] SOL={solAll6h.Count}, BTC={btcAll6h.Count}, PAXG={paxgAll6h.Count}");
-
 			solAll1h = ReadAll1h (solSym);
-			Console.WriteLine ($"[1h] SOL count = {solAll1h.Count}");
 
 			sol1m = ReadAll1m (solSym);
-			Console.WriteLine ($"[1m] SOL count = {sol1m.Count}");
 			if (sol1m.Count == 0)
 				throw new InvalidOperationException ("[init] Нет 1m свечей SOL/USDT в cache/candles.");
 

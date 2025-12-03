@@ -1,4 +1,7 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 
@@ -38,10 +41,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 			DateTime exitDateLocal;
 
-			if (ny.DayOfWeek is DayOfWeek.Monday
-				or DayOfWeek.Tuesday
-				or DayOfWeek.Wednesday
-				or DayOfWeek.Thursday)
+			if (ny.DayOfWeek is DayOfWeek.Monday or DayOfWeek.Tuesday or DayOfWeek.Wednesday or DayOfWeek.Thursday)
 				{
 				// Переход на следующее утро в рабочий день.
 				exitDateLocal = ny.Date.AddDays (1);
@@ -58,8 +58,11 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 			// 08:00 локального NY-времени (DST учитывается при конвертации в UTC).
 			var exitLocal = new DateTime (
-				exitDateLocal.Year, exitDateLocal.Month, exitDateLocal.Day,
-				8, 0, 0, DateTimeKind.Unspecified);
+				exitDateLocal.Year,
+				exitDateLocal.Month,
+				exitDateLocal.Day,
+				8, 0, 0,
+				DateTimeKind.Unspecified);
 
 			var exitUtc = TimeZoneInfo.ConvertTimeToUtc (exitLocal, nyTz);
 
@@ -74,12 +77,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public static List<Candle6h> FilterNyTrainWindows ( List<Candle6h> all, TimeZoneInfo nyTz )
 			{
 			var res = new List<Candle6h> ();
+
 			foreach (var c in all)
 				{
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (c.OpenTimeUtc, nyTz);
-				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) continue;
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					continue;
 
 				bool isDst = nyTz.IsDaylightSavingTime (ny);
+
 				if (isDst)
 					{
 					if (ny.Hour == 8 || ny.Hour == 14)
@@ -102,12 +108,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public static List<Candle6h> FilterNyMorningOnly ( List<Candle6h> all, TimeZoneInfo nyTz )
 			{
 			var res = new List<Candle6h> ();
+
 			foreach (var c in all)
 				{
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (c.OpenTimeUtc, nyTz);
-				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) continue;
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					continue;
 
 				bool isDst = nyTz.IsDaylightSavingTime (ny);
+
 				if (isDst)
 					{
 					if (ny.Hour == 8)
@@ -138,32 +147,40 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			}
 
 		/// <summary>
-		/// Строит spaced-test: берёт несколько блоков из конца ряда с пропусками между блоками.
+		/// Строит spaced-test: берёт несколько блоков из конца ряда
+		/// с пропусками между блоками.
 		/// </summary>
 		public static List<DataRow> BuildSpacedTest ( List<DataRow> rows, int take, int skip, int blocks )
 			{
-			var res = new List<DataRow> ();
-			int n = rows.Count;
-			int end = n;
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (take <= 0 || blocks <= 0)
+				return new List<DataRow> ();
 
-			for (int b = 0; b < blocks; b++)
+			var n = rows.Count;
+			if (n == 0)
+				return new List<DataRow> ();
+
+			// Верхняя оценка размера: take * blocks, но не больше n.
+			var res = new List<DataRow> (Math.Min (n, take * blocks));
+
+			// endExclusive — правая граница диапазона [start; endExclusive) (не включительно).
+			var endExclusive = n;
+
+			for (int b = 0; b < blocks && endExclusive > 0; b++)
 				{
-				int start = end - take;
+				var start = endExclusive - take;
 				if (start < 0)
 					start = 0;
 
-				var part = rows
-					.Skip (start)
-					.Take (end - start)
-					.ToList ();
+				// Вместо Skip/Take работаем по индексам — O(K), где K — размер блока.
+				for (int i = start; i < endExclusive; i++)
+					res.Add (rows[i]);
 
-				res.AddRange (part);
-
-				end = start - skip;
-				if (end <= 0)
-					break;
+				// Смещаем окно на предыдущий блок с пропуском skip элементов.
+				endExclusive = start - skip;
 				}
 
+			// Итоговый список сортируем по дате, как и раньше.
 			return res.OrderBy (r => r.Date).ToList ();
 			}
 
@@ -172,9 +189,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		/// </summary>
 		public static IEnumerable<List<DataRow>> GroupByBlocks ( List<DataRow> rows, int blockSize )
 			{
-			var sorted = rows.OrderBy (r => r.Date).ToList ();
-			var cur = new List<DataRow> ();
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (blockSize <= 0) throw new ArgumentOutOfRangeException (nameof (blockSize));
 
+			var sorted = rows.OrderBy (r => r.Date).ToList ();
+
+			var cur = new List<DataRow> ();
 			foreach (var r in sorted)
 				{
 				cur.Add (r);

@@ -15,12 +15,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 	/// 1) бинарная модель "есть ли ход" (move);
 	/// 2) бинарные модели направления (dir-normal / dir-down);
 	/// 3) микро-модель для боковика (через MicroFlatTrainer).
-	/// Вся подготовка данных вынесена в DailyTrainingDataBuilder, хелперы — в MlTrainingUtils.
+	/// Подготовка данных вынесена в DailyDatasetBuilder / DailyTrainingDataBuilder.
 	/// </summary>
 	public sealed class ModelTrainer
 		{
+		// Число потоков для LightGBM.
+		private readonly int _gbmThreads = Math.Max (1, Environment.ProcessorCount - 1);
+
 		// Общий MLContext для всех дневных/микро-моделей.
-		// Остаётся внутри тренера и не используется в диагностике.
 		private readonly MLContext _ml = new MLContext (seed: 42);
 
 		// Граница "актуального" рынка для логов/метрик внутри тренера.
@@ -37,23 +39,28 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			{
 			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
 
-			// 1) Фильтрация по датам (например, выкинуть out-of-sample / тестовые дни).
-			if (datesToExclude != null && datesToExclude.Count > 0)
+			if (trainRows.Count == 0)
 				{
-				trainRows = trainRows
-					.Where (r => !datesToExclude.Contains (r.Date))
-					.ToList ();
+				throw new InvalidOperationException ("TrainAll: empty trainRows — нечего обучать.");
 				}
 
-			// 2) Собираем обучающие выборки для move/dir.
-			DailyTrainingDataBuilder.Build (
-				trainRows,
+			// === 1. Единый dataset-builder для дневной модели ===
+			// Тут нет trainUntil "из Program", поэтому используем максимум по тем
+			// строкам, которые уже отобраны наружным кодом (trainRows).
+			// Это не меняет поведение: и раньше ModelTrainer видел только этот отрезок.
+			var trainUntil = trainRows.Max (r => r.Date);
+
+			var dataset = DailyDatasetBuilder.Build (
+				allRows: trainRows,
+				trainUntil: trainUntil,
 				balanceMove: BalanceMove,
 				balanceDir: BalanceDir,
 				balanceTargetFrac: BalanceTargetFrac,
-				moveTrainRows: out var moveTrainRows,
-				dirNormalRows: out var dirNormalRows,
-				dirDownRows: out var dirDownRows);
+				datesToExclude: datesToExclude);
+
+			var moveTrainRows = dataset.MoveTrainRows;
+			var dirNormalRows = dataset.DirNormalRows;
+			var dirDownRows = dataset.DirDownRows;
 
 			// ===== 1. Модель "есть ли ход" (move) =====
 			// Цель: Label != 1 (non-flat по path-based label).
@@ -73,7 +80,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 					LearningRate = 0.07f,
 					MinimumExampleCountPerLeaf = 20,
 					Seed = 42,
-					NumberOfThreads = 1
+					NumberOfThreads = _gbmThreads
 					});
 
 			var moveModel = movePipe.Fit (moveData);
@@ -84,7 +91,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			var dirDownModel = BuildDirModel (dirDownRows, "dir-down");
 
 			// ===== 3. Микро-модель для боковика =====
-			var microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, trainRows);
+			// Микро-слой по-прежнему берёт тот же trainRows, но внутри использует MicroDatasetBuilder.
+			var microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, dataset.TrainRows);
 
 			// Бандл остаётся тем же — чтобы не ломать внешний код.
 			return new ModelBundle
@@ -131,7 +139,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 					LearningRate = 0.07f,
 					MinimumExampleCountPerLeaf = 15,
 					Seed = 42,
-					NumberOfThreads = 1
+					NumberOfThreads = _gbmThreads
 					});
 
 			var model = pipe.Fit (data);

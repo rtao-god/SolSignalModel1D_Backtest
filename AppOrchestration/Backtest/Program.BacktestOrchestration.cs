@@ -51,7 +51,6 @@ namespace SolSignalModel1D_Backtest
 			Console.WriteLine ($"[policies] total = {policies.Count}");
 
 			// Для отчёта "текущий прогноз" нужны голые ILeveragePolicy (без MarginMode и имени).
-			// Хотя сейчас список не используется в этом методе, сохраняем код как есть, чтобы не ломать договорённости.
 			var leveragePolicies = policies
 				.Where (p => p.Policy != null)
 				.Select (p => p.Policy!)

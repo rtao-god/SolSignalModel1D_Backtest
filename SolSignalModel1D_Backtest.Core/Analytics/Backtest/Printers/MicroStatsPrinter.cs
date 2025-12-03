@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 			PrintFlatOnlyMicro (mornings, records);
 			Console.WriteLine ();
 
-			// 2) Направленная точность по не-боковикам (как и раньше)
+			// 2) Направленная точность по не-боковикам
 			PrintNonFlatDirection (records);
 			}
 

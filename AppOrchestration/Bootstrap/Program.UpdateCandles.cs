@@ -32,12 +32,9 @@ namespace SolSignalModel1D_Backtest
 				return;
 				}
 
-			Console.WriteLine ($"[update] {symbol}-{tfSuffix}: checking file {path}");
 
 			var store = new CandleNdjsonStore (path);
 			var first = store.TryGetFirstTimestampUtc ();
-
-			Console.WriteLine ($"[update] {symbol}-{tfSuffix}: first={first?.ToString ("yyyy-MM-dd HH:mm") ?? "null"} (FullBackfillFromUtc={FullBackfillFromUtc:yyyy-MM-dd})");
 
 			if (!first.HasValue || first.Value > FullBackfillFromUtc)
 				{
@@ -58,7 +55,6 @@ namespace SolSignalModel1D_Backtest
 				{
 				var path = CandlePaths.File (symbol, tf);
 				bool exists = File.Exists (path);
-				Console.WriteLine ($"[update] NeedsFullBackfill check: {symbol}-{tf} exists={exists} path={path}");
 
 				if (!exists)
 					{
@@ -90,11 +86,6 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static async Task UpdateCandlesAsync ( HttpClient http )
 			{
-			Console.WriteLine ("[update] Updating SOL/USDT, BTC/USDT, PAXG/USDT candles...");
-
-			Console.WriteLine ($"[update] CacheRoot = {PathConfig.CacheRoot}");
-			Console.WriteLine ($"[update] CandlesDir = {PathConfig.CandlesDir}");
-
 			var solSymbol = TradingSymbols.SolUsdtInternal;
 			var btcSymbol = TradingSymbols.BtcUsdtInternal;
 			var paxgSymbol = TradingSymbols.PaxgUsdtInternal;
@@ -140,9 +131,6 @@ namespace SolSignalModel1D_Backtest
 				btcUpdater.UpdateAllAsync (btcNeedsFull ? FullBackfillFromUtc : (DateTime?) null),
 				paxgUpdater.UpdateAllAsync (paxgNeedsFull ? FullBackfillFromUtc : (DateTime?) null)
 			);
-
-			Console.WriteLine ("[update] Candle update done.");
 			}
-
 		}
 	}

@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe
+﻿namespace SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe
 	{
 	public sealed class Candle1m
 		{

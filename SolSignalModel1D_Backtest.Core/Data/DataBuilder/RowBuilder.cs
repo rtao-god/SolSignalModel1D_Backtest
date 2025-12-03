@@ -1,6 +1,4 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.Indicators;
-using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 
@@ -379,7 +377,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					{
 					// Добавляем фичу, напрямую завязанную на будущий результат сделки.
 					// Это явная утечка: модель видит SolFwd1 при обучении и в OOS.
+#pragma warning disable CS0162 // Обнаружен недостижимый код
 					feats.Add (solFwd1);
+#pragma warning restore CS0162 // Обнаружен недостижимый код
 					}
 
 

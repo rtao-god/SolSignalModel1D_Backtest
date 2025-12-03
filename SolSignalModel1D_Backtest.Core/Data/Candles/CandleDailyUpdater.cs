@@ -1,9 +1,4 @@
 ﻿using SolSignalModel1D_Backtest.Core.Utils;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Net.Http;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Candles
 	{
@@ -31,62 +26,193 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			_catchupDays = catchupDays;
 			}
 
-		private string BuildPath ( string tf )
-			=> Path.Combine (_baseDir, $"{_symbol}-{tf}.ndjson");
+		private string BuildPath ( string tf ) =>
+			Path.Combine (_baseDir, $"{_symbol}-{tf}.ndjson");
+
+		private string BuildWeekendsPath ( string tf ) =>
+			Path.Combine (_baseDir, $"{_symbol}-{tf}-weekends.ndjson");
 
 		/// <summary>
-		/// Полный апдейт по трём ТФ.
-		/// Если файла нет — берём fromUtc и тянем до сейчас.
-		/// Если файл есть — только догоняем.
+		/// Базовый апдейт для одного TF:
+		/// - тянет klines с Binance;
+		/// - проверяет, что внутри диапазона нет дыр по времени;
+		/// - пишет только будни (IsWeekendUtc() == false) в один файл.
+		/// Используется для 1h/6h и может использоваться для 1m,
+		/// если отдельный файл выходных не нужен.
 		/// </summary>
-		private async Task UpdateOneAsync ( string binanceInterval, TimeSpan tf, DateTime? fullBackfillFromUtc = null )
+		private async Task UpdateOneAsync (
+			string binanceInterval,
+			TimeSpan tf,
+			DateTime? fullBackfillFromUtc = null )
 			{
 			var path = BuildPath (binanceInterval);
-			Console.WriteLine ($"[candle-updater] {_symbol} {binanceInterval}: path={path}");
-
 			var store = new CandleNdjsonStore (path);
 
-			DateTime? last = store.TryGetLastTimestampUtc ();
 			DateTime fromUtc;
-			if (last.HasValue)
-				fromUtc = last.Value + tf;
+				{
+				DateTime? last = store.TryGetLastTimestampUtc ();
+
+				if (last.HasValue)
+					fromUtc = last.Value + tf;
+				else if (fullBackfillFromUtc.HasValue)
+					fromUtc = fullBackfillFromUtc.Value;
+				else
+					fromUtc = DateTime.UtcNow.Date.AddDays (-_catchupDays);
+
+				var toUtc = DateTime.UtcNow;
+
+				if (!fullBackfillFromUtc.HasValue && (toUtc.Date - fromUtc.Date).TotalDays > _catchupDays)
+					fromUtc = toUtc.Date.AddDays (-_catchupDays);
+
+				var raw = await DataLoading.GetBinanceKlinesRange (_http, _symbol, binanceInterval, fromUtc, toUtc);
+				if (raw.Count == 0) return;
+
+				// Проверяем, что внутри полученного диапазона нет дыр по tf.
+				// Здесь проверяются и будни, и выходные — если Binance вернул неполный ряд.
+				DateTime? prev = null;
+				foreach (var r in raw)
+					{
+					var ts = r.openUtc;
+					if (prev.HasValue)
+						{
+						var expected = prev.Value + tf;
+						if (ts != expected)
+							{
+							throw new InvalidOperationException (
+								$"[candle-updater] {_symbol} {binanceInterval}: пропущены свечи между {prev:O} и {ts:O}, ожидали {expected:O}");
+							}
+						}
+					prev = ts;
+					}
+
+				var filtered = new List<CandleNdjsonStore.CandleLine> (raw.Count);
+				foreach (var r in raw)
+					{
+					// Для базового файла продолжаем отбрасывать выходные.
+					if (r.openUtc.IsWeekendUtc ()) continue;
+
+					filtered.Add (new CandleNdjsonStore.CandleLine (
+						r.openUtc,
+						r.open,
+						r.high,
+						r.low,
+						r.close));
+					}
+
+				if (filtered.Count == 0) return;
+
+				store.Append (filtered);
+				}
+			}
+
+		/// <summary>
+		/// Специальный апдейт для 1m:
+		/// - читает один диапазон klines с Binance;
+		/// - проверяет отсутствие дыр по времени;
+		/// - пишет будни в SYMBOL-1m.ndjson;
+		/// - пишет выходные в SYMBOL-1m-weekends.ndjson.
+		/// </summary>
+		private async Task UpdateOne1mWithWeekendsAsync ( TimeSpan tf, DateTime? fullBackfillFromUtc = null )
+			{
+			const string interval = "1m";
+
+			var weekdayPath = BuildPath (interval);
+			var weekendPath = BuildWeekendsPath (interval);
+
+			var weekdayStore = new CandleNdjsonStore (weekdayPath);
+			var weekendStore = new CandleNdjsonStore (weekendPath);
+
+			// Для определения диапазона достаточно любой из серий (будни/выходные),
+			// берём максимальный из двух timestamps, чтобы не перезаписывать историю.
+			DateTime? lastWeekday = weekdayStore.TryGetLastTimestampUtc ();
+			DateTime? lastWeekend = weekendStore.TryGetLastTimestampUtc ();
+
+			DateTime? lastCombined =
+				lastWeekday.HasValue && lastWeekend.HasValue
+					? (lastWeekday.Value > lastWeekend.Value ? lastWeekday : lastWeekend)
+					: lastWeekday ?? lastWeekend;
+
+			DateTime fromUtc;
+			if (lastCombined.HasValue)
+				fromUtc = lastCombined.Value + tf;
 			else if (fullBackfillFromUtc.HasValue)
 				fromUtc = fullBackfillFromUtc.Value;
 			else
 				fromUtc = DateTime.UtcNow.Date.AddDays (-_catchupDays);
 
-			DateTime toUtc = DateTime.UtcNow;
+			var toUtc = DateTime.UtcNow;
 
 			if (!fullBackfillFromUtc.HasValue && (toUtc.Date - fromUtc.Date).TotalDays > _catchupDays)
 				fromUtc = toUtc.Date.AddDays (-_catchupDays);
 
-			Console.WriteLine ($"[candle-updater] {_symbol} {binanceInterval}: last={last?.ToString ("yyyy-MM-dd HH:mm") ?? "null"}, from={fromUtc:yyyy-MM-dd HH:mm}, to={toUtc:yyyy-MM-dd HH:mm}");
-
-			var raw = await DataLoading.GetBinanceKlinesRange (_http, _symbol, binanceInterval, fromUtc, toUtc);
+			var raw = await DataLoading.GetBinanceKlinesRange (_http, _symbol, interval, fromUtc, toUtc);
 			if (raw.Count == 0) return;
 
-			var filtered = new List<CandleNdjsonStore.CandleLine> (raw.Count);
+			// Проверка непрерывности минут внутри полученного диапазона.
+			DateTime? prev = null;
 			foreach (var r in raw)
 				{
-				if (r.openUtc.IsWeekendUtc ()) continue;
-				filtered.Add (new CandleNdjsonStore.CandleLine (r.openUtc, r.open, r.high, r.low, r.close));
+				var ts = r.openUtc;
+				if (prev.HasValue)
+					{
+					var expected = prev.Value + tf;
+					if (ts != expected)
+						{
+						throw new InvalidOperationException (
+							$"[candle-updater] {_symbol} {interval}: пропущены 1m-свечи между {prev:O} и {ts:O}, ожидали {expected:O}");
+						}
+					}
+				prev = ts;
 				}
-			if (filtered.Count == 0) return;
 
-			store.Append (filtered);
-			Console.WriteLine ($"[candle-updater] {_symbol} {binanceInterval}: appended {filtered.Count} candles ({fromUtc:yyyy-MM-dd HH:mm} .. {toUtc:yyyy-MM-dd HH:mm} UTC)");
+			var weekday = new List<CandleNdjsonStore.CandleLine> (raw.Count);
+			var weekend = new List<CandleNdjsonStore.CandleLine> (raw.Count);
+
+			foreach (var r in raw)
+				{
+				var line = new CandleNdjsonStore.CandleLine (
+					r.openUtc,
+					r.open,
+					r.high,
+					r.low,
+					r.close);
+
+				if (r.openUtc.IsWeekendUtc ())
+					weekend.Add (line);
+				else
+					weekday.Add (line);
+				}
+
+			if (weekday.Count > 0)
+				{
+				weekdayStore.Append (weekday);
+				Console.WriteLine (
+					$"[candle-updater] {_symbol} {interval}: appended WEEKDAY {weekday.Count} candles");
+				}
+
+			if (weekend.Count > 0)
+				{
+				weekendStore.Append (weekend);
+				Console.WriteLine (
+					$"[candle-updater] {_symbol} {interval}: appended WEEKEND {weekend.Count} candles");
+				}
 			}
 
+		/// <summary>
+		/// Полный апдейт по трём ТФ.
+		/// - 1m: будни + отдельный weekend-файл;
+		/// </summary>
 		public async Task UpdateAllAsync ( DateTime? fullBackfillFromUtc = null )
 			{
-			Console.WriteLine ($"[candle-updater] symbol={_symbol}, baseDir={_baseDir}, fullBackfillFrom={fullBackfillFromUtc:yyyy-MM-dd HH:mm}");
-
 			var tasks = new[]
-			{
-		UpdateOneAsync ("1m", TimeSpan.FromMinutes (1), fullBackfillFromUtc),
-		UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc),
-		UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc)
-	};
+				{
+				// 1m: пишем и будний, и weekend-файл.
+				UpdateOne1mWithWeekendsAsync (TimeSpan.FromMinutes (1), fullBackfillFromUtc),
+
+				// 1h/6h
+				UpdateOneAsync ("1h", TimeSpan.FromHours (1), fullBackfillFromUtc),
+				UpdateOneAsync ("6h", TimeSpan.FromHours (6), fullBackfillFromUtc)
+				};
 
 			await Task.WhenAll (tasks);
 			}

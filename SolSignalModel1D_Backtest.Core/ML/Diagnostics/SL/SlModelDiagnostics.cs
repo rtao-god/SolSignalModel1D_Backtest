@@ -1,11 +1,7 @@
 ﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 	{

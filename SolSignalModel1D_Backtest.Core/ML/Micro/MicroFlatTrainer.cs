@@ -16,10 +16,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 	/// </summary>
 	public static class MicroFlatTrainer
 		{
-		/// <summary>
-		/// Минимальное число размеченных микро-дней, при котором имеет смысл учить LightGBM.
-		/// Меньше этого порога — считаем, что история ещё «слишком молодая» для микро-слоя.
-		/// </summary>
 		private const int MinMicroRowsForTraining = 40;
 
 		/// <summary>
@@ -33,21 +29,26 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 			if (ml == null) throw new ArgumentNullException (nameof (ml));
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 
-			// 1. Сырой датасет микро-дней (есть FactMicroUp/FactMicroDown).
-			var flatsRaw = rows
-				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.Date)
-				.ToList ();
+			// === Новый слой: MicroDatasetBuilder ===
+			// В проде сюда уже прилетает train-only список дней; для него берём trainUntil = max(Date),
+			// чтобы не менять поведение. В тестах можно строить датасет от allRows + явного trainUntil.
+			var trainUntil = rows.Count > 0
+				? rows.Max (r => r.Date)
+				: DateTime.MinValue;
 
-			// Нет ни одного размеченного микро-дня — это не ошибка, просто микро-слоя быть не может.
+			var dataset = MicroDatasetBuilder.Build (
+				allRows: rows,
+				trainUntil: trainUntil);
+
+			var flatsRaw = dataset.MicroRows;
+
+			// 1. Сырой датасет микро-дней (есть FactMicroUp/FactMicroDown).
 			if (flatsRaw.Count == 0)
 				{
 				Console.WriteLine ("[2stage-micro] нет ни одного размеченного микро-дня, микро-слой отключён.");
 				return null;
 				}
 
-			// История микро-дней есть, но её объективно мало.
-			// Учить LightGBM на 5–10 строках бессмысленно: получится шум и нестабильность.
 			if (flatsRaw.Count < MinMicroRowsForTraining)
 				{
 				Console.WriteLine (
@@ -61,7 +62,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 			var up = flatsRaw.Where (r => r.FactMicroUp).ToList ();
 			var dn = flatsRaw.Where (r => r.FactMicroDown).ToList ();
 
-			// На «взрослом» датасете отсутствие одного из классов — уже реальная проблема разметки.
 			if (up.Count == 0 || dn.Count == 0)
 				{
 				throw new InvalidOperationException (
@@ -130,7 +130,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 				samples.Add (new MlSampleBinary
 					{
-					// true => microUp, false => microDown
 					Label = r.FactMicroUp,
 					Features = feats
 					});
@@ -153,7 +152,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				LearningRate = 0.07f,
 				MinimumExampleCountPerLeaf = 15,
 				Seed = 42,
-				NumberOfThreads = 1
+				NumberOfThreads = Environment.ProcessorCount
 				};
 
 			try
@@ -170,7 +169,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				}
 			catch (Exception ex)
 				{
-				// Сюда должны попадать только реальные сбои LightGBM при уже проверенном датасете.
 				throw new InvalidOperationException (
 					"[2stage-micro] LightGBM не смог обучить микро-модель при корректном датасете. " +
 					$"flats={flats.Count}, up={upBalanced.Count}, down={dnBalanced.Count}, " +

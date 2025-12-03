@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			// Разделяем по режиму (NORMAL / DOWN), как и раньше.
+			// Разделяем по режиму (NORMAL / DOWN)
 			dirNormalRows = moveRows
 				.Where (r => !r.RegimeDown)
 				.OrderBy (r => r.Date)

@@ -7,6 +7,7 @@ using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
+using System.Text.Json.Serialization;
 
 namespace SolSignalModel1D_Backtest.Api
 	{
@@ -18,6 +19,14 @@ namespace SolSignalModel1D_Backtest.Api
 		public static void Main ( string[] args )
 			{
 			var builder = WebApplication.CreateBuilder (args);
+
+			// Глобальные JSON-настройки для HTTP-ответов
+			builder.Services.ConfigureHttpJsonOptions (options =>
+			{
+				// Разрешаем NaN/Infinity/-Infinity так же, как в ReportStorage,
+				// чтобы объекты с такими double полями нормально отдавались наружу.
+				options.SerializerOptions.NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals;
+			});
 
 			builder.Services.AddRouting ();
 

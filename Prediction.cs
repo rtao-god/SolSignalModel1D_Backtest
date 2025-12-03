@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest
 		/// <summary>
 		/// Глобальная граница train-периода для дневной модели.
 		/// Всё, что ≤ этой даты, используется только для обучения.
-		/// Всё, что &gt; этой даты, считается OOS (для логов/аналитики).
+		/// Всё, что > этой даты, считается OOS (для логов/аналитики).
 		/// </summary>
 		private static DateTime _trainUntilUtc;
 
@@ -19,8 +19,7 @@ namespace SolSignalModel1D_Backtest
 		/// Создаёт PredictionEngine:
 		/// - выбирает обучающую часть истории (train) по дате;
 		/// - тренирует дневной move+dir и микро-слой через ModelTrainer;
-		/// - запоминает границу train-периода в _trainUntilUtc;
-		/// - никаких fallback: если моделей нет, сразу исключение.
+		/// - запоминает границу train-периода в _trainUntilUtc.
 		/// </summary>
 		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
 			{
@@ -32,14 +31,13 @@ namespace SolSignalModel1D_Backtest
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			DateTime minDate = ordered.First ().Date;
-			DateTime maxDate = ordered.Last ().Date;
+			var minDate = ordered.First ().Date;
+			var maxDate = ordered.Last ().Date;
 
 			// Простой временной hold-out: последние N дней не участвуют в обучении,
 			// чтобы модели не видели самые свежие дни, по которым считаются forward-метрики.
 			const int HoldoutDays = 120;
-
-			DateTime trainUntil = maxDate.AddDays (-HoldoutDays);
+			var trainUntil = maxDate.AddDays (-HoldoutDays);
 
 			var trainRows = ordered
 				.Where (r => r.Date <= trainUntil)
@@ -52,8 +50,7 @@ namespace SolSignalModel1D_Backtest
 				.Select (g => $"{g.Key}={g.Count ()}")
 				.ToArray ();
 
-			Console.WriteLine (
-				"[engine] train label hist: " + string.Join (", ", labelHist));
+			Console.WriteLine ("[engine] train label hist: " + string.Join (", ", labelHist));
 
 			if (labelHist.Length <= 1)
 				{
@@ -67,9 +64,11 @@ namespace SolSignalModel1D_Backtest
 				// Если данных мало — лучше обучиться на всём, чем падать.
 				Console.WriteLine (
 					$"[engine] trainRows too small ({trainRows.Count}), " +
-					$"используем всю историю без hold-out (метрики будут train-like)");
+					"используем всю историю без hold-out (метрики будут train-like)");
+
 				trainRows = ordered;
-				_trainUntilUtc = ordered.Last ().Date; // по сути, train == вся история → OOS нет
+				// по сути, train == вся история → OOS нет
+				_trainUntilUtc = ordered.Last ().Date;
 				}
 			else
 				{
@@ -124,20 +123,24 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			// Подготавливаем отсортированный список 6h-свечей для forward-метрик.
-			var sorted6h = solAll6h is List<Candle6h> list6h
-				? list6h
-				: solAll6h.ToList ();
-
+			var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList ();
 			if (sorted6h.Count == 0)
 				throw new InvalidOperationException ("[forward] Пустая серия 6h для SOL");
 
+			// Предподготавливаем индекс свечей по времени открытия.
+			// Строим словарь в обратном порядке, чтобы при дублях времени
+			// использовался минимальный индекс (совпадает с FindIndex).
+			var indexByOpenTime = new Dictionary<DateTime, int> (sorted6h.Count);
+			for (int i = sorted6h.Count - 1; i >= 0; i--)
+				{
+				var openTime = sorted6h[i].OpenTimeUtc;
+				indexByOpenTime[openTime] = i;
+				}
+
 			// Все mornings по времени.
-			var orderedMornings = mornings
-				.OrderBy (r => r.Date)
-				.ToList ();
+			var orderedMornings = mornings as List<DataRow> ?? mornings.ToList ();
 
-			int oosCount = orderedMornings.Count (r => r.Date > _trainUntilUtc);
-
+			var oosCount = orderedMornings.Count (r => r.Date > _trainUntilUtc);
 			Console.WriteLine (
 				$"[forward] mornings total = {orderedMornings.Count}, " +
 				$"OOS (Date > trainUntil={_trainUntilUtc:yyyy-MM-dd}) = {oosCount}");
@@ -155,33 +158,30 @@ namespace SolSignalModel1D_Backtest
 			foreach (var r in orderedMornings)
 				{
 				// Предсказание только через PredictionEngine (дневная модель + микро).
-				// Никаких эвристик и ручных подмен.
 				var pr = engine.Predict (r);
-
-				int cls = pr.Class;
-				bool microUp = pr.Micro.ConsiderUp;
-				bool microDn = pr.Micro.ConsiderDown;
-				string reason = pr.Reason;
+				var cls = pr.Class;
+				var microUp = pr.Micro.ConsiderUp;
+				var microDn = pr.Micro.ConsiderDown;
+				var reason = pr.Reason;
 
 				// Вычисляем показатели по forward-окну (до базового выхода t_exit).
-				DateTime entryUtc = r.Date;
+				var entryUtc = r.Date;
 
 				// Общий NyTz (определён в другом partial Program), чтобы baseline-окно
 				// совпадало с PnL/SL/Delayed.
-				DateTime exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
+				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
 
-				int entryIdx = sorted6h.FindIndex (c => c.OpenTimeUtc == entryUtc);
-				if (entryIdx < 0)
+				if (!indexByOpenTime.TryGetValue (entryUtc, out var entryIdx))
 					{
 					throw new InvalidOperationException (
 						$"[forward] entry candle {entryUtc:O} not found in 6h series");
 					}
 
-				int exitIdx = -1;
+				var exitIdx = -1;
 				for (int i = entryIdx; i < sorted6h.Count; i++)
 					{
 					var start = sorted6h[i].OpenTimeUtc;
-					DateTime end = (i + 1 < sorted6h.Count)
+					var end = (i + 1 < sorted6h.Count)
 						? sorted6h[i + 1].OpenTimeUtc
 						: start.AddHours (6);
 
@@ -204,13 +204,15 @@ namespace SolSignalModel1D_Backtest
 						$"[forward] exitIdx {exitIdx} <= entryIdx {entryIdx} для entry {entryUtc:O}");
 					}
 
-				double entryPrice = sorted6h[entryIdx].Close;
+				var entryPrice = sorted6h[entryIdx].Close;
+
 				double maxHigh = double.MinValue;
 				double minLow = double.MaxValue;
 
 				for (int j = entryIdx + 1; j <= exitIdx; j++)
 					{
 					var c = sorted6h[j];
+
 					if (c.High > maxHigh) maxHigh = c.High;
 					if (c.Low < minLow) minLow = c.Low;
 					}
@@ -221,24 +223,21 @@ namespace SolSignalModel1D_Backtest
 						$"[forward] no candles between entry {entryUtc:O} and exit {exitUtc:O}");
 					}
 
-				double fwdClose = sorted6h[exitIdx].Close;
+				var fwdClose = sorted6h[exitIdx].Close;
 
 				list.Add (new PredictionRecord
 					{
 					DateUtc = r.Date,
 					TrueLabel = r.Label,
 					PredLabel = cls,
-
 					PredMicroUp = microUp,
 					PredMicroDown = microDn,
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown,
-
 					Entry = entryPrice,
 					MaxHigh24 = maxHigh,
 					MinLow24 = minLow,
 					Close24 = fwdClose,
-
 					RegimeDown = r.RegimeDown,
 					Reason = reason,
 					MinMove = r.MinMove,
@@ -254,7 +253,6 @@ namespace SolSignalModel1D_Backtest
 					TargetLevelClass = 0,
 					DelayedWhyNot = null,
 					DelayedEntryExecutedAtUtc = null,
-
 					SlProb = 0.0,
 					SlHighDecision = false
 					});
