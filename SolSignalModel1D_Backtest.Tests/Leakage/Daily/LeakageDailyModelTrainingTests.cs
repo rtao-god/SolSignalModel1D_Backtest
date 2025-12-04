@@ -253,22 +253,25 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				.ToList ();
 			}
 
+		/// <summary>
+		/// Сравнивает два списка бинарных предсказаний:
+		/// - PredictedLabel — строго;
+		/// - Score/Probability — с небольшим допуском по плавающей точке.
+		/// Такой инвариант гарантирует, что обучение не стало зависеть от мутированного хвоста.
+		/// Альтернатива — сравнивать только Score или только Probability, но тогда сложнее
+		/// отлавливать мелкие дрожания в пороге.
+		/// </summary>
 		private static void AssertBinaryOutputsEqual (
-			List<BinaryOutput> a,
-			List<BinaryOutput> b,
-			double tol = 1e-6 )
+			IReadOnlyList<BinaryOutput> a,
+			IReadOnlyList<BinaryOutput> b )
 			{
 			Assert.Equal (a.Count, b.Count);
 
-			for (var i = 0; i < a.Count; i++)
+			for (int i = 0; i < a.Count; i++)
 				{
 				Assert.Equal (a[i].PredictedLabel, b[i].PredictedLabel);
-				Assert.InRange (
-					Math.Abs (a[i].Score - b[i].Score),
-					0.0, tol);
-				Assert.InRange (
-					Math.Abs (a[i].Probability - b[i].Probability),
-					0.0, tol);
+				Assert.Equal (a[i].Score, b[i].Score, 6);
+				Assert.Equal (a[i].Probability, b[i].Probability, 6);
 				}
 			}
 		}

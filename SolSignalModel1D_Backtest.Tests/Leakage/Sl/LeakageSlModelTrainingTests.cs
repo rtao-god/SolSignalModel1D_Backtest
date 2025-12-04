@@ -1,8 +1,10 @@
 ﻿using Microsoft.ML;
+using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using System;
 using System.Collections.Generic;
@@ -29,7 +31,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 		private sealed class SlEvalRow
 			{
 			public bool Label { get; set; }
-			public float[] Features { get; set; } = Array.Empty<float> ();
+
+			[VectorType (MlSchema.FeatureCount)]
+			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
 			}
 
 		[Fact]

@@ -109,7 +109,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		[Fact]
 		public void PickNearestFng_UsesPreviousDay_WhenExactMissing ()
 			{
-			var fng = new Dictionary<DateTime, int>
+			var fng = new Dictionary<DateTime, double>
 				{
 					{ new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), 10 },
 					{ new DateTime (2024, 1, 3, 0, 0, 0, DateTimeKind.Utc), 20 }
@@ -118,7 +118,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			// На 2024-01-02 нет значения, ожидаем взять 2024-01-01.
 			var asOf = new DateTime (2024, 1, 2, 12, 0, 0, DateTimeKind.Utc);
 
-			int val = CoreIndicators.PickNearestFng (fng, asOf);
+			double val = CoreIndicators.PickNearestFng (fng, asOf);
 
 			Assert.Equal (10, val);
 			}

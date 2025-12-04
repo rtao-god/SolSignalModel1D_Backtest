@@ -105,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				}
 
 			// FNG / DXY / extraDaily — как в IndicatorsLeakageTests
-			var fngBase = new Dictionary<DateTime, int> ();
+			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
@@ -166,7 +166,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			// Макро: считаем допустимым использовать FNG/DXY текущего дня,
 			// но не будущие даты (строго > entryUtc.Date)
-			var fngB = new Dictionary<DateTime, int> (fngBase);
+			var fngB = new Dictionary<DateTime, double> (fngBase);
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
 			foreach (var key in fngBase.Keys.ToList ())

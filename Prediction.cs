@@ -23,6 +23,8 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
 			{
+			PredictionEngine.DebugAllowDisabledModels = true;
+
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 			if (allRows.Count == 0)
 				throw new InvalidOperationException ("[engine] Пустой список DataRow для обучения моделей");
@@ -79,14 +81,20 @@ namespace SolSignalModel1D_Backtest
 					$"({trainRows.Count} из {ordered.Count}, диапазон [{minDate:yyyy-MM-dd}; {trainUntil:yyyy-MM-dd}])");
 				}
 
-			var trainer = new ModelTrainer ();
+			var trainer = new ModelTrainer
+				{
+					DisableMoveModel = false,           // отключаем move
+					DisableDirNormalModel = false,
+					DisableDirDownModel = true,
+					DisableMicroFlatModel = false
+				};
 			var bundle = trainer.TrainAll (trainRows);
 
 			if (bundle.MlCtx == null)
 				throw new InvalidOperationException ("[engine] ModelTrainer вернул ModelBundle с MlCtx == null");
 
-			if (bundle.MoveModel == null)
-				throw new InvalidOperationException ("[engine] ModelBundle.MoveModel == null после обучения");
+			/*if (bundle.MoveModel == null)
+				throw new InvalidOperationException ("[engine] ModelBundle.MoveModel == null после обучения");*/
 
 			//if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
 			//	throw new InvalidOperationException (

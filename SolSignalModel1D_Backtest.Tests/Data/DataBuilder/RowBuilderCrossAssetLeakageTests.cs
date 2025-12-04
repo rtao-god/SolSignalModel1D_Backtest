@@ -102,7 +102,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				}
 
 			// Базовые FNG/DXY
-			var fngBase = new Dictionary<DateTime, int> ();
+			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 

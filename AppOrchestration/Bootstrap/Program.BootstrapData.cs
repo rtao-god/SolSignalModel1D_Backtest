@@ -28,8 +28,6 @@ namespace SolSignalModel1D_Backtest
 			);
 
 			// --- 2. Загрузка всех таймфреймов и окна бэктеста ---
-			// ВАЖНО: оставляем out var прямо в вызове, без лямбды,
-			// чтобы компилятор видел, что все переменные точно инициализированы.
 			LoadAllCandlesAndWindow (
 				out var solAll6h,
 				out var btcAll6h,

@@ -4,9 +4,6 @@ using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Daily
 	{
@@ -19,6 +16,30 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 	/// </summary>
 	public sealed class ModelTrainer
 		{
+		// === DEBUG-флаги для точечного отключения моделей ===
+		// По умолчанию все false → поведение полностью совпадает с прежним.
+
+		/// <summary>
+		/// Если true, move-модель ("есть ли ход") не обучается и в бандле будет null.
+		/// Удобно для абляционных тестов/поиска утечек.
+		/// </summary>
+		public bool DisableMoveModel { get; set; }
+
+		/// <summary>
+		/// Если true, модель направления для NORMAL-режима не обучается (DirModelNormal = null).
+		/// </summary>
+		public bool DisableDirNormalModel { get; set; }
+
+		/// <summary>
+		/// Если true, модель направления для DOWN-режима не обучается (DirModelDown = null).
+		/// </summary>
+		public bool DisableDirDownModel { get; set; }
+
+		/// <summary>
+		/// Если true, микро-модель боковика не обучается (MicroFlatModel = null).
+		/// </summary>
+		public bool DisableMicroFlatModel { get; set; }
+
 		// Число потоков для LightGBM.
 		private readonly int _gbmThreads = Math.Max (1, Environment.ProcessorCount - 1);
 
@@ -40,14 +61,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
 
 			if (trainRows.Count == 0)
-				{
 				throw new InvalidOperationException ("TrainAll: empty trainRows — нечего обучать.");
-				}
 
 			// === 1. Единый dataset-builder для дневной модели ===
-			// Тут нет trainUntil "из Program", поэтому используем максимум по тем
-			// строкам, которые уже отобраны наружным кодом (trainRows).
-			// Это не меняет поведение: и раньше ModelTrainer видел только этот отрезок.
 			var trainUntil = trainRows.Max (r => r.Date);
 
 			var dataset = DailyDatasetBuilder.Build (
@@ -64,35 +80,77 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 
 			// ===== 1. Модель "есть ли ход" (move) =====
 			// Цель: Label != 1 (non-flat по path-based label).
-			var moveData = _ml.Data.LoadFromEnumerable (
-				moveTrainRows.Select (r => new MlSampleBinary
-					{
-					Label = r.Label != 1,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
-					})
-			);
+			ITransformer? moveModel = null;
 
-			var movePipe = _ml.BinaryClassification.Trainers.LightGbm (
-				new LightGbmBinaryTrainer.Options
+			if (DisableMoveModel)
+				{
+				Console.WriteLine ("[2stage] move-model DISABLED by flag, skipped training");
+				}
+			else
+				{
+				if (moveTrainRows.Count == 0)
 					{
-					NumberOfLeaves = 16,
-					NumberOfIterations = 90,
-					LearningRate = 0.07f,
-					MinimumExampleCountPerLeaf = 20,
-					Seed = 42,
-					NumberOfThreads = _gbmThreads
-					});
+					Console.WriteLine ("[2stage] move-model: train rows = 0, skipping");
+					}
+				else
+					{
+					var moveData = _ml.Data.LoadFromEnumerable (
+						moveTrainRows.Select (r => new MlSampleBinary
+							{
+							Label = r.Label != 1,
+							Features = MlTrainingUtils.ToFloatFixed (r.Features)
+							}));
 
-			var moveModel = movePipe.Fit (moveData);
-			Console.WriteLine ($"[2stage] move-model trained on {moveTrainRows.Count} rows");
+					var movePipe = _ml.BinaryClassification.Trainers.LightGbm (
+						new LightGbmBinaryTrainer.Options
+							{
+							NumberOfLeaves = 16,
+							NumberOfIterations = 90,
+							LearningRate = 0.07f,
+							MinimumExampleCountPerLeaf = 20,
+							Seed = 42,
+							NumberOfThreads = _gbmThreads
+							});
+
+					moveModel = movePipe.Fit (moveData);
+					Console.WriteLine ($"[2stage] move-model trained on {moveTrainRows.Count} rows");
+					}
+				}
 
 			// ===== 2. Направление (dir-normal / dir-down) =====
-			var dirNormalModel = BuildDirModel (dirNormalRows, "dir-normal");
-			var dirDownModel = BuildDirModel (dirDownRows, "dir-down");
+
+			ITransformer? dirNormalModel = null;
+			ITransformer? dirDownModel = null;
+
+			if (DisableDirNormalModel)
+				{
+				Console.WriteLine ("[2stage] dir-normal DISABLED by flag, skipped training");
+				}
+			else
+				{
+				dirNormalModel = BuildDirModel (dirNormalRows, "dir-normal");
+				}
+
+			if (DisableDirDownModel)
+				{
+				Console.WriteLine ("[2stage] dir-down DISABLED by flag, skipped training");
+				}
+			else
+				{
+				dirDownModel = BuildDirModel (dirDownRows, "dir-down");
+				}
 
 			// ===== 3. Микро-модель для боковика =====
-			// Микро-слой по-прежнему берёт тот же trainRows, но внутри использует MicroDatasetBuilder.
-			var microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, dataset.TrainRows);
+			ITransformer? microModel = null;
+
+			if (DisableMicroFlatModel)
+				{
+				Console.WriteLine ("[2stage] micro-flat DISABLED by flag, skipped training");
+				}
+			else
+				{
+				microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, dataset.TrainRows);
+				}
 
 			// Бандл остаётся тем же — чтобы не ломать внешний код.
 			return new ModelBundle
@@ -128,8 +186,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 					// true = up (Label=2), false = down (Label=0)
 					Label = r.Label == 2,
 					Features = MlTrainingUtils.ToFloatFixed (r.Features)
-					})
-			);
+					}));
 
 			var pipe = _ml.BinaryClassification.Trainers.LightGbm (
 				new LightGbmBinaryTrainer.Options

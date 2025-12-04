@@ -16,7 +16,7 @@
 		public double BtcRet1 { get; set; }
 		public double BtcRet3 { get; set; }
 
-		public int Fng { get; set; }
+		public double Fng { get; set; }
 		public double DxyChg30 { get; set; }
 		public double GoldChg30 { get; set; }
 		public double BtcVs200 { get; set; }

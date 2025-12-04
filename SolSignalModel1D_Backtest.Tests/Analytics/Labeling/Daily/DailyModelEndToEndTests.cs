@@ -265,7 +265,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				}
 
 			// 3. FNG/DXY: простые плоские ряды, но с полным покрытием дат.
-			var fng = new Dictionary<DateTime, int> ();
+			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
 			var firstDate = start.Date.AddDays (-200);

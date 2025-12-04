@@ -141,7 +141,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			var firstDate = solAll6h.First ().OpenTimeUtc.Date.AddDays (-120);
 			var lastDate = solAll6h.Last ().OpenTimeUtc.Date.AddDays (120);
 
-			var fng = new Dictionary<DateTime, int> ();
+			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))

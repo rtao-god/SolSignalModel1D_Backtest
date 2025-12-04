@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Daily
@@ -36,6 +34,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 	/// <summary>
 	/// Единая точка сборки дневного датасета:
 	/// - режет по trainUntil (r.Date <= trainUntil);
+	/// - дополнительно выбрасывает строки, чей baseline-exit за trainUntil;
 	/// - опционально выкидывает datesToExclude;
 	/// - делегирует разбиение на move/dir в DailyTrainingDataBuilder.
 	///
@@ -43,6 +42,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 	/// </summary>
 	public static class DailyDatasetBuilder
 		{
+		// Используем тот же таймзон, что и RowBuilder/Windowing.
+		private static readonly TimeZoneInfo NyTz = Windowing.NyTz;
+
 		public static DailyDataset Build (
 			List<DataRow> allRows,
 			DateTime trainUntil,
@@ -58,12 +60,12 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			// 2. Train-период по дате.
+			// 2. Базовый train-период по дате входа.
 			var trainRows = ordered
 				.Where (r => r.Date <= trainUntil)
 				.ToList ();
 
-			// 3. Исключаем явно заданные даты (например, OOS).
+			// 3. Явные исключения дат (например, OOS).
 			if (datesToExclude != null && datesToExclude.Count > 0)
 				{
 				trainRows = trainRows
@@ -71,7 +73,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 					.ToList ();
 				}
 
-			// 4. Разбиение на move/dir-датасеты.
+			// 4. Фильтрация по baseline-exit:
+			//    оставляем только те строки, у которых baseline-exit не залезает за trainUntil.
+			trainRows = FilterByBaselineExit (trainRows, trainUntil);
+
+			// 5. Разбиение на move/dir-датасеты.
 			DailyTrainingDataBuilder.Build (
 				trainRows: trainRows,
 				balanceMove: balanceMove,
@@ -87,6 +93,37 @@ namespace SolSignalModel1D_Backtest.Core.ML.Daily
 				dirNormalRows: dirNormalRows,
 				dirDownRows: dirDownRows,
 				trainUntilUtc: trainUntil);
+			}
+
+		/// <summary>
+		/// Выбрасывает строки, baseline-exit которых позже trainUntil.
+		/// Для нерабочих дней (weekend) baseline-exit по определению не задан,
+		/// такие строки просто не попадают в train-набор (как и в RowBuilder).
+		/// </summary>
+		private static List<DataRow> FilterByBaselineExit (
+			List<DataRow> rows,
+			DateTime trainUntil )
+			{
+			var result = new List<DataRow> (rows.Count);
+
+			foreach (var r in rows)
+				{
+				// В прод-пайплайне RowBuilder вообще не создаёт строк для выходных.
+				// Здесь явно повторяем тот же контракт: weekend-строки не участвуют в train-наборе.
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (r.Date, NyTz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					continue;
+
+				// Если для буднего дня ComputeBaselineExitUtc кидает ошибку — это уже
+				// реальная проблема входных данных, и её важно увидеть.
+				var exitUtc = Windowing.ComputeBaselineExitUtc (r.Date, NyTz);
+
+				if (exitUtc <= trainUntil)
+					result.Add (r);
+				// если exitUtc > trainUntil — это holdout, строку не включаем в train
+				}
+
+			return result;
 			}
 		}
 	}

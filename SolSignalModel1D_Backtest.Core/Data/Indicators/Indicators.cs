@@ -228,17 +228,24 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 		/// Берём FNG на дату asOfUtcDate; если точной нет — ближайшая предыдущая (до 14 дней).
 		/// Если нет, вернём 50.
 		/// </summary>
-		public static int PickNearestFng ( Dictionary<DateTime, int> fngByDate, DateTime asOfUtcDate )
+		public static double PickNearestFng (
+			Dictionary<DateTime, double> fngByDate,
+			DateTime asOfUtcDate )
 			{
-			if (fngByDate == null || fngByDate.Count == 0) return 50;
-			if (fngByDate.TryGetValue (asOfUtcDate.Date, out int v)) return v;
+			if (fngByDate == null || fngByDate.Count == 0)
+				return 50.0;
+
+			if (fngByDate.TryGetValue (asOfUtcDate.Date, out double v))
+				return v;
 
 			for (int i = 1; i <= 14; i++)
 				{
 				var d = asOfUtcDate.Date.AddDays (-i);
-				if (fngByDate.TryGetValue (d, out v)) return v;
+				if (fngByDate.TryGetValue (d, out v))
+					return v;
 				}
-			return 50;
+
+			return 50.0;
 			}
 
 		/// <summary>

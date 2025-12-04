@@ -35,7 +35,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				sol6hDict: sol6hDict,
 				trainUntil: trainUntil,
 				tpPct: 0.03,
-				slPct: 0.05);
+				slPct: 0.05,
+				strongSelector: null
+			);
 
 			var dsB = SlDatasetBuilder.Build (
 				rows: rowsB,
@@ -44,7 +46,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				sol6hDict: sol6hDict,
 				trainUntil: trainUntil,
 				tpPct: 0.03,
-				slPct: 0.05);
+				slPct: 0.05,
+				strongSelector: null
+			);
 
 			Assert.All (dsA.MorningRows, r => Assert.True (r.Date <= trainUntil));
 			Assert.All (dsB.MorningRows, r => Assert.True (r.Date <= trainUntil));

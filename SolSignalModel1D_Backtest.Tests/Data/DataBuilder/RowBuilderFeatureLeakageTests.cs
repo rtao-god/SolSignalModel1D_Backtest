@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Xunit;
+﻿using Xunit;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using CoreWindowing = SolSignalModel1D_Backtest.Core.Data.Windowing;
@@ -79,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var paxgWinTrain = paxgAll6h;
 
 			// FNG и DXY: стабильные ряды по датам.
-			var fng = new Dictionary<DateTime, int> ();
+			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
 			var firstDate = start.Date.AddDays (-60);

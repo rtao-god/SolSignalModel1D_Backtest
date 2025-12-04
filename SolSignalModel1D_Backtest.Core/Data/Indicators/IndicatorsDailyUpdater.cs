@@ -1,9 +1,4 @@
 ﻿using SolSignalModel1D_Backtest.Core.Infra;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 	{
@@ -48,10 +43,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				throw new InvalidOperationException ("[indicators] missing: " + string.Join (", ", missing));
 			}
 
-		public Dictionary<DateTime, int> LoadFngDict ( DateTime startUtc, DateTime endUtc )
+		public Dictionary<DateTime, double> LoadFngDict ( DateTime startUtc, DateTime endUtc )
 			{
 			var raw = _fngStore.ReadRange (startUtc, endUtc);
-			var res = new Dictionary<DateTime, int> ();
+			var res = new Dictionary<DateTime, double> ();
 			foreach (var kv in raw)
 				res[kv.Key] = (int) Math.Round (kv.Value);
 			return res;
@@ -72,9 +67,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 
 			for (var d = from.Date; d <= endUtc.Date; d = d.AddDays (1))
 				{
-				if (fresh.TryGetValue (d, out int idx))
+				if (fresh.TryGetValue (d, out var fng))
 					{
-					lines.Add (new IndicatorsNdjsonStore.IndicatorLine (d, idx));
+					lines.Add (new IndicatorsNdjsonStore.IndicatorLine (d, fng));
 					}
 				else
 					{

@@ -92,7 +92,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				}
 
 			// Базовые FNG/DXY ряды: "ровные" по датам, без пропусков.
-			var fngBase = new Dictionary<DateTime, int> ();
+			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 
 			var firstDate = start.Date.AddDays (-120);
@@ -127,7 +127,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var cutoff = rowsA[rowsA.Count / 3].Date;
 
 			// === B-сценарий: копия FNG/DXY, но будущая часть сильно мутирована ===
-			var fngB = new Dictionary<DateTime, int> (fngBase);
+			var fngB = new Dictionary<DateTime, double> (fngBase);
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
 			// Сдвигаем "будущее" после cutoff + 10 дней.

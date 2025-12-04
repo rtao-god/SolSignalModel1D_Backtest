@@ -105,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				}
 
 			// FNG / DXY / extraDaily как в IndicatorsLeakageTests
-			var fng = new Dictionary<DateTime, int> ();
+			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 

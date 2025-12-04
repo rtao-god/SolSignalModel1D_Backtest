@@ -246,7 +246,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			List<Candle6h> solAll6h,
 			List<Candle6h> solAll1hDummy, // не используется, оставлен для совместимости сигнатуры
 			List<Candle1m> solAll1m,
-			Dictionary<DateTime, int> fngHistory,
+			Dictionary<DateTime, double> fngHistory,
 			Dictionary<DateTime, double> dxySeries
 		) BuildSyntheticSeriesWith1h ( TimeZoneInfo nyTz )
 			{
@@ -342,7 +342,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				}
 
 			// FNG/DXY на каждый календарный день диапазона.
-			var fngHistory = new Dictionary<DateTime, int> ();
+			var fngHistory = new Dictionary<DateTime, double> ();
 			var dxySeries = new Dictionary<DateTime, double> ();
 
 			var day = firstMinuteLocal.Date;
@@ -373,7 +373,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			List<Candle6h> paxgWinTrain,
 			List<Candle6h> solAll6h,
 			List<Candle1m> solAll1m,
-			Dictionary<DateTime, int> fngHistory,
+			Dictionary<DateTime, double> fngHistory,
 			Dictionary<DateTime, double> dxySeries
 		) BuildSyntheticSeries ( TimeZoneInfo nyTz )
 			{

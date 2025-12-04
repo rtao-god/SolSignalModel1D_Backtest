@@ -1,6 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-
-namespace SolSignalModel1D_Backtest.Core.ML.SL
+﻿namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	public static class SlUtils
 		{

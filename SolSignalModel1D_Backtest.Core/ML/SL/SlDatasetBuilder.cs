@@ -1,46 +1,67 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Trading;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Infra;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	/// <summary>
-	/// Датасет для SL-модели:
-	/// - MorningRows — утренние дни, попавшие в train-период;
-	/// - Samples — SlHitSample (Label + фичи) для гипотетических long/short.
+	/// Контейнер датасета для SL-модели:
+	/// - MorningRows — исходные дневные строки для утренних точек;
+	/// - Samples — SL-сэмплы (long/short) для обучения.
 	/// </summary>
 	public sealed class SlDataset
 		{
-		public List<DataRow> MorningRows { get; }
-		public List<SlHitSample> Samples { get; }
-		public DateTime TrainUntilUtc { get; }
+		/// <summary>
+		/// Граница train-окна для SL-модели.
+		/// Все сэмплы в этом датасете имеют baseline-выход <= TrainUntilUtc.
+		/// </summary>
+		public DateTime TrainUntilUtc { get; init; }
 
-		public SlDataset (
-			List<DataRow> morningRows,
-			List<SlHitSample> samples,
-			DateTime trainUntilUtc )
-			{
-			MorningRows = morningRows ?? throw new ArgumentNullException (nameof (morningRows));
-			Samples = samples ?? throw new ArgumentNullException (nameof (samples));
-			TrainUntilUtc = trainUntilUtc;
-			}
+		/// <summary>
+		/// Утренние дневные строки, по которым строились SL-сэмплы.
+		/// Один день может давать несколько сэмплов (long/short),
+		/// но сам DataRow здесь уникален по Date.
+		/// </summary>
+		public List<DataRow> MorningRows { get; init; } = new List<DataRow> ();
+
+		/// <summary>
+		/// Сырые SL-сэмплы (long/short), которыми фактически тренируется модель.
+		/// </summary>
+		public List<SlHitSample> Samples { get; init; } = new List<SlHitSample> ();
 		}
 
 	/// <summary>
-	/// Dataset-builder для SL-слоя.
-	/// Важные инварианты:
-	/// - в MorningRows входят только дни с Date <= trainUntil;
-	/// - для каждого такого дня считаем path-based факт по 1m до baseline-выхода;
-	/// - фичи считаются через SlFeatureBuilder по 1h.
+	/// Builder SL-датасета поверх низкоуровневого SlOfflineBuilder.
+	/// Задача:
+	/// - использовать только дни с Date <= trainUntil;
+	/// - выкинуть любые сэмплы, у которых baseline-выход залезает за trainUntil.
+	///
+	/// Таким образом, train-часть SL-модели строго future-blind
+	/// и не использует path-based информацию из OOS-участка.
 	/// </summary>
 	public static class SlDatasetBuilder
 		{
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+
+		/// <summary>
+		/// Строит SlDataset для обучения SL-модели.
+		/// </summary>
+		/// <param name="rows">
+		/// Все дневные строки RowBuilder'а (включая IsMorning/MinMove/RegimeDown).
+		/// </param>
+		/// <param name="sol1h">Вся 1h-история SOL (для фичей). Может быть null.</param>
+		/// <param name="sol1m">Вся 1m-история SOL (для path-based факта).</param>
+		/// <param name="sol6hDict">Словарь 6h-свечей SOL по Date (NY-утро).</param>
+		/// <param name="trainUntil">
+		/// Граница train-окна. Дни, у которых baseline-выход &gt; trainUntil,
+		/// не попадают в датасет.
+		/// </param>
+		/// <param name="tpPct">TP (в долях, 0.03 = 3%).</param>
+		/// <param name="slPct">SL (в долях, 0.05 = 5%).</param>
+		/// <param name="strongSelector">
+		/// Кастомная логика strong/weak для SL-фич; если null — все дни сильные.
+		/// </param>
 		public static SlDataset Build (
 			List<DataRow> rows,
 			IReadOnlyList<Candle1h>? sol1h,
@@ -49,194 +70,97 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			DateTime trainUntil,
 			double tpPct,
 			double slPct,
-			Func<DataRow, bool>? strongSelector = null )
+			Func<DataRow, bool>? strongSelector )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (sol6hDict == null) throw new ArgumentNullException (nameof (sol6hDict));
+			if (sol1m == null) throw new ArgumentNullException (nameof (sol1m));
 
-			var mornings = rows
-				.Where (r => r.IsMorning && r.Date <= trainUntil)
+			// 1. Берём только дни с Date <= trainUntil.
+			// Это гарантирует, что EntryUtc сэмпла не позже trainUntil.
+			var rowsTrain = rows
+				.Where (r => r.Date <= trainUntil)
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			var result = new List<SlHitSample> (mornings.Count * 2);
-
-			if (mornings.Count == 0)
+			if (rowsTrain.Count == 0)
 				{
-				return new SlDataset (mornings, result, trainUntil);
+				return new SlDataset
+					{
+					TrainUntilUtc = trainUntil,
+					MorningRows = new List<DataRow> (),
+					Samples = new List<SlHitSample> ()
+					};
 				}
 
-			var all1m = sol1m != null
-				? sol1m.OrderBy (m => m.OpenTimeUtc).ToList ()
-				: new List<Candle1m> ();
+			// 2. Низкоуровневая генерация SL-сэмплов (long/short) поверх rowsTrain.
+			// Внутри SlOfflineBuilder.Build:
+			// - используется только rowsTrain (IsMorning/MinMove);
+			// - 1h/1m/6h берутся "как есть" по всей истории.
+			var allSamples = SlOfflineBuilder.Build (
+				rows: rowsTrain,
+				sol1h: sol1h,
+				sol1m: sol1m,
+				sol6hDict: sol6hDict,
+				tpPct: tpPct,
+				slPct: slPct,
+				strongSelector: strongSelector
+			);
 
-			foreach (var r in mornings)
+			if (allSamples.Count == 0)
 				{
-				if (!sol6hDict.TryGetValue (r.Date, out var c6))
-					continue;
-
-				double entry = c6.Close;
-				if (entry <= 0)
-					continue;
-
-				double dayMinMove = r.MinMove;
-				if (dayMinMove <= 0)
-					dayMinMove = 0.02;
-
-				bool strongSignal = strongSelector?.Invoke (r) ?? true;
-
-				DateTime entryUtc = r.Date;
-
-				DateTime exitUtc;
-				try
+				return new SlDataset
 					{
-					// Используем общий Windowing для baseline-горизонта.
-					exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc);
-					}
-				catch
+					TrainUntilUtc = trainUntil,
+					MorningRows = new List<DataRow> (),
+					Samples = new List<SlHitSample> ()
+					};
+				}
+
+			// 3. Фильтруем сэмплы: baseline-выход не должен залезать за trainUntil.
+			// path-based логика внутри SlOfflineBuilder использует окна до
+			// ComputeBaselineExitUtc(entry), здесь мы просто режем по этой границе.
+			var filteredSamples = new List<SlHitSample> (allSamples.Count);
+
+			foreach (var s in allSamples)
+				{
+				var exit = Windowing.ComputeBaselineExitUtc (s.EntryUtc, NyTz);
+
+				if (exit <= trainUntil)
 					{
-					// Если baseline-выход не удаётся посчитать (например, из-за gap’ов),
-					// просто пропускаем этот день.
-					continue;
-					}
-
-				if (exitUtc <= entryUtc)
-					continue;
-
-				var day1m = all1m
-					.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
-					.ToList ();
-
-				if (day1m.Count == 0)
-					continue;
-
-				// --- гипотетический long ---
-					{
-					var labelRes = EvalPath1m (
-						day1m: day1m,
-						goLong: true,
-						entry: entry,
-						tpPct: tpPct,
-						slPct: slPct);
-
-					if (labelRes == HourlyTradeResult.SlFirst || labelRes == HourlyTradeResult.TpFirst)
-						{
-						var feats = SlFeatureBuilder.Build (
-							entryUtc: entryUtc,
-							goLong: true,
-							strongSignal: strongSignal,
-							dayMinMove: dayMinMove,
-							entryPrice: entry,
-							candles1h: sol1h);
-
-						result.Add (new SlHitSample
-							{
-							Label = labelRes == HourlyTradeResult.SlFirst,
-							Features = Pad (feats),
-							EntryUtc = entryUtc
-							});
-						}
-					}
-
-				// --- гипотетический short ---
-					{
-					var labelRes = EvalPath1m (
-						day1m: day1m,
-						goLong: false,
-						entry: entry,
-						tpPct: tpPct,
-						slPct: slPct);
-
-					if (labelRes == HourlyTradeResult.SlFirst || labelRes == HourlyTradeResult.TpFirst)
-						{
-						var feats = SlFeatureBuilder.Build (
-							entryUtc: entryUtc,
-							goLong: false,
-							strongSignal: strongSignal,
-							dayMinMove: dayMinMove,
-							entryPrice: entry,
-							candles1h: sol1h);
-
-						result.Add (new SlHitSample
-							{
-							Label = labelRes == HourlyTradeResult.SlFirst,
-							Features = Pad (feats),
-							EntryUtc = entryUtc
-							});
-						}
+					filteredSamples.Add (s);
 					}
 				}
 
-			return new SlDataset (mornings, result, trainUntil);
-			}
+			// 4. Собираем утренние строки, по которым остались сэмплы.
+			var morningByDate = rowsTrain
+				.Where (r => r.IsMorning)
+				.GroupBy (r => r.Date)
+				.ToDictionary (g => g.Key, g => g.First ());
 
-		/// <summary>
-		/// Path-based факт по 1m: кто был первым — TP или SL.
-		/// Логика строго симметрична PnL.
-		/// </summary>
-		private static HourlyTradeResult EvalPath1m (
-			List<Candle1m> day1m,
-			bool goLong,
-			double entry,
-			double tpPct,
-			double slPct )
-			{
-			if (day1m == null || day1m.Count == 0) return HourlyTradeResult.None;
-			if (entry <= 0) return HourlyTradeResult.None;
-			if (tpPct <= 0 && slPct <= 0) return HourlyTradeResult.None;
+			var morningRows = new List<DataRow> ();
 
-			if (goLong)
+			foreach (var s in filteredSamples)
 				{
-				double tp = entry * (1.0 + Math.Max (tpPct, 0.0));
-				double sl = slPct > 0 ? entry * (1.0 - slPct) : double.NaN;
-
-				foreach (var m in day1m)
+				if (morningByDate.TryGetValue (s.EntryUtc, out var row))
 					{
-					bool hitTp = tpPct > 0 && m.High >= tp;
-					bool hitSl = slPct > 0 && m.Low <= sl;
-
-					if (hitTp || hitSl)
-						{
-						if (hitTp && hitSl)
-							return HourlyTradeResult.SlFirst;
-
-						return hitSl ? HourlyTradeResult.SlFirst : HourlyTradeResult.TpFirst;
-						}
-					}
-				}
-			else
-				{
-				double tp = entry * (1.0 - Math.Max (tpPct, 0.0));
-				double sl = slPct > 0 ? entry * (1.0 + slPct) : double.NaN;
-
-				foreach (var m in day1m)
-					{
-					bool hitTp = tpPct > 0 && m.Low <= tp;
-					bool hitSl = slPct > 0 && m.High >= sl;
-
-					if (hitTp || hitSl)
-						{
-						if (hitTp && hitSl)
-							return HourlyTradeResult.SlFirst;
-
-						return hitSl ? HourlyTradeResult.SlFirst : HourlyTradeResult.TpFirst;
-						}
+					morningRows.Add (row);
 					}
 				}
 
-			return HourlyTradeResult.None;
-			}
+			// Делаем уникальными по Date (иначе long/short дадут дубликаты одного дня).
+			var distinctMorning = morningRows
+				.OrderBy (r => r.Date)
+				.GroupBy (r => r.Date)
+				.Select (g => g.First ())
+				.ToList ();
 
-		private static float[] Pad ( float[] src )
-			{
-			if (src == null) throw new ArgumentNullException (nameof (src));
-
-			if (src.Length == MlSchema.FeatureCount)
-				return src;
-
-			var arr = new float[MlSchema.FeatureCount];
-			Array.Copy (src, arr, Math.Min (src.Length, MlSchema.FeatureCount));
-			return arr;
+			return new SlDataset
+				{
+				TrainUntilUtc = trainUntil,
+				MorningRows = distinctMorning,
+				Samples = filteredSamples
+				};
 			}
 		}
 	}

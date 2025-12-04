@@ -289,16 +289,18 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 		// ===== FNG / DXY / extra ===== 
 
-		public static async Task<Dictionary<DateTime, int>> GetFngHistory ( HttpClient http )
+		public static async Task<Dictionary<DateTime, double>> GetFngHistory ( HttpClient http )
 			{
-			var dict = new Dictionary<DateTime, int> ();
+			var dict = new Dictionary<DateTime, double> ();
 			try
 				{
 				string url = "https://api.alternative.me/fng/?limit=1000";
 				using var resp = await http.GetAsync (url);
 				resp.EnsureSuccessStatusCode ();
+
 				await using var s = await resp.Content.ReadAsStreamAsync ();
 				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+
 				if (root.TryGetProperty ("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
 					{
 					foreach (var el in arr.EnumerateArray ())

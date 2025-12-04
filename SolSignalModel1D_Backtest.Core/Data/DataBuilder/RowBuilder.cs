@@ -44,7 +44,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 			List<Candle6h> btcWinTrain,
 			List<Candle6h> paxgWinTrain,
 			List<Candle6h> solAll6h,
-			Dictionary<DateTime, int> fngHistory,
+			Dictionary<DateTime, double> fngHistory,
 			Dictionary<DateTime, double> dxySeries,
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily,
 			TimeZoneInfo nyTz )
@@ -73,7 +73,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 			List<Candle6h> paxgWinTrain,
 			List<Candle6h> solAll6h,
 			IReadOnlyList<Candle1m>? solAll1m,
-			Dictionary<DateTime, int> fngHistory,
+			Dictionary<DateTime, double> fngHistory,
 			Dictionary<DateTime, double> dxySeries,
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily,
 			TimeZoneInfo nyTz )
@@ -207,7 +207,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				if (fngHistory == null || fngHistory.Count == 0)
 					throw new InvalidOperationException ("[RowBuilder] fngHistory is null or empty.");
 
-				int fng = Indicators.Indicators.PickNearestFng (fngHistory, openUtc.Date);
+				double fng = Indicators.Indicators.PickNearestFng (fngHistory, openUtc.Date);
 				double fngNorm = (fng - 50.0) / 50.0;
 
 				// DXY (сжатый 30-дневный change) — без ряда DXY тоже считаем ошибкой
@@ -375,13 +375,11 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				// ==== ТЕСТОВАЯ УТЕЧКА (использовать только для проверки self-check'ов) ====
 				if (EnableLeakageHackForTests)
 					{
-					// Добавляем фичу, напрямую завязанную на будущий результат сделки.
-					// Это явная утечка: модель видит SolFwd1 при обучении и в OOS.
-#pragma warning disable CS0162 // Обнаружен недостижимый код
-					feats.Add (solFwd1);
-#pragma warning restore CS0162 // Обнаружен недостижимый код
+					// вместо feats.Add(solFwd1);
+					// переписываем, скажем, первый признак заведомой утечкой
+					if (feats.Count > 0)
+						feats[0] = solFwd1;
 					}
-
 
 				var row = new DataRow
 					{
