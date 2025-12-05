@@ -1,6 +1,7 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
-using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder.Diagnostics;
 
 namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 	{
@@ -26,12 +27,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 		private const int SolEmaSlow = 200;
 		private const int BtcEmaFast = 50;
 		private const int BtcEmaSlow = 200;
-
-		/// <summary>
-		/// Тестовый флаг: если включён, в фичи подмешивается заведомая утечка
-		/// (future-ret SolFwd1). В нормальном режиме ДОЛЖЕН быть false.
-		/// </summary>
-		private const bool EnableLeakageHackForTests = false;
 
 		/// <summary>
 		/// Старый удобный вход без 1m. Сейчас 1m обязательны,
@@ -362,23 +357,54 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					isDownRegime ? 1.0 : 0.0,
 					atrPct,
 					dynVol,
-					funding,
-					oi / 1_000_000.0,
-					// стресс как бинарная фича
-					hardRegime == 2 ? 1.0 : 0.0,
-					// EMA-блок
-					solAboveEma50,
+					//funding, пока что не используем
+					//oi / 1_000_000.0, пока что не используем
+                    // стресс как бинарная фича 
+                    hardRegime == 2 ? 1.0 : 0.0,
+                    // EMA-блок
+                    solAboveEma50,
 					solEma50vs200,
 					btcEma50vs200
 				};
 
-				// ==== ТЕСТОВАЯ УТЕЧКА (использовать только для проверки self-check'ов) ====
-				if (EnableLeakageHackForTests)
+				// ==== ТЕСТОВЫЕ УТЕЧКИ (используются только в диагностиках) ====
+
+				// 1) Хак через SolFwd1 (заведомо future-зависимая величина).
+				if (RowBuilderLeakageFlags.EnableRowBuilderLeakSolFwd1)
 					{
-					// вместо feats.Add(solFwd1);
-					// переписываем, скажем, первый признак заведомой утечкой
 					if (feats.Count > 0)
+						{
+						// Переписываем первый признак таргетом SolFwd1.
+						// Это грубая утечка, которая должна ловиться как по RowBuilder-тестам,
+						// так и по self-check'ам RowFeatureLeakageChecks.
 						feats[0] = solFwd1;
+						}
+					}
+
+				// 2) Хак через минутный future-peek:
+				// подмешиваем цену первой 1m-свечи строго ПОСЛЕ baseline-exit.
+				if (RowBuilderLeakageFlags.EnableRowBuilderLeakSingleMinutePeek)
+					{
+					// sol1mSorted содержит полную минутную историю по SOL.
+					// Ищем первую свечу после exitUtc. Для debug-режима достаточно линейного поиска.
+					var future1m = sol1mSorted.FirstOrDefault (m => m.OpenTimeUtc > exitUtc);
+
+					if (future1m != null)
+						{
+						double futureClose = future1m.Close;
+
+						// Куда писать:
+						// если фич хотя бы две — кладём во второй признак,
+						// чтобы не пересекаться с SolFwd1-хаком; иначе в первый.
+						if (feats.Count > 1)
+							{
+							feats[1] = futureClose;
+							}
+						else if (feats.Count == 1)
+							{
+							feats[0] = futureClose;
+							}
+						}
 					}
 
 				var row = new DataRow

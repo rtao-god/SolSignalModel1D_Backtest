@@ -17,14 +17,13 @@
 		<Compile Remove="SolSignalModel1D_Backtest.Api\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Reports\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Tests\**\*.cs" />
-		<Compile Remove="SolSignalModel1D_Backtest.SanityChecks.csproj\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.SanityChecks\**\*.cs" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
 		<ProjectReference Include="SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />
-		<ProjectReference Include="SolSignalModel1D_Backtest.Tests\SolSignalModel1D_Backtest.Tests.csproj" />
-		<ProjectReference Include="SolSignalModel1D_Backtest.SanityChecks.csproj\SolSignalModel1D_Backtest.SanityChecks.csproj" />
+		<ProjectReference Include="SolSignalModel1D_Backtest.SanityChecks\SolSignalModel1D_Backtest.SanityChecks.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -1,7 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Trading;
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Trading;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 	{
@@ -24,7 +26,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			bool goShort,
 			double entryPrice,
 			double dayMinMove,
-			bool strongSignal )
+			bool strongSignal,
+			TimeZoneInfo nyTz )
 			{
 			var outcome = new HourlyTradeOutcome
 				{
@@ -37,13 +40,28 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 				return outcome;
 			if (!goLong && !goShort)
 				return outcome;
+			if (nyTz == null)
+				throw new ArgumentNullException (nameof (nyTz));
 
 			if (dayMinMove <= 0)
 				dayMinMove = 0.02;
 			if (dayMinMove < MinDayTradeable)
 				return outcome;
 
-			double tpPct, slPct;
+			// Горизонт моделирования берётся из базового окна entry → baseline exit,
+			// чтобы исключить использование минут за пределами дневного трейда.
+			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+
+			var window = day1m
+				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
+				.OrderBy (m => m.OpenTimeUtc)
+				.ToList ();
+
+			if (window.Count == 0)
+				return outcome;
+
+			double tpPct;
+			double slPct;
 			if (strongSignal)
 				{
 				tpPct = Math.Max (StrongTpFloor, dayMinMove * StrongTpMul);
@@ -58,7 +76,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			outcome.TpPct = tpPct;
 			outcome.SlPct = slPct;
 
-			double tpPrice, slPrice;
+			double tpPrice;
+			double slPrice;
 			if (goLong)
 				{
 				tpPrice = entryPrice * (1.0 + tpPct);
@@ -70,23 +89,25 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 				slPrice = entryPrice * (1.0 + slPct);
 				}
 
-			foreach (var m in day1m)
+			foreach (var m in window)
 				{
 				if (goLong)
 					{
-					bool tp = m.High >= tpPrice;
-					bool sl = m.Low <= slPrice;
+					var tp = m.High >= tpPrice;
+					var sl = m.Low <= slPrice;
 
 					if (tp && sl)
 						{
 						outcome.Result = HourlyTradeResult.Ambiguous;
 						return outcome;
 						}
+
 					if (tp)
 						{
 						outcome.Result = HourlyTradeResult.TpFirst;
 						return outcome;
 						}
+
 					if (sl)
 						{
 						outcome.Result = HourlyTradeResult.SlFirst;
@@ -95,19 +116,21 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 					}
 				else
 					{
-					bool tp = m.Low <= tpPrice;
-					bool sl = m.High >= slPrice;
+					var tp = m.Low <= tpPrice;
+					var sl = m.High >= slPrice;
 
 					if (tp && sl)
 						{
 						outcome.Result = HourlyTradeResult.Ambiguous;
 						return outcome;
 						}
+
 					if (tp)
 						{
 						outcome.Result = HourlyTradeResult.TpFirst;
 						return outcome;
 						}
+
 					if (sl)
 						{
 						outcome.Result = HourlyTradeResult.SlFirst;

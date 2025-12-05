@@ -193,7 +193,7 @@ namespace SolSignalModel1D_Backtest
 						? sorted6h[i + 1].OpenTimeUtc
 						: start.AddHours (6);
 
-					if (exitUtc >= start && exitUtc <= end)
+					if (exitUtc >= start && exitUtc < end)
 						{
 						exitIdx = i;
 						break;

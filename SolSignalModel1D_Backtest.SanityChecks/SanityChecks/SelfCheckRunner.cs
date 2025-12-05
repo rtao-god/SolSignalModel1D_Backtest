@@ -1,10 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
+﻿using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro;
+using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL;
+using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 	{
@@ -36,6 +34,16 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 					ctx.Records,
 					ctx.TrainUntilUtc));
 
+			// Дополнительная диагностика: bare-PnL по PredictionRecord + shuffle.
+			// Не влияет на SelfCheckResult, только пишет подробный лог в консоль.
+			if (ctx.Records != null && ctx.Records.Count > 0)
+				{
+				DailyBarePnlChecks.LogDailyBarePnlWithBaselinesAndShuffle (
+					ctx.Records,
+					ctx.TrainUntilUtc,
+					shuffleRuns: 20);
+				}
+
 			// === 2. Микро-слой (flat-модель) ===
 			// Запускаем только если в контексте реально есть данные,
 			// чтобы не ломать SelfCheckRunnerTests, где заполнены только Records/TrainUntilUtc.
@@ -57,6 +65,17 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 				{
 				results.Add (SlLeakageChecks.CheckSlLayer (ctx));
 				}
+
+			// === 1. Дневная модель + OOS / shuffle ===
+			results.Add (
+				DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
+					ctx.Records,
+					ctx.TrainUntilUtc));
+
+			// === 1a. Фичи RowBuilder против future-полей (SolFwd1, MaxHigh24 и т.п.) ===
+			results.Add (
+				RowFeatureLeakageChecks.CheckRowFeaturesAgainstFuture (ctx));
+
 
 			// === 4. Агрегация ===
 			// SelfCheckResult.Aggregate уже знает, как объединять Success/Errors/Warnings/Metrics.

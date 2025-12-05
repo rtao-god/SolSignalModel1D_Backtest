@@ -1,0 +1,149 @@
+{
+  "id": "backtest-baseline-20251205_032816",
+  "generatedAtUtc": "2025-12-05T03:28:16.8330739Z",
+  "configName": "default",
+  "dailyStopPct": 0.05,
+  "dailyTpPct": 0.03,
+  "policies": [
+    {
+      "policyName": "const_10x_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": -42.48,
+      "maxDrawdownPct": 77.4,
+      "hadLiquidation": true,
+      "withdrawnTotal": 3503.9999999999927,
+      "tradesCount": 6
+    },
+    {
+      "policyName": "const_10x_isolated",
+      "marginMode": "Isolated",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": -42.48,
+      "maxDrawdownPct": 77.4,
+      "hadLiquidation": true,
+      "withdrawnTotal": 3503.9999999999927,
+      "tradesCount": 6
+    },
+    {
+      "policyName": "const_15x_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": -33.72,
+      "maxDrawdownPct": 69.54,
+      "hadLiquidation": true,
+      "withdrawnTotal": 5255.999999999989,
+      "tradesCount": 6
+    },
+    {
+      "policyName": "const_15x_isolated",
+      "marginMode": "Isolated",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": -33.72,
+      "maxDrawdownPct": 69.54,
+      "hadLiquidation": true,
+      "withdrawnTotal": 5255.999999999989,
+      "tradesCount": 6
+    },
+    {
+      "policyName": "const_2x_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 1861.56,
+      "maxDrawdownPct": 9.6,
+      "hadLiquidation": false,
+      "withdrawnTotal": 372312.6001948093,
+      "tradesCount": 919
+    },
+    {
+      "policyName": "const_2x_isolated",
+      "marginMode": "Isolated",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 1861.56,
+      "maxDrawdownPct": 9.6,
+      "hadLiquidation": false,
+      "withdrawnTotal": 372312.6001948093,
+      "tradesCount": 919
+    },
+    {
+      "policyName": "const_3x_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 2757.75,
+      "maxDrawdownPct": 14.01,
+      "hadLiquidation": false,
+      "withdrawnTotal": 551549.7434786505,
+      "tradesCount": 919
+    },
+    {
+      "policyName": "const_3x_isolated",
+      "marginMode": "Isolated",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 2757.75,
+      "maxDrawdownPct": 14.01,
+      "hadLiquidation": false,
+      "withdrawnTotal": 551549.7434786505,
+      "tradesCount": 919
+    },
+    {
+      "policyName": "const_50x_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": -60,
+      "maxDrawdownPct": 100,
+      "hadLiquidation": true,
+      "withdrawnTotal": 0,
+      "tradesCount": 1
+    },
+    {
+      "policyName": "const_50x_isolated",
+      "marginMode": "Isolated",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": -60,
+      "maxDrawdownPct": 100,
+      "hadLiquidation": true,
+      "withdrawnTotal": 0,
+      "tradesCount": 1
+    },
+    {
+      "policyName": "const_5x_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 115.15,
+      "maxDrawdownPct": 25.52,
+      "hadLiquidation": true,
+      "withdrawnTotal": 35029.343571848534,
+      "tradesCount": 38
+    },
+    {
+      "policyName": "const_5x_isolated",
+      "marginMode": "Isolated",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 115.15,
+      "maxDrawdownPct": 25.52,
+      "hadLiquidation": true,
+      "withdrawnTotal": 35029.343571848534,
+      "tradesCount": 38
+    },
+    {
+      "policyName": "risk_aware_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 99.44,
+      "maxDrawdownPct": 27.34,
+      "hadLiquidation": true,
+      "withdrawnTotal": 31888.259751691294,
+      "tradesCount": 38
+    },
+    {
+      "policyName": "ultra_safe_cross",
+      "marginMode": "Cross",
+      "useAntiDirectionOverlay": false,
+      "totalPnlPct": 2149.26,
+      "maxDrawdownPct": 10.94,
+      "hadLiquidation": false,
+      "withdrawnTotal": 430501.3942956368,
+      "tradesCount": 640
+    }
+  ]
+}

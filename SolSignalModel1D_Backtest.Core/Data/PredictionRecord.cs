@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace SolSignalModel1D_Backtest.Core.Data
+﻿namespace SolSignalModel1D_Backtest.Core.Data
 	{
 	public sealed class PredictionRecord
 		{

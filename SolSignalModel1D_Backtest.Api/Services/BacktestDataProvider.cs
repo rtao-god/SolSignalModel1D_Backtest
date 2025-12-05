@@ -12,6 +12,9 @@ namespace SolSignalModel1D_Backtest.Api.Services
 		{
 		public Task<BacktestDataSnapshot> LoadAsync ( CancellationToken cancellationToken = default )
 			{
+			// Важно: вызываться должен доменный entrypoint BuildBacktestDataAsync,
+			// а не внутренний BootstrapDataAsync. Так API зависит только от
+			// стабильного контракта BacktestDataSnapshot, а не от технического контейнера.
 			return SolSignalModel1D_Backtest.Program.BuildBacktestDataAsync ();
 			}
 		}

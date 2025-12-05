@@ -1,7 +1,4 @@
-﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using SolSignalModel1D_Backtest.Api.Endpoints;
+﻿using SolSignalModel1D_Backtest.Api.Endpoints;
 using SolSignalModel1D_Backtest.Api.Services;
 using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;

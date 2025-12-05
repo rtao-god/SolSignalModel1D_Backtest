@@ -96,7 +96,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				goShort,
 				entry,
 				dayMinMove,
-				strong
+				strong,
+				NyTz
 			);
 
 			// SL-фичи по 1h
