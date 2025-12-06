@@ -393,7 +393,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 						{
 						double futureClose = future1m.Close;
 
-						// Куда писать:
 						// если фич хотя бы две — кладём во второй признак,
 						// чтобы не пересекаться с SolFwd1-хаком; иначе в первый.
 						if (feats.Count > 1)

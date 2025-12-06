@@ -1,4 +1,7 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
+﻿using System;
+using System.Collections.Generic;
+
+namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 	{
 	/// <summary>
 	/// Снимок "текущего прогноза":
@@ -42,6 +45,12 @@
 
 		/// <summary>Плоский список строк по политикам и веткам BASE/ANTI-D.</summary>
 		public List<CurrentPredictionPolicyRow> PolicyRows { get; } = new ();
+
+		/// <summary>
+		/// Top-факторы и источники, которые повлияли на итоговый прогноз.
+		/// Сейчас наполняется агрегированными причинами; поле расширяемо под детальный ML-trace.
+		/// </summary>
+		public List<CurrentPredictionExplanationItem> ExplanationItems { get; } = new ();
 		}
 
 	/// <summary>
@@ -93,5 +102,33 @@
 		public double? LiqPrice { get; set; }
 
 		public double? LiqDistPct { get; set; }
+		}
+
+	/// <summary>
+	/// Одна "причина", вошедшая в top объяснения прогноза.
+	/// Может описывать модель, фичу, правило или агрегированную политику.
+	/// </summary>
+	public sealed class CurrentPredictionExplanationItem
+		{
+		/// <summary>Высокоуровневая категория: "model", "feature", "rule", "policy" и т.п.</summary>
+		public string Kind { get; set; } = string.Empty;
+
+		/// <summary>Техническое имя источника (например, "daily", "micro_1m", "sl", "sol_ret30").</summary>
+		public string Name { get; set; } = string.Empty;
+
+		/// <summary>Человекочитаемое описание вклада.</summary>
+		public string Description { get; set; } = string.Empty;
+
+		/// <summary>Текущее числовое значение (если применимо).</summary>
+		public double? Value { get; set; }
+
+		/// <summary>
+		/// Относительная важность/вес фактора.
+		/// Оставлено nullable, чтобы в будущем сюда можно было положить SHAP / contribution score.
+		/// </summary>
+		public double? Score { get; set; }
+
+		/// <summary>Порядок в top-листе (1 = самый верхний фактор).</summary>
+		public int Rank { get; set; }
 		}
 	}

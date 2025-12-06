@@ -11,6 +11,11 @@ namespace SolSignalModel1D_Backtest
 	public partial class Program
 		{
 		/// <summary>
+		/// Количество календарных дней, за которые сохраняются отчёты истории "текущего прогноза".
+		/// </summary>
+		// 
+		private const int CurrentPredictionHistoryWindowDays = 30;
+		/// <summary>
 		/// Ленивая инициализация репозитория профилей бэктеста.
 		/// Внутри создаётся baseline-профиль, если файла ещё нет.
 		/// </summary>
@@ -56,6 +61,21 @@ namespace SolSignalModel1D_Backtest
 				.Select (p => p.Policy!)
 				.Cast<ILeveragePolicy> ()
 				.ToList ();
+
+			// === Текущий прогноз + JSON-репорт ===
+			// Используются те же records и политики, что и в baseline-бэктесте.
+			BacktestReportsOrchestrator.SaveCurrentPredictionReport (
+				records: records,
+				leveragePolicies: leveragePolicies,
+				walletBalanceUsd: 200.0 // при желании можно завязать на конфиг
+			);
+
+			BacktestReportsOrchestrator.SaveCurrentPredictionHistoryReports (
+				records,
+				leveragePolicies,
+				walletBalanceUsd: 200.0,
+				historyWindowDays: CurrentPredictionHistoryWindowDays
+				);
 
 			// Верхнеуровневый бэктест-раннер.
 			var runner = new BacktestRunner ();

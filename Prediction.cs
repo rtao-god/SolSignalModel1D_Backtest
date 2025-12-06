@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
 			{
-			PredictionEngine.DebugAllowDisabledModels = true;
+			PredictionEngine.DebugAllowDisabledModels = false;
 
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 			if (allRows.Count == 0)
@@ -85,7 +85,7 @@ namespace SolSignalModel1D_Backtest
 				{
 					DisableMoveModel = false,           // отключаем move
 					DisableDirNormalModel = false,
-					DisableDirDownModel = true,
+					DisableDirDownModel = false,
 					DisableMicroFlatModel = false
 				};
 			var bundle = trainer.TrainAll (trainRows);

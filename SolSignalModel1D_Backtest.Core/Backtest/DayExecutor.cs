@@ -76,12 +76,15 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				return rec;
 
 			// 1h и 1m только для "фактов" внутри дня
+			var entryUtc = dayRow.Date;
+			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);  // единственный источник правды по горизонту
+
 			var day1h = sol1h
-				.Where (h => h.OpenTimeUtc >= dayRow.Date && h.OpenTimeUtc < dayRow.Date.AddHours (24))
+				.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < exitUtc)
 				.ToList ();
 
 			var day1m = sol1m
-				.Where (m => m.OpenTimeUtc >= dayRow.Date && m.OpenTimeUtc < dayRow.Date.AddHours (24))
+				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
 				.ToList ();
 
 			double dayMinMove = dayRow.MinMove > 0 ? dayRow.MinMove : 0.02;

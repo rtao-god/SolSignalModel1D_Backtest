@@ -19,7 +19,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 		/// когда какая-то из моделей в бандле отсутствует (null),
 		/// а использует простые fallback-ветки.
 		///
-		/// По умолчанию false, т.е. поведение строгое, как раньше.
+		/// По умолчанию false, т.е. поведение строгое и все модели должны быть включены
 		/// Включать только в специальных экспериментах/тестах.
 		/// </summary>
 		public static bool DebugAllowDisabledModels { get; set; } = false;
@@ -29,13 +29,13 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 		/// - при true: считаем, что "хода нет" → всегда дневной flat (class=1);
 		/// - при false: считаем, что "ход есть" и сразу идём в dir-модели.
 		/// </summary>
-		public static bool DebugTreatMissingMoveAsFlat { get; set; } = true;
+		public static bool DebugTreatMissingMoveAsFlat { get; set; } = false;
 
 		/// <summary>
 		/// Если dir-модель для нужного режима отсутствует и DebugAllowDisabledModels == true,
 		/// и при этом Move говорит "ход есть" — по умолчанию возвращаем flat.
 		/// </summary>
-		public static bool DebugTreatMissingDirAsFlat { get; set; } = true;
+		public static bool DebugTreatMissingDirAsFlat { get; set; } = false;
 
 		/// <summary>
 		/// Порог уверенности для микро-модели в flat-днях.
@@ -45,7 +45,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 		/// <summary>
 		/// Лимит диагностических логов по микро-слою, чтобы не заспамить консоль.
 		/// </summary>
-		private const int MicroDebugMaxRows = 64;
+		private const int MicroDebugMaxRows = 10;
 
 		/// <summary>
 		/// Счётчик уже выведенных диагностических строк по микро-слою.
@@ -293,7 +293,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 			return microInfo;
 		}
 
-		// ===== Оценка качества с учётом микро-слоя (оставляю как было) =====
+		// ===== Оценка качества с учётом микро-слоя =====
 
 		public bool EvalMicroAware (DataRow r, int predClass, MicroInfo micro)
 		{

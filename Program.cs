@@ -31,9 +31,6 @@ namespace SolSignalModel1D_Backtest
 			// всё, что ниже, попадёт в "фактическое время работы" в PerfLogging.
 			PerfLogging.StartApp ();
 
-			// Логируем инфо о среде — помогает отслеживать странные баги.
-			Console.WriteLine ($".NET runtime: {Environment.Version}, 64bit={Environment.Is64BitProcess}");
-
 			// --- 1. Бутстрап свечей и дневных строк ---
 			// Внешний PerfLogging.MeasureAsync — для общей Σ времени,
 			// внутренний PerfBlockLogger.MeasureAsync — для старых [perf]-логов.

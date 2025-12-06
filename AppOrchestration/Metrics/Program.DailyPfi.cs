@@ -1,5 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Utils;
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -13,13 +14,9 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void RunDailyPfi ( List<DataRow> allRows )
 			{
-			var dailyTrainRows = allRows
-				.Where (r => r.Date <= _trainUntilUtc)
-				.ToList ();
-
-			var dailyOosRows = allRows
-				.Where (r => r.Date > _trainUntilUtc)
-				.ToList ();
+			// Раньше здесь было два прохода по allRows через Where(...<=)... и Where(...>...).
+			// Теперь всё делается за один проход в хелпере, что уменьшает время на больших выборках.
+			var (dailyTrainRows, dailyOosRows) = TrainOosSplitHelper.SplitByTrainBoundary (allRows, _trainUntilUtc);
 
 			if (dailyTrainRows.Count < 50)
 				{

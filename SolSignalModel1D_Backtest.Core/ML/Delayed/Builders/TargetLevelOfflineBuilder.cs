@@ -38,7 +38,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Builders
 				DateTime entryUtc = r.Date;
 				DateTime endUtc;
 				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
-				catch { endUtc = entryUtc.AddHours (24); }
+				catch (Exception ex)
+					{
+					// Явно ломаемся с понятным сообщением
+					throw new InvalidOperationException (
+						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}. " +
+						"Fix data/windowing logic instead of relying on fallback.",
+						ex);
+					}
 
 				var dayHours = sol1h
 					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)

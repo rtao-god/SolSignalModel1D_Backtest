@@ -22,6 +22,6 @@
 		/// Включает sanity-проверки с альтернативной 24h-разметкой (старый таргет).
 		/// В проде должен оставаться false.
 		/// </summary>
-		public const bool EnableLegacy24hTargetSanityCheck = true;
+		public const bool EnableLegacy24hTargetSanityCheck = false;
 		}
 	}
