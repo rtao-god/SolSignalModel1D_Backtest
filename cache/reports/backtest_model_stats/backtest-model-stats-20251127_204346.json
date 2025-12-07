@@ -1,0 +1,85 @@
+{
+  "id": "backtest-model-stats-20251127_204346",
+  "kind": "backtest_model_stats",
+  "title": "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (PFI / AUC)",
+  "generatedAtUtc": "2025-11-27T20:43:46.2214078Z",
+  "keyValueSections": [],
+  "tableSections": [
+    {
+      "title": "Models overview",
+      "columns": [
+        "Tag",
+        "BaselineAuc",
+        "Rows",
+        "Pos",
+        "Neg"
+      ],
+      "rows": [
+        [
+          "train:move",
+          "0,998",
+          "1195",
+          "940",
+          "255"
+        ],
+        [
+          "train:dir-normal",
+          "1,000",
+          "691",
+          "320",
+          "371"
+        ],
+        [
+          "train:dir-down",
+          "1,000",
+          "249",
+          "134",
+          "115"
+        ],
+        [
+          "train:micro-flat",
+          "1,000",
+          "236",
+          "120",
+          "116"
+        ],
+        [
+          "oos:move",
+          "0,657",
+          "327",
+          "271",
+          "56"
+        ],
+        [
+          "oos:dir-normal",
+          "0,793",
+          "148",
+          "68",
+          "80"
+        ],
+        [
+          "oos:dir-down",
+          "0,741",
+          "123",
+          "61",
+          "62"
+        ],
+        [
+          "oos:micro-flat",
+          "0,678",
+          "51",
+          "25",
+          "26"
+        ],
+        [
+          "sl-train thr=0,030",
+          "0,978",
+          "420",
+          "125",
+          "295"
+        ]
+      ]
+    }
+  ],
+  "textSections": []
+}

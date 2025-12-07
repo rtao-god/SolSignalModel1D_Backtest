@@ -1,19 +1,30 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net9.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	
 	<ItemGroup>
-	  <PackageReference Include="Microsoft.ML" Version="4.0.3" />
-	  <PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
+		<PackageReference Include="Microsoft.ML" Version="4.0.3" />
+		<PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="cache\" />
+		<Compile Remove="SolSignalModel1D_Backtest.Core\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.Api\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.Reports\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.Tests\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.SanityChecks.csproj\**\*.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
+		<ProjectReference Include="SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />
+		<ProjectReference Include="SolSignalModel1D_Backtest.Tests\SolSignalModel1D_Backtest.Tests.csproj" />
+		<ProjectReference Include="SolSignalModel1D_Backtest.SanityChecks.csproj\SolSignalModel1D_Backtest.SanityChecks.csproj" />
 	</ItemGroup>
 
 </Project>
