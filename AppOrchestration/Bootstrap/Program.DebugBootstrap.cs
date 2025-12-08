@@ -8,7 +8,7 @@ namespace SolSignalModel1D_Backtest
 		/// <summary>
 		/// Debug-фасад для тестов: даёт доступ к BootstrapRowsAndCandlesAsync
 		/// с тем же tuple, что использует Main.
-		/// В прод-логике не используется.
+		/// В прод-логике НЕ используется.
 		/// </summary>
 		public static Task<(
 			List<DataRow> AllRows,

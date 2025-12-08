@@ -1,8 +1,12 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Aggregation;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.States;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
@@ -15,9 +19,16 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 	public static class DayExecutor
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
-		private const float PullbackProbThresh = 0.85f;  // было 0.70f
+		private const float PullbackProbThresh = 0.85f;
 		private const float SmallProbThresh = 0.75f;
 		private const bool EnableDelayedB = false;
+
+		private static int ArgmaxLabel ( double pUp, double pFlat, double pDown )
+			{
+			if (pUp >= pFlat && pUp >= pDown) return 2;
+			if (pDown >= pFlat && pDown >= pUp) return 0;
+			return 1;
+			}
 
 		public static PredictionRecord ProcessDay (
 			DataRow dayRow,
@@ -30,17 +41,45 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			SmallImprovementOnlineState smallState,
 			Analytics.ExecutionStats stats )
 			{
-			// дневной предикт из PredictionEngine
+			// дневной предикт из PredictionEngine: класс + P_day + P_dayMicro
 			var pred = dailyEngine.Predict (dayRow);
 			int predCls = pred.Class;
+
+			if (predCls != 0 && predCls != 1 && predCls != 2)
+				{
+				throw new InvalidOperationException (
+					$"Unexpected prediction class '{predCls}' for date {dayRow.Date:o}. Expected 0, 1 or 2.");
+				}
+
+			var dayProbs = pred.Day;
+			var dayMicroProbs = pred.DayWithMicro;
+
+			// Sanity-check: дневные вероятности должны быть валидными распределениями.
+			double daySum = dayProbs.PUp + dayProbs.PFlat + dayProbs.PDown;
+			double dayMicroSum = dayMicroProbs.PUp + dayMicroProbs.PFlat + dayMicroProbs.PDown;
+
+			if (daySum <= 0.0 || dayMicroSum <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[DayExecutor] Invalid probabilities from PredictionEngine for {dayRow.Date:o}. " +
+					$"daySum={daySum}, dayMicroSum={dayMicroSum}, " +
+					$"P_day=({dayProbs.PUp}, {dayProbs.PFlat}, {dayProbs.PDown}), " +
+					$"P_dayMicro=({dayMicroProbs.PUp}, {dayMicroProbs.PFlat}, {dayMicroProbs.PDown}).");
+				}
+
+			int predLabelDay = ArgmaxLabel (dayProbs.PUp, dayProbs.PFlat, dayProbs.PDown);
+			int predLabelDayMicro = ArgmaxLabel (dayMicroProbs.PUp, dayMicroProbs.PFlat, dayMicroProbs.PDown);
+
+			// До SL-оверлея считаем, что Total = Day+Micro.
+			var totalProbs = dayMicroProbs;
+			int predLabelTotal = predLabelDayMicro;
+
 			var micro = pred.Micro;
 			string reason = pred.Reason;
 
 			var fwd = BacktestHelpers.GetForwardInfo (dayRow.Date, sol6hDict);
 			double entry = fwd.entry;
-			// Вариант БЕЗ влияния микро-слоя на направление:
-			// - торгуем только по основному классу (0 = down, 2 = up);
-			// - класс 1 (flat) вообще не даёт сделки. потом добавить || (predCls == 1 && micro.ConsiderUp);   и || (predCls == 1 && micro.ConsiderDown);
+
 			bool goLong = predCls == 2;
 			bool goShort = predCls == 0;
 			bool hasDir = goLong || goShort;
@@ -48,20 +87,51 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			var rec = new PredictionRecord
 				{
 				DateUtc = dayRow.Date,
+
+				// факт и исходный дневной класс (PredLabel остаётся "как было")
 				TrueLabel = dayRow.Label,
 				PredLabel = predCls,
+
+				// Day-слой
+				PredLabel_Day = predLabelDay,
+				ProbUp_Day = dayProbs.PUp,
+				ProbFlat_Day = dayProbs.PFlat,
+				ProbDown_Day = dayProbs.PDown,
+				Conf_Day = dayProbs.Confidence,
+
+				// Day+Micro
+				PredLabel_DayMicro = predLabelDayMicro,
+				ProbUp_DayMicro = dayMicroProbs.PUp,
+				ProbFlat_DayMicro = dayMicroProbs.PFlat,
+				ProbDown_DayMicro = dayMicroProbs.PDown,
+				Conf_Micro = dayMicroProbs.Confidence,
+
+				// Total (по умолчанию = Day+Micro, будет обновлено после SL-оверлея)
+				PredLabel_Total = predLabelTotal,
+				ProbUp_Total = totalProbs.PUp,
+				ProbFlat_Total = totalProbs.PFlat,
+				ProbDown_Total = totalProbs.PDown,
+
+				// микро-факты/прогнозы
 				PredMicroUp = micro.ConsiderUp,
 				PredMicroDown = micro.ConsiderDown,
 				FactMicroUp = dayRow.FactMicroUp,
 				FactMicroDown = dayRow.FactMicroDown,
+
+				// цены дня
 				Entry = entry,
 				MaxHigh24 = fwd.maxHigh,
 				MinLow24 = fwd.minLow,
 				Close24 = fwd.fwdClose,
+
+				// контекст
 				RegimeDown = dayRow.RegimeDown,
 				Reason = reason,
 				MinMove = dayRow.MinMove,
+
+				// delayed A/B
 				DelayedSource = string.Empty,
+				DelayedEntryAsked = false,
 				DelayedEntryUsed = false,
 				DelayedEntryExecuted = false,
 				DelayedEntryPrice = 0.0,
@@ -69,15 +139,24 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				DelayedIntradayTpPct = 0.0,
 				DelayedIntradaySlPct = 0.0,
 				DelayedEntryExecutedAtUtc = null,
-				SlHighDecision = false
+
+				// SL online
+				SlProb = 0.0,
+				SlHighDecision = false,
+				Conf_SlLong = 0.0,
+				Conf_SlShort = 0.0,
+
+				// Anti-D
+				AntiDirectionApplied = false
 				};
 
+			// Для дней без направления SL-оверлей не считается, Total уже = Day+Micro.
 			if (!hasDir)
 				return rec;
 
-			// 1h и 1m только для "фактов" внутри дня
+			// 1h и 1m для фактического исхода дня
 			var entryUtc = dayRow.Date;
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);  // единственный источник правды по горизонту
+			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
 
 			var day1h = sol1h
 				.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < exitUtc)
@@ -87,11 +166,13 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
 				.ToList ();
 
-			double dayMinMove = dayRow.MinMove > 0 ? dayRow.MinMove : 0.02;
-			// единая логика strong/weak для train и runtime
-			bool strong = SlUtils.IsStrongByMinMove (dayMinMove /*, rec.RegimeDown */);
+			if (dayRow.MinMove <= 0)
+				throw new InvalidOperationException ($"MinMove <= 0 for {dayRow.Date:o}. Raw value: {dayRow.MinMove}");
 
-			// базовый исход — ТОЛЬКО по минуте (факт, для статистики)
+			double dayMinMove = dayRow.MinMove;
+
+			bool strong = SlUtils.IsStrongByMinMove (dayMinMove);
+
 			var baseOutcome = MinuteTradeEvaluator.Evaluate (
 				day1m,
 				dayRow.Date,
@@ -103,21 +184,20 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				NyTz
 			);
 
-			// SL-фичи по 1h
+			// SL-оверлей + online-SL.
 			if (slState.Engine != null && sol1h.Count > 0)
 				{
 				var slFeats = SlFeatureBuilder.Build (
-					rec.DateUtc,     // дата входа
-					goLong,          // направление
-					strong,          // сильный/не сильный сигнал
-					dayMinMove,      // MinMove дня
-					entry,           // цена входа
-					sol1h            // ВСЯ 1h-история SOL
+					rec.DateUtc,
+					goLong,
+					strong,
+					dayMinMove,
+					entry,
+					sol1h
 				);
 
 				var slPred = slState.Engine.Predict (new SlHitSample
 					{
-					// Label в рантайме не используется, но безопасно заполним false
 					Label = false,
 					Features = slFeats,
 					EntryUtc = dayRow.Date
@@ -126,9 +206,40 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				double slProb = slPred.Probability;
 				bool slPredictedSlFirst = slPred.PredictedLabel;
 
+				rec.SlProb = slProb;
+
 				stats.AddSlScore (slProb, slPredictedSlFirst, baseOutcome);
 
-				// HIGH = модель считает, что первым будет SL И уверенность выше порога
+				// Строим SlProbabilities для оверлея.
+				var slProbs = new SlProbabilities ();
+
+				if (slPredictedSlFirst)
+					{
+					if (goLong)
+						{
+						slProbs.PSlLong = slProb;
+						slProbs.ConfidenceLong = slProb;
+						rec.Conf_SlLong = slProb;
+						}
+
+					if (goShort)
+						{
+						slProbs.PSlShort = slProb;
+						slProbs.ConfidenceShort = slProb;
+						rec.Conf_SlShort = slProb;
+						}
+					}
+
+				// SL-оверлей: Day+Micro → Total.
+				var aggCfg = new ProbabilityAggregationConfig ();
+				totalProbs = ProbabilityAggregator.ApplySlOverlay (dayMicroProbs, slProbs, aggCfg);
+				predLabelTotal = ArgmaxLabel (totalProbs.PUp, totalProbs.PFlat, totalProbs.PDown);
+
+				rec.ProbUp_Total = totalProbs.PUp;
+				rec.ProbFlat_Total = totalProbs.PFlat;
+				rec.ProbDown_Total = totalProbs.PDown;
+				rec.PredLabel_Total = predLabelTotal;
+
 				bool slSaidRisk = slPredictedSlFirst && slProb >= slState.SLRiskThreshold;
 				rec.SlHighDecision = slSaidRisk;
 
@@ -138,7 +249,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					bool wantA = false;
 					if (strong && pullbackState.Engine != null)
 						{
-						// фичи только из окна [t-6h, t) по всей SOL 1h истории
 						var featsA = TargetLevelFeatureBuilder.Build (
 							entryUtc: dayRow.Date,
 							goLong: goLong,
@@ -184,19 +294,19 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 						rec.DelayedIntradaySlPct = delayed.SlPct;
 						rec.DelayedEntryExecutedAtUtc = delayed.ExecutedAtUtc;
 
-						stats.AddDelayed ("A", new Trading.Evaluator.DelayedEntryResult
+						stats.AddDelayed ("A", new DelayedEntryResult
 							{
 							Executed = delayed.Executed,
 							ExecutedAtUtc = delayed.ExecutedAtUtc,
 							TargetEntryPrice = delayed.TargetEntryPrice,
-							Result = (Trading.Evaluator.DelayedIntradayResult) (int) delayed.Result,
+							Result = (DelayedIntradayResult) (int) delayed.Result,
 							TpPct = delayed.TpPct,
 							SlPct = delayed.SlPct
 							});
 						return rec;
 						}
 
-					// ===== Model B (мелкое улучшение, если включим) =====
+					// ===== Model B =====
 					if (EnableDelayedB && smallState.Engine != null)
 						{
 						var featsB = TargetLevelFeatureBuilder.Build (
@@ -260,12 +370,12 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				}
 			else
 				{
-				// SL-модели нет → просто фиксируем базовый вариант
+				// SL-модели нет → Total остаётся равным Day+Micro.
 				stats.AddImmediate (baseOutcome);
 				return rec;
 				}
 
-			// обычный день без вмешательства delayed-слоя
+			// обычный день без вмешательства delayed-слоя (SL-оверлей уже учтён выше)
 			stats.AddImmediate (baseOutcome);
 			return rec;
 			}

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.Net.Http;
+﻿using System.Globalization;
 using System.Text.Json;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 
@@ -432,7 +428,6 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			}
 
 		// ===== диапазонный загрузчик =====
-
 		public static async Task<List<(DateTime openUtc, double open, double high, double low, double close)>> GetBinanceKlinesRange (
 			HttpClient http,
 			string symbol,
@@ -441,8 +436,31 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			DateTime toUtc )
 			{
 			if (http == null) throw new ArgumentNullException (nameof (http));
-			if (toUtc < fromUtc)
+
+			// Пытаемся оценить длину интервала, чтобы корректно обрабатывать случаи to<=from.
+			var intervalLen = TryGetBinanceIntervalLength (interval);
+
+			// Ситуация: toUtc <= fromUtc.
+			// Для хвостовых апдейтов это обычно означает, что следующая свеча ещё
+			// не началась/не закончилась и обновлять нечего.
+			if (toUtc <= fromUtc)
+				{
+				if (intervalLen.HasValue)
+					{
+					var diff = fromUtc - toUtc; // >= 0 при to<=from
+
+					// Если разница не больше одной свечи (+ небольшой запас),
+					// считаем это нормальным "пустым" диапазоном и просто выходим.
+					if (diff <= intervalLen.Value + TimeSpan.FromSeconds (5))
+						{
+						return new List<(DateTime openUtc, double open, double high, double low, double close)> (0);
+						}
+					}
+
+				// Если разрыв больше длины интервала — это уже реально аномалия.
+				// Её лучше не маскировать.
 				throw new ArgumentException ("toUtc < fromUtc для диапазона klines", nameof (toUtc));
+				}
 
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
 			string symbolEsc = Uri.EscapeDataString (symbol);
@@ -496,6 +514,30 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 			result.Sort (( a, b ) => a.openUtc.CompareTo (b.openUtc));
 			return result;
+			}
+
+		// helper 
+		private static TimeSpan? TryGetBinanceIntervalLength ( string interval )
+			{
+			return interval switch
+				{
+					"1m" => TimeSpan.FromMinutes (1),
+					"3m" => TimeSpan.FromMinutes (3),
+					"5m" => TimeSpan.FromMinutes (5),
+					"15m" => TimeSpan.FromMinutes (15),
+					"30m" => TimeSpan.FromMinutes (30),
+					"1h" => TimeSpan.FromHours (1),
+					"2h" => TimeSpan.FromHours (2),
+					"4h" => TimeSpan.FromHours (4),
+					"6h" => TimeSpan.FromHours (6),
+					"8h" => TimeSpan.FromHours (8),
+					"12h" => TimeSpan.FromHours (12),
+					"1d" => TimeSpan.FromDays (1),
+					"3d" => TimeSpan.FromDays (3),
+					"1w" => TimeSpan.FromDays (7),
+					"1M" => TimeSpan.FromDays (30),
+					_ => null
+					};
 			}
 		}
 	}

@@ -19,9 +19,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 		[Fact]
 		public void BuildRowsDaily_IsFutureBlind_ToTailMutation ()
 			{
-			// 1. Синтетическая долгая история.
+			// 1. Синтетическая долгая история (240 дней достаточно для всех окон).
+			const int SyntheticDays = 240;
+
 			BuildSyntheticHistory (
-				days: 600,
+				days: SyntheticDays,
 				out var solWinTrainA,
 				out var btcWinTrainA,
 				out var paxgWinTrainA,
@@ -96,12 +98,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 			// Запас 8 дней: baseline-exit и минутный путь короче.
 			var safeRowsA = rowsA
 				.Where (r => r.Date.AddDays (8) <= trainUntil)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			var safeRowsB = rowsB
 				.Where (r => r.Date.AddDays (8) <= trainUntil)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			Assert.NotEmpty (safeRowsA);
@@ -140,13 +140,16 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 			out Dictionary<DateTime, double> fngHistory,
 			out Dictionary<DateTime, double> dxyHistory )
 			{
-			var sol6 = new List<Candle6h> ();
-			var btc6 = new List<Candle6h> ();
-			var paxg6 = new List<Candle6h> ();
-			var all1m = new List<Candle1m> ();
+			var total6h = days * 4;
+			var total1m = total6h * 360;
 
-			fngHistory = new Dictionary<DateTime, double> ();
-			dxyHistory = new Dictionary<DateTime, double> ();
+			var sol6 = new List<Candle6h> (total6h);
+			var btc6 = new List<Candle6h> (total6h);
+			var paxg6 = new List<Candle6h> (total6h);
+			var all1m = new List<Candle1m> (total1m);
+
+			fngHistory = new Dictionary<DateTime, double> (days);
+			dxyHistory = new Dictionary<DateTime, double> (days);
 
 			var start = new DateTime (2021, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 			var t = start;

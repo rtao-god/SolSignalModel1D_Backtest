@@ -19,30 +19,28 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 		[Fact]
 		public async Task PathBasedVsLegacy24hTarget_Sanity ()
 			{
-			// --- прогон №1: текущий path-based Label (как в проде) ---
-			var (allRowsPath, morningsPath, solAll6hPath, _, _) =
+			// Один Bootstrap: сначала гоняем path-based, потом на тех же рядах пересчитываем 24h-лейблы
+			var (allRows, mornings, solAll6h, _, _) =
 				await BootstrapRowsAndCandlesAsync ();
 
+			// --- прогон №1: текущий path-based Label (как в проде) ---
 			var pathRun = await RunDailyModelAsync (
-				allRowsPath,
-				morningsPath,
-				solAll6hPath);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var accPath = ComputeOosAccuracy (pathRun.Records, pathRun.TrainUntilUtc);
 
 			// --- прогон №2: 24h-таргет по close с тем же MinMove (r.MinMove) ---
-			var (allRowsLegacy, morningsLegacy, solAll6hLegacy, _, _) =
-				await BootstrapRowsAndCandlesAsync ();
-
 			ApplyLegacy24hLabelsUsingCurrentMinMove (
-				allRowsLegacy,
-				morningsLegacy,
-				solAll6hLegacy);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var legacyRun = await RunDailyModelAsync (
-				allRowsLegacy,
-				morningsLegacy,
-				solAll6hLegacy);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var accLegacy = ComputeOosAccuracy (legacyRun.Records, legacyRun.TrainUntilUtc);
 
@@ -58,37 +56,36 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 		[Fact]
 		public async Task LegacyMinMoveVsAdaptiveMinMoveOn24hTarget_Sanity ()
 			{
-			// --- прогон №1: 24h + текущий MinMove (адаптивный) ---
-			var (allRowsAdaptive, morningsAdaptive, solAll6hAdaptive, _, _) =
+			// Один Bootstrap: на одних и тех же рядах сначала считаем 24h+новый MinMove,
+			// затем поверх них пересчитываем 24h+старый MinMove.
+			var (allRows, mornings, solAll6h, _, _) =
 				await BootstrapRowsAndCandlesAsync ();
 
+			// --- прогон №1: 24h + текущий MinMove (адаптивный) ---
 			ApplyLegacy24hLabelsUsingCurrentMinMove (
-				allRowsAdaptive,
-				morningsAdaptive,
-				solAll6hAdaptive);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var adaptiveRun = await RunDailyModelAsync (
-				allRowsAdaptive,
-				morningsAdaptive,
-				solAll6hAdaptive);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var accAdaptive = ComputeOosAccuracy (
 				adaptiveRun.Records,
 				adaptiveRun.TrainUntilUtc);
 
 			// --- прогон №2: 24h + "старый" MinMove (формула ATR+dynVol+месяц) ---
-			var (allRowsLegacy, morningsLegacy, solAll6hLegacy, _, _) =
-				await BootstrapRowsAndCandlesAsync ();
-
 			ApplyLegacy24hLabelsUsingLegacyMinMove (
-				allRowsLegacy,
-				morningsLegacy,
-				solAll6hLegacy);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var legacyRun = await RunDailyModelAsync (
-				allRowsLegacy,
-				morningsLegacy,
-				solAll6hLegacy);
+				allRows,
+				mornings,
+				solAll6h);
 
 			var accLegacy = ComputeOosAccuracy (
 				legacyRun.Records,
@@ -111,14 +108,25 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 		/// Использует debug-фасад Program.DebugBootstrapRowsAndCandlesAsync
 		/// вместо рефлексии.
 		/// </summary>
-		internal static Task<(
+		internal static async Task<(
 			List<DataRow> AllRows,
 			List<DataRow> Mornings,
 			List<Candle6h> SolAll6h,
 			List<Candle1h> SolAll1h,
 			List<Candle1m> Sol1m)> BootstrapRowsAndCandlesAsync ()
 			{
-			return AppProgram.DebugBootstrapRowsAndCandlesAsync ();
+			// В тестах отключаем любые обновления свечей, чтобы:
+			// - не ходить в сеть;
+			// - не ловить ошибки диапазона (toUtc < fromUtc) из CandleDailyUpdater.
+			AppProgram.DebugSkipCandleUpdatesForTests = true;
+			try
+				{
+				return await AppProgram.DebugBootstrapRowsAndCandlesAsync ();
+				}
+			finally
+				{
+				AppProgram.DebugSkipCandleUpdatesForTests = false;
+				}
 			}
 
 		private sealed class DailyModelRunResult
