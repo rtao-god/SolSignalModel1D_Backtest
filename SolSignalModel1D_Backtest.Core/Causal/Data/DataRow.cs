@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
+﻿namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	{
 	public sealed class DataRow
 		{

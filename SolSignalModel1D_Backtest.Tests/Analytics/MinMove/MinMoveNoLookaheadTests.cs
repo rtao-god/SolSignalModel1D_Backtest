@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 	{

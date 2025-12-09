@@ -1,9 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Diagnostics;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder.Diagnostics;
 
-namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
+namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	{
 	/// <summary>
 	/// Построитель дневных строк DataRow из 6h/1m свечей и дневных индикаторов.

@@ -3,7 +3,7 @@ using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 using AppProgram = SolSignalModel1D_Backtest.Program;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
