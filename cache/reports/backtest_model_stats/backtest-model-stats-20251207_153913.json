@@ -1,0 +1,1104 @@
+{
+  "id": "backtest-model-stats-20251207_153913",
+  "kind": "backtest_model_stats",
+  "title": "\u041C\u043E\u0434\u0435\u043B\u044C\u043D\u044B\u0435 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0438 \u0431\u044D\u043A\u0442\u0435\u0441\u0442\u0430 (multi-segment, SOLUSDT)",
+  "generatedAtUtc": "2025-12-07T15:39:13.3744607Z",
+  "keyValueSections": [
+    {
+      "title": "\u041F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B \u043C\u043E\u0434\u0435\u043B\u044C\u043D\u044B\u0445 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A (multi-segment)",
+      "items": [
+        {
+          "key": "RunKind",
+          "value": "Analytics"
+        },
+        {
+          "key": "HasOos",
+          "value": "True"
+        },
+        {
+          "key": "TrainUntilUtc",
+          "value": "2025-08-07T00:00:00.0000000Z"
+        },
+        {
+          "key": "TrainRecordsCount",
+          "value": "997"
+        },
+        {
+          "key": "OosRecordsCount",
+          "value": "87"
+        },
+        {
+          "key": "TotalRecordsCount",
+          "value": "1084"
+        },
+        {
+          "key": "RecentDays",
+          "value": "240"
+        },
+        {
+          "key": "RecentRecordsCount",
+          "value": "173"
+        }
+      ]
+    },
+    {
+      "title": "[OOS] \u0421\u0435\u0433\u043C\u0435\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u044C\u043D\u044B\u0445 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A",
+      "items": [
+        {
+          "key": "SegmentKind",
+          "value": "OosOnly"
+        },
+        {
+          "key": "Label",
+          "value": "OOS-only (DateUtc \u003E trainUntil)"
+        },
+        {
+          "key": "FromDateUtc",
+          "value": "2025-08-06T12:00:00.0000000Z"
+        },
+        {
+          "key": "ToDateUtc",
+          "value": "2025-12-04T12:00:00.0000000Z"
+        },
+        {
+          "key": "RecordsCount",
+          "value": "87"
+        }
+      ]
+    },
+    {
+      "title": "[TRAIN] \u0421\u0435\u0433\u043C\u0435\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u044C\u043D\u044B\u0445 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A",
+      "items": [
+        {
+          "key": "SegmentKind",
+          "value": "TrainOnly"
+        },
+        {
+          "key": "Label",
+          "value": "Train-only (DateUtc \u003C= trainUntil)"
+        },
+        {
+          "key": "FromDateUtc",
+          "value": "2021-10-11T12:00:00.0000000Z"
+        },
+        {
+          "key": "ToDateUtc",
+          "value": "2025-08-05T12:00:00.0000000Z"
+        },
+        {
+          "key": "RecordsCount",
+          "value": "997"
+        }
+      ]
+    },
+    {
+      "title": "[RECENT] \u0421\u0435\u0433\u043C\u0435\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u044C\u043D\u044B\u0445 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A",
+      "items": [
+        {
+          "key": "SegmentKind",
+          "value": "RecentWindow"
+        },
+        {
+          "key": "Label",
+          "value": "Recent window (last 240 days)"
+        },
+        {
+          "key": "FromDateUtc",
+          "value": "2025-04-08T12:00:00.0000000Z"
+        },
+        {
+          "key": "ToDateUtc",
+          "value": "2025-12-04T12:00:00.0000000Z"
+        },
+        {
+          "key": "RecordsCount",
+          "value": "173"
+        }
+      ]
+    },
+    {
+      "title": "[FULL] \u0421\u0435\u0433\u043C\u0435\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u044C\u043D\u044B\u0445 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A",
+      "items": [
+        {
+          "key": "SegmentKind",
+          "value": "FullHistory"
+        },
+        {
+          "key": "Label",
+          "value": "Full history"
+        },
+        {
+          "key": "FromDateUtc",
+          "value": "2021-10-11T12:00:00.0000000Z"
+        },
+        {
+          "key": "ToDateUtc",
+          "value": "2025-12-04T12:00:00.0000000Z"
+        },
+        {
+          "key": "RecordsCount",
+          "value": "1084"
+        }
+      ]
+    }
+  ],
+  "tableSections": [
+    {
+      "title": "[OOS] Daily label summary (business)",
+      "columns": [
+        "Class",
+        "Summary"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "\u0412\u0441\u0435\u0433\u043E 41 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 32 (78,0%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 9 (22,0%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 0,0% (0), FLAT 4,9% (2), UP 17,1% (7)."
+        ],
+        [
+          "FLAT",
+          "\u0412\u0441\u0435\u0433\u043E 8 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 4 (50,0%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 4 (50,0%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 37,5% (3), FLAT 0,0% (0), UP 12,5% (1)."
+        ],
+        [
+          "UP",
+          "\u0412\u0441\u0435\u0433\u043E 38 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 23 (60,5%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 15 (39,5%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 5,3% (2), FLAT 34,2% (13), UP 0,0% (0)."
+        ],
+        [
+          "Overall",
+          "\u0412\u0441\u0435\u0433\u043E 87 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 59 (67,8%)."
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] Daily label confusion (3-class, technical)",
+      "columns": [
+        "TRUE",
+        "Pred DOWN",
+        "Pred FLAT",
+        "Pred UP",
+        "Hit %"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "78,0% (32)",
+          "4,9% (2)",
+          "17,1% (7)",
+          "78,0%"
+        ],
+        [
+          "FLAT",
+          "37,5% (3)",
+          "50,0% (4)",
+          "12,5% (1)",
+          "50,0%"
+        ],
+        [
+          "UP",
+          "5,3% (2)",
+          "34,2% (13)",
+          "60,5% (23)",
+          "60,5%"
+        ],
+        [
+          "Overall accuracy",
+          "",
+          "",
+          "",
+          "67,8% (59 / 87)"
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] Trend-direction confusion (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u0422\u0438\u043F \u0434\u043D\u044F",
+        "\u0422\u043E\u0447\u043D\u043E\u0441\u0442\u044C, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "82,1"
+        ],
+        [
+          "UP days",
+          "92,3"
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] Trend-direction confusion (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "True trend",
+        "Pred DOWN (count)",
+        "Pred UP (count)",
+        "Correct",
+        "Total",
+        "Accuracy, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "32",
+          "7",
+          "32",
+          "39",
+          "82,1"
+        ],
+        [
+          "UP days",
+          "2",
+          "24",
+          "24",
+          "26",
+          "92,3"
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] SL-model confusion (runtime, path-based)",
+      "columns": [
+        "day type",
+        "pred LOW",
+        "pred HIGH"
+      ],
+      "rows": [
+        [
+          "TP-day",
+          "45",
+          "0"
+        ],
+        [
+          "SL-day",
+          "6",
+          "1"
+        ],
+        [
+          "SL saved (potential)",
+          "1",
+          ""
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] SL-model metrics (runtime)",
+      "columns": [
+        "metric",
+        "value"
+      ],
+      "rows": [
+        [
+          "coverage (scored / signal days)",
+          "73,2%  (52/71)"
+        ],
+        [
+          "TPR / Recall (SL-day)",
+          "14,3%"
+        ],
+        [
+          "FPR (TP-day)",
+          "0,0%"
+        ],
+        [
+          "Precision (SL-day)",
+          "100,0%"
+        ],
+        [
+          "F1 (SL-day)",
+          "0,250"
+        ],
+        [
+          "PR-AUC (approx)",
+          "0,240"
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] SL threshold sweep (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u041F\u043E\u0440\u043E\u0433",
+        "TPR(SL), %",
+        "pred HIGH, %"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "14,3",
+          "19,2"
+        ],
+        [
+          "0,40",
+          "14,3",
+          "9,6"
+        ],
+        [
+          "0,50",
+          "14,3",
+          "1,9"
+        ],
+        [
+          "0,60",
+          "0,0",
+          "0,0"
+        ]
+      ]
+    },
+    {
+      "title": "[OOS] SL threshold sweep (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "Threshold",
+        "TPR(SL), %",
+        "FPR(TP), %",
+        "Pred HIGH, %",
+        "High / total"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "14,3",
+          "20,0",
+          "19,2",
+          "10/52"
+        ],
+        [
+          "0,40",
+          "14,3",
+          "8,9",
+          "9,6",
+          "5/52"
+        ],
+        [
+          "0,50",
+          "14,3",
+          "0,0",
+          "1,9",
+          "1/52"
+        ],
+        [
+          "0,60",
+          "0,0",
+          "0,0",
+          "0,0",
+          "0/52"
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] Daily label summary (business)",
+      "columns": [
+        "Class",
+        "Summary"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "\u0412\u0441\u0435\u0433\u043E 412 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 402 (97,6%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 10 (2,4%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 0,0% (0), FLAT 0,5% (2), UP 1,9% (8)."
+        ],
+        [
+          "FLAT",
+          "\u0412\u0441\u0435\u0433\u043E 110 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 69 (62,7%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 41 (37,3%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 22,7% (25), FLAT 0,0% (0), UP 14,5% (16)."
+        ],
+        [
+          "UP",
+          "\u0412\u0441\u0435\u0433\u043E 475 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 357 (75,2%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 118 (24,8%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 5,3% (25), FLAT 19,6% (93), UP 0,0% (0)."
+        ],
+        [
+          "Overall",
+          "\u0412\u0441\u0435\u0433\u043E 997 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 828 (83,0%)."
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] Daily label confusion (3-class, technical)",
+      "columns": [
+        "TRUE",
+        "Pred DOWN",
+        "Pred FLAT",
+        "Pred UP",
+        "Hit %"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "97,6% (402)",
+          "0,5% (2)",
+          "1,9% (8)",
+          "97,6%"
+        ],
+        [
+          "FLAT",
+          "22,7% (25)",
+          "62,7% (69)",
+          "14,5% (16)",
+          "62,7%"
+        ],
+        [
+          "UP",
+          "5,3% (25)",
+          "19,6% (93)",
+          "75,2% (357)",
+          "75,2%"
+        ],
+        [
+          "Overall accuracy",
+          "",
+          "",
+          "",
+          "83,0% (828 / 997)"
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] Trend-direction confusion (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u0422\u0438\u043F \u0434\u043D\u044F",
+        "\u0422\u043E\u0447\u043D\u043E\u0441\u0442\u044C, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "98,0"
+        ],
+        [
+          "UP days",
+          "93,5"
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] Trend-direction confusion (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "True trend",
+        "Pred DOWN (count)",
+        "Pred UP (count)",
+        "Correct",
+        "Total",
+        "Accuracy, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "402",
+          "8",
+          "402",
+          "410",
+          "98,0"
+        ],
+        [
+          "UP days",
+          "25",
+          "358",
+          "358",
+          "383",
+          "93,5"
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] SL-model confusion (runtime, path-based)",
+      "columns": [
+        "day type",
+        "pred LOW",
+        "pred HIGH"
+      ],
+      "rows": [
+        [
+          "TP-day",
+          "657",
+          "24"
+        ],
+        [
+          "SL-day",
+          "23",
+          "13"
+        ],
+        [
+          "SL saved (potential)",
+          "13",
+          ""
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] SL-model metrics (runtime)",
+      "columns": [
+        "metric",
+        "value"
+      ],
+      "rows": [
+        [
+          "coverage (scored / signal days)",
+          "82,8%  (717/866)"
+        ],
+        [
+          "TPR / Recall (SL-day)",
+          "36,1%"
+        ],
+        [
+          "FPR (TP-day)",
+          "3,5%"
+        ],
+        [
+          "Precision (SL-day)",
+          "35,1%"
+        ],
+        [
+          "F1 (SL-day)",
+          "0,356"
+        ],
+        [
+          "PR-AUC (approx)",
+          "0,224"
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] SL threshold sweep (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u041F\u043E\u0440\u043E\u0433",
+        "TPR(SL), %",
+        "pred HIGH, %"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "88,9",
+          "31,9"
+        ],
+        [
+          "0,40",
+          "63,9",
+          "16,0"
+        ],
+        [
+          "0,50",
+          "41,7",
+          "7,7"
+        ],
+        [
+          "0,60",
+          "16,7",
+          "2,9"
+        ]
+      ]
+    },
+    {
+      "title": "[TRAIN] SL threshold sweep (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "Threshold",
+        "TPR(SL), %",
+        "FPR(TP), %",
+        "Pred HIGH, %",
+        "High / total"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "88,9",
+          "28,9",
+          "31,9",
+          "229/717"
+        ],
+        [
+          "0,40",
+          "63,9",
+          "13,5",
+          "16,0",
+          "115/717"
+        ],
+        [
+          "0,50",
+          "41,7",
+          "5,9",
+          "7,7",
+          "55/717"
+        ],
+        [
+          "0,60",
+          "16,7",
+          "2,2",
+          "2,9",
+          "21/717"
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] Daily label summary (business)",
+      "columns": [
+        "Class",
+        "Summary"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "\u0412\u0441\u0435\u0433\u043E 78 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 68 (87,2%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 10 (12,8%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 0,0% (0), FLAT 2,6% (2), UP 10,3% (8)."
+        ],
+        [
+          "FLAT",
+          "\u0412\u0441\u0435\u0433\u043E 12 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 5 (41,7%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 7 (58,3%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 41,7% (5), FLAT 0,0% (0), UP 16,7% (2)."
+        ],
+        [
+          "UP",
+          "\u0412\u0441\u0435\u0433\u043E 83 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 65 (78,3%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 18 (21,7%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 3,6% (3), FLAT 18,1% (15), UP 0,0% (0)."
+        ],
+        [
+          "Overall",
+          "\u0412\u0441\u0435\u0433\u043E 173 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 138 (79,8%)."
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] Daily label confusion (3-class, technical)",
+      "columns": [
+        "TRUE",
+        "Pred DOWN",
+        "Pred FLAT",
+        "Pred UP",
+        "Hit %"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "87,2% (68)",
+          "2,6% (2)",
+          "10,3% (8)",
+          "87,2%"
+        ],
+        [
+          "FLAT",
+          "41,7% (5)",
+          "41,7% (5)",
+          "16,7% (2)",
+          "41,7%"
+        ],
+        [
+          "UP",
+          "3,6% (3)",
+          "18,1% (15)",
+          "78,3% (65)",
+          "78,3%"
+        ],
+        [
+          "Overall accuracy",
+          "",
+          "",
+          "",
+          "79,8% (138 / 173)"
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] Trend-direction confusion (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u0422\u0438\u043F \u0434\u043D\u044F",
+        "\u0422\u043E\u0447\u043D\u043E\u0441\u0442\u044C, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "89,5"
+        ],
+        [
+          "UP days",
+          "95,7"
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] Trend-direction confusion (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "True trend",
+        "Pred DOWN (count)",
+        "Pred UP (count)",
+        "Correct",
+        "Total",
+        "Accuracy, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "68",
+          "8",
+          "68",
+          "76",
+          "89,5"
+        ],
+        [
+          "UP days",
+          "3",
+          "66",
+          "66",
+          "69",
+          "95,7"
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] SL-model confusion (runtime, path-based)",
+      "columns": [
+        "day type",
+        "pred LOW",
+        "pred HIGH"
+      ],
+      "rows": [
+        [
+          "TP-day",
+          "105",
+          "0"
+        ],
+        [
+          "SL-day",
+          "7",
+          "4"
+        ],
+        [
+          "SL saved (potential)",
+          "4",
+          ""
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] SL-model metrics (runtime)",
+      "columns": [
+        "metric",
+        "value"
+      ],
+      "rows": [
+        [
+          "coverage (scored / signal days)",
+          "74,8%  (116/155)"
+        ],
+        [
+          "TPR / Recall (SL-day)",
+          "36,4%"
+        ],
+        [
+          "FPR (TP-day)",
+          "0,0%"
+        ],
+        [
+          "Precision (SL-day)",
+          "100,0%"
+        ],
+        [
+          "F1 (SL-day)",
+          "0,533"
+        ],
+        [
+          "PR-AUC (approx)",
+          "0,513"
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] SL threshold sweep (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u041F\u043E\u0440\u043E\u0433",
+        "TPR(SL), %",
+        "pred HIGH, %"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "45,5",
+          "22,4"
+        ],
+        [
+          "0,40",
+          "45,5",
+          "9,5"
+        ],
+        [
+          "0,50",
+          "45,5",
+          "4,3"
+        ],
+        [
+          "0,60",
+          "27,3",
+          "2,6"
+        ]
+      ]
+    },
+    {
+      "title": "[RECENT] SL threshold sweep (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "Threshold",
+        "TPR(SL), %",
+        "FPR(TP), %",
+        "Pred HIGH, %",
+        "High / total"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "45,5",
+          "20,0",
+          "22,4",
+          "26/116"
+        ],
+        [
+          "0,40",
+          "45,5",
+          "5,7",
+          "9,5",
+          "11/116"
+        ],
+        [
+          "0,50",
+          "45,5",
+          "0,0",
+          "4,3",
+          "5/116"
+        ],
+        [
+          "0,60",
+          "27,3",
+          "0,0",
+          "2,6",
+          "3/116"
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] Daily label summary (business)",
+      "columns": [
+        "Class",
+        "Summary"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "\u0412\u0441\u0435\u0433\u043E 453 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 434 (95,8%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 19 (4,2%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 0,0% (0), FLAT 0,9% (4), UP 3,3% (15)."
+        ],
+        [
+          "FLAT",
+          "\u0412\u0441\u0435\u0433\u043E 118 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 73 (61,9%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 45 (38,1%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 23,7% (28), FLAT 0,0% (0), UP 14,4% (17)."
+        ],
+        [
+          "UP",
+          "\u0412\u0441\u0435\u0433\u043E 513 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 380 (74,1%). \u041F\u0440\u043E\u043C\u0430\u0445\u043E\u0432: 133 (25,9%). \u041E\u0448\u0438\u0431\u043A\u0438: DOWN 5,3% (27), FLAT 20,7% (106), UP 0,0% (0)."
+        ],
+        [
+          "Overall",
+          "\u0412\u0441\u0435\u0433\u043E 1084 \u0434\u043D\u0435\u0439. \u041F\u043E\u043F\u0430\u0434\u0430\u043D\u0438\u0439: 887 (81,8%)."
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] Daily label confusion (3-class, technical)",
+      "columns": [
+        "TRUE",
+        "Pred DOWN",
+        "Pred FLAT",
+        "Pred UP",
+        "Hit %"
+      ],
+      "rows": [
+        [
+          "DOWN",
+          "95,8% (434)",
+          "0,9% (4)",
+          "3,3% (15)",
+          "95,8%"
+        ],
+        [
+          "FLAT",
+          "23,7% (28)",
+          "61,9% (73)",
+          "14,4% (17)",
+          "61,9%"
+        ],
+        [
+          "UP",
+          "5,3% (27)",
+          "20,7% (106)",
+          "74,1% (380)",
+          "74,1%"
+        ],
+        [
+          "Overall accuracy",
+          "",
+          "",
+          "",
+          "81,8% (887 / 1084)"
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] Trend-direction confusion (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u0422\u0438\u043F \u0434\u043D\u044F",
+        "\u0422\u043E\u0447\u043D\u043E\u0441\u0442\u044C, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "96,7"
+        ],
+        [
+          "UP days",
+          "93,4"
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] Trend-direction confusion (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "True trend",
+        "Pred DOWN (count)",
+        "Pred UP (count)",
+        "Correct",
+        "Total",
+        "Accuracy, %"
+      ],
+      "rows": [
+        [
+          "DOWN days",
+          "434",
+          "15",
+          "434",
+          "449",
+          "96,7"
+        ],
+        [
+          "UP days",
+          "27",
+          "382",
+          "382",
+          "409",
+          "93,4"
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] SL-model confusion (runtime, path-based)",
+      "columns": [
+        "day type",
+        "pred LOW",
+        "pred HIGH"
+      ],
+      "rows": [
+        [
+          "TP-day",
+          "702",
+          "24"
+        ],
+        [
+          "SL-day",
+          "29",
+          "14"
+        ],
+        [
+          "SL saved (potential)",
+          "14",
+          ""
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] SL-model metrics (runtime)",
+      "columns": [
+        "metric",
+        "value"
+      ],
+      "rows": [
+        [
+          "coverage (scored / signal days)",
+          "82,1%  (769/937)"
+        ],
+        [
+          "TPR / Recall (SL-day)",
+          "32,6%"
+        ],
+        [
+          "FPR (TP-day)",
+          "3,3%"
+        ],
+        [
+          "Precision (SL-day)",
+          "36,8%"
+        ],
+        [
+          "F1 (SL-day)",
+          "0,346"
+        ],
+        [
+          "PR-AUC (approx)",
+          "0,212"
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] SL threshold sweep (\u0443\u043F\u0440\u043E\u0449\u0451\u043D\u043D\u043E)",
+      "columns": [
+        "\u041F\u043E\u0440\u043E\u0433",
+        "TPR(SL), %",
+        "pred HIGH, %"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "76,7",
+          "31,1"
+        ],
+        [
+          "0,40",
+          "55,8",
+          "15,6"
+        ],
+        [
+          "0,50",
+          "37,2",
+          "7,3"
+        ],
+        [
+          "0,60",
+          "14,0",
+          "2,7"
+        ]
+      ]
+    },
+    {
+      "title": "[FULL] SL threshold sweep (\u0442\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u0438)",
+      "columns": [
+        "Threshold",
+        "TPR(SL), %",
+        "FPR(TP), %",
+        "Pred HIGH, %",
+        "High / total"
+      ],
+      "rows": [
+        [
+          "0,30",
+          "76,7",
+          "28,4",
+          "31,1",
+          "239/769"
+        ],
+        [
+          "0,40",
+          "55,8",
+          "13,2",
+          "15,6",
+          "120/769"
+        ],
+        [
+          "0,50",
+          "37,2",
+          "5,5",
+          "7,3",
+          "56/769"
+        ],
+        [
+          "0,60",
+          "14,0",
+          "2,1",
+          "2,7",
+          "21/769"
+        ]
+      ]
+    }
+  ],
+  "textSections": []
+}

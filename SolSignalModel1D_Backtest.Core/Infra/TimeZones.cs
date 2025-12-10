@@ -11,15 +11,6 @@
 		public static readonly TimeZoneInfo NewYork = ResolveNewYork ();
 
 		/// <summary>
-		/// Старый API: получить таймзону Нью-Йорка.
-		/// Оставлен для совместимости; просто возвращает кешированное поле.
-		/// </summary>
-		public static TimeZoneInfo GetNewYork ()
-			{
-			return NewYork;
-			}
-
-		/// <summary>
 		/// Внутреннее разрешение таймзоны NY с учётом разных идентификаторов на платформах.
 		/// </summary>
 		private static TimeZoneInfo ResolveNewYork ()

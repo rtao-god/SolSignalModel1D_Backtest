@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -102,6 +103,82 @@ namespace SolSignalModel1D_Backtest.Reports
 			}
 
 		/// <summary>
+		/// Элемент индекса по current_prediction-отчётам:
+		/// Id = имя файла без расширения;
+		/// PredictionDateUtc восстанавливается из Id (current-prediction-YYYYMMDD-HHmmss).
+		/// </summary>
+		public sealed class CurrentPredictionReportIndexItem
+			{
+			public string Id { get; set; } = string.Empty;
+			public DateTime PredictionDateUtc { get; set; }
+			}
+
+		/// <summary>
+		/// Возвращает отсортированный список всех current_prediction-отчётов,
+		/// доступных в файловом хранилище.
+		/// Сортировка: по дате прогноза (DESC), затем по Id (DESC).
+		/// </summary>
+		public IReadOnlyList<CurrentPredictionReportIndexItem> ListCurrentPredictionReports ()
+			{
+			const string kind = "current_prediction";
+
+			var kindDir = GetKindDir (kind);
+			if (!Directory.Exists (kindDir))
+				return Array.Empty<CurrentPredictionReportIndexItem> ();
+
+			var files = Directory.GetFiles (kindDir, "*.json", SearchOption.TopDirectoryOnly);
+			if (files.Length == 0)
+				return Array.Empty<CurrentPredictionReportIndexItem> ();
+
+			var list = new List<CurrentPredictionReportIndexItem> (files.Length);
+
+			foreach (var file in files)
+				{
+				var id = Path.GetFileNameWithoutExtension (file);
+				if (string.IsNullOrWhiteSpace (id))
+					continue;
+
+				if (!TryParseCurrentPredictionDateFromId (id, out var predictionDateUtc))
+					continue;
+
+				list.Add (new CurrentPredictionReportIndexItem
+					{
+					Id = id,
+					PredictionDateUtc = predictionDateUtc
+					});
+				}
+
+			return list
+				.OrderByDescending (x => x.PredictionDateUtc)
+				.ThenByDescending (x => x.Id, StringComparer.OrdinalIgnoreCase)
+				.ToArray ();
+			}
+
+		/// <summary>
+		/// Загружает current_prediction-отчёт по дате прогноза (UTC).
+		/// Берётся последний по Id отчёт, у которого PredictionDateUtc.Date совпадает с датой.
+		/// Если отчёт не найден — возвращает null.
+		/// </summary>
+		public ReportDocument? LoadCurrentPredictionByDate ( DateTime predictionDateUtc )
+			{
+			var targetDate = predictionDateUtc.Date;
+
+			var index = ListCurrentPredictionReports ();
+			if (index.Count == 0)
+				return null;
+
+			var item = index
+				.Where (x => x.PredictionDateUtc.Date == targetDate)
+				.OrderByDescending (x => x.Id, StringComparer.OrdinalIgnoreCase)
+				.FirstOrDefault ();
+
+			if (item == null)
+				return null;
+
+			return LoadByKindAndId<ReportDocument> ("current_prediction", item.Id);
+			}
+
+		/// <summary>
 		/// Загружает последний по времени backtest_summary-отчёт.
 		/// Используется /api/backtest/summary.
 		/// </summary>
@@ -199,6 +276,44 @@ namespace SolSignalModel1D_Backtest.Reports
 		private string GetKindDir ( string kind )
 			{
 			return Path.Combine (_rootDir, kind);
+			}
+
+		/// <summary>
+		/// Парсит дату прогноза из Id current_prediction-отчёта.
+		/// Ожидаемый формат Id: "current-prediction-YYYYMMDD-HHmmss".
+		/// </summary>
+		private static bool TryParseCurrentPredictionDateFromId ( string id, out DateTime predictionDateUtc )
+			{
+			predictionDateUtc = default;
+
+			if (string.IsNullOrWhiteSpace (id))
+				return false;
+
+			// "current-prediction-YYYYMMDD-HHmmss"
+			var parts = id.Split ('-', StringSplitOptions.RemoveEmptyEntries);
+			if (parts.Length < 3)
+				return false;
+
+			var datePart = parts[2];
+			if (datePart.Length != 8)
+				return false;
+
+			if (!int.TryParse (datePart.Substring (0, 4), out int year))
+				return false;
+			if (!int.TryParse (datePart.Substring (4, 2), out int month))
+				return false;
+			if (!int.TryParse (datePart.Substring (6, 2), out int day))
+				return false;
+
+			try
+				{
+				predictionDateUtc = new DateTime (year, month, day, 0, 0, 0, DateTimeKind.Utc);
+				return true;
+				}
+			catch
+				{
+				return false;
+				}
 			}
 		}
 	}

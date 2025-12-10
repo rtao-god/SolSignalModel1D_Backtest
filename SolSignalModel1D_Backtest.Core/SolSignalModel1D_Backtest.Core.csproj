@@ -9,8 +9,18 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+	  <Compile Remove="ML\SL\Новая папка\**" />
+	  <EmbeddedResource Remove="ML\SL\Новая папка\**" />
+	  <None Remove="ML\SL\Новая папка\**" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="Microsoft.ML" Version="4.0.3" />
 		<PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Omniscient\" />
 	</ItemGroup>
 
 </Project>

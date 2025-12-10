@@ -1,4 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Infra;
+﻿using System;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
@@ -8,7 +10,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 	/// - берёт готовый CurrentPredictionSnapshot;
 	/// - показывает даты, режим, SL-prob;
 	/// - рисует табличку по политикам.
-	/// Никакой математики внутри — только форматирование.
+	/// Внутри только форматирование, без новой математики.
 	/// </summary>
 	public static class CurrentPredictionPrinter
 		{
@@ -17,10 +19,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		public static void Print ( CurrentPredictionSnapshot snapshot )
 			{
 			if (snapshot == null)
-				{
-				Console.WriteLine ("[current] snapshot is null — nothing to print.");
-				return;
-				}
+				throw new ArgumentNullException (
+					nameof (snapshot),
+					"[current] CurrentPredictionSnapshot == null в CurrentPredictionPrinter.Print — нарушен инвариант пайплайна"
+				);
 
 			var tbTz = TimeZoneInfo.FindSystemTimeZoneById ("Asia/Tbilisi");
 			DateTime nyTime = TimeZoneInfo.ConvertTimeFromUtc (snapshot.PredictionDateUtc, NyTz);
@@ -46,6 +48,35 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				Console.WriteLine ();
 				}
 
+			// Текстовый комментарий модели (если есть)
+			if (!string.IsNullOrWhiteSpace (snapshot.Reason))
+				{
+				Console.WriteLine ("Комментарий модели:");
+				Console.WriteLine (snapshot.Reason);
+				Console.WriteLine ();
+				}
+
+			// Объяснение прогноза: top факторов/источников
+			if (snapshot.ExplanationItems.Count > 0)
+				{
+				Console.WriteLine ("=== Объяснение прогноза (top факторов) ===");
+
+				var ordered = snapshot.ExplanationItems
+					.OrderBy (e => e.Rank == 0 ? int.MaxValue : e.Rank)
+					.ThenBy (e => e.Name);
+
+				foreach (var item in ordered)
+					{
+					var valuePart = item.Value.HasValue
+						? $" (value={item.Value.Value:0.####})"
+						: string.Empty;
+
+					Console.WriteLine ($"[{item.Kind}] {item.Name}: {item.Description}{valuePart}");
+					}
+
+				Console.WriteLine ();
+				}
+
 			var table = new TextTable ();
 			table.AddHeader (
 				"Policy",
@@ -63,7 +94,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				"Position $",
 				"Position qty",
 				"Liq price",
-				"Liq dist %" );
+				"Liq dist %");
 
 			foreach (var row in snapshot.PolicyRows)
 				{
@@ -94,4 +125,4 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			Console.WriteLine ();
 			}
 		}
-		}
+	}

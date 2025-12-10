@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
@@ -25,6 +25,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	/// </summary>
 	public sealed class RowAndSlLeakageTests
 		{
+		// Уменьшаем синтетический диапазон без потери смысла тестов.
+		private const int SyntheticDays = 240;
+
 		// === 1. RowBuilder: future-blind по хвосту ===
 
 		[Fact]
@@ -32,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			{
 			// Синтетическая история 6h/1m.
 			BuildSyntheticHistory (
-				days: 600,
+				days: SyntheticDays,
 				out var solWinTrainA,
 				out var btcWinTrainA,
 				out var paxgWinTrainA,
@@ -106,12 +109,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			// Сравниваем только префикс до asOf.
 			var aPrefix = rowsAAll
 				.Where (r => r.Date <= asOfUtc)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			var bPrefix = rowsBAll
 				.Where (r => r.Date <= asOfUtc)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			AssertRowsEqual (aPrefix, bPrefix);
@@ -123,7 +124,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public void DailyDatasetBuilder_TrainRows_AreFutureBlind_ToTailMutation ()
 			{
 			BuildSyntheticHistory (
-				days: 600,
+				days: SyntheticDays,
 				out var solWinTrainA,
 				out var btcWinTrainA,
 				out var paxgWinTrainA,
@@ -191,12 +192,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			var allRowsA = rowsAAll
 				.Where (r => r.Date <= trainUntil)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			var allRowsB = rowsBAll
 				.Where (r => r.Date <= trainUntil)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			Assert.NotEmpty (allRowsA);
@@ -230,7 +229,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public void SlDatasetBuilder_Samples_AreFutureBlind_ToTailMutation ()
 			{
 			BuildSyntheticHistory (
-				days: 600,
+				days: SyntheticDays,
 				out var solWinTrainA,
 				out var btcWinTrainA,
 				out var paxgWinTrainA,
@@ -298,12 +297,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			var allRowsA = rowsAAll
 				.Where (r => r.Date <= trainUntil)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			var allRowsB = rowsBAll
 				.Where (r => r.Date <= trainUntil)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			Assert.NotEmpty (allRowsA);
@@ -396,14 +393,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			out Dictionary<DateTime, double> fngHistory,
 			out Dictionary<DateTime, double> dxyHistory )
 			{
-			var sol6 = new List<Candle6h> ();
-			var btc6 = new List<Candle6h> ();
-			var paxg6 = new List<Candle6h> ();
-			var all1m = new List<Candle1m> ();
-			var dict6 = new Dictionary<DateTime, Candle6h> ();
+			var total6h = days * 4;
+			var total1m = total6h * 360;
 
-			fngHistory = new Dictionary<DateTime, double> ();
-			dxyHistory = new Dictionary<DateTime, double> ();
+			var sol6 = new List<Candle6h> (total6h);
+			var btc6 = new List<Candle6h> (total6h);
+			var paxg6 = new List<Candle6h> (total6h);
+			var all1m = new List<Candle1m> (total1m);
+			var dict6 = new Dictionary<DateTime, Candle6h> (total6h);
+
+			fngHistory = new Dictionary<DateTime, double> (days);
+			dxyHistory = new Dictionary<DateTime, double> (days);
 
 			var start = new DateTime (2021, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 			var t = start;

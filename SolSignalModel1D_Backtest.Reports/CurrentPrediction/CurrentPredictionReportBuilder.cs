@@ -1,9 +1,10 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
-using SolSignalModel1D_Backtest.Core.Domain;
-using SolSignalModel1D_Backtest.Reports.Model;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Domain;
+using SolSignalModel1D_Backtest.Reports.Model;
 
 namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 	{
@@ -13,40 +14,44 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 	/// </summary>
 	public static class CurrentPredictionReportBuilder
 		{
-		public static ReportDocument? Build ( CurrentPredictionSnapshot snapshot )
+		public static ReportDocument Build ( CurrentPredictionSnapshot snapshot )
 			{
 			if (snapshot == null)
-				return null;
+				throw new ArgumentNullException (
+					nameof (snapshot),
+					"[current-report] CurrentPredictionSnapshot == null — нарушен инвариант построения отчёта");
 
 			var doc = new ReportDocument
 				{
-				Id = $"current-prediction-{snapshot.PredictionDateUtc:yyyyMMdd}",
+				Id = $"current-prediction-{snapshot.PredictionDateUtc:yyyyMMdd}-{snapshot.GeneratedAtUtc:HHmmss}",
 				Kind = "current_prediction",
 				Title = $"Текущий прогноз ({TradingSymbols.SolUsdtDisplay})",
 				GeneratedAtUtc = snapshot.GeneratedAtUtc
 				};
 
-			// === Общие параметры прогноза (то, что видно юзеру в первую очередь) ===
 			var info = new KeyValueSection
 				{
 				Title = "Общие параметры прогноза"
 				};
 
-			// Дата прогноза, без ISO-мусора
+			info.Items.Add (new KeyValueItem
+				{
+				Key = "Время генерации отчёта (UTC)",
+				Value = FormatDateUtc (snapshot.GeneratedAtUtc)
+				});
+
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Дата прогноза (UTC)",
 				Value = FormatDateUtc (snapshot.PredictionDateUtc)
 				});
 
-			// Основное решение дневной модели (Daily)
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Основная модель (Daily)",
 				Value = BuildMainDirectionLabel (snapshot)
 				});
 
-			// Микро-модель (1m), если есть человекочитаемое описание
 			if (!string.IsNullOrWhiteSpace (snapshot.MicroDisplay))
 				{
 				info.Items.Add (new KeyValueItem
@@ -56,7 +61,6 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 					});
 				}
 
-			// Режим рынка: нормальный / в фазе снижения
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Режим рынка",
@@ -65,35 +69,30 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 					: "Рынок в нормальном режиме"
 				});
 
-			// Вероятность срабатывания стоп-лосса (из SL-модели)
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Вероятность срабатывания стоп-лосса",
 				Value = $"{snapshot.SlProb:0.0} %"
 				});
 
-			// Сигнал SL-модели: аккуратно форматируем, не предполагая точной семантики
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Сигнал SL-модели",
 				Value = FormatSlDecision (snapshot.SlHighDecision)
 				});
 
-			// Текущая цена инструмента
 			info.Items.Add (new KeyValueItem
 				{
 				Key = $"Текущая цена {TradingSymbols.SolUsdtDisplay}",
 				Value = snapshot.Entry.ToString ("0.0000")
 				});
 
-			// Минимальный осмысленный ход (в долях) + сразу человекочитаемый %
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Минимальный осмысленный ход цены",
 				Value = $"{snapshot.MinMove:0.0000} ({snapshot.MinMove * 100:0.0} %)"
 				});
 
-			// Комментарий модели, если есть
 			if (!string.IsNullOrWhiteSpace (snapshot.Reason))
 				{
 				info.Items.Add (new KeyValueItem
@@ -105,7 +104,6 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 
 			doc.KeyValueSections.Add (info);
 
-			// === Forward 24h (baseline на истории) ===
 			if (snapshot.Forward24h != null)
 				{
 				var fwd = snapshot.Forward24h;
@@ -134,13 +132,51 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 				doc.KeyValueSections.Add (fwdSection);
 				}
 
-			// === Таблица по политикам (BASE vs ANTI-D) ===
+			// Таблица с top-факторами, которые повлияли на прогноз
+			if (snapshot.ExplanationItems.Count > 0)
+				{
+				var explain = new TableSection
+					{
+					Title = "Почему модель дала такой прогноз (top факторов)"
+					};
+
+				explain.Columns.AddRange (new[]
+					{
+					"Тип",
+					"Имя",
+					"Описание",
+					"Значение",
+					"Ранг"
+					});
+
+				var ordered = snapshot.ExplanationItems
+					.OrderBy (e => e.Rank == 0 ? int.MaxValue : e.Rank)
+					.ThenBy (e => e.Name);
+
+				foreach (var item in ordered)
+					{
+					explain.Rows.Add (new List<string>
+						{
+						item.Kind,
+						item.Name,
+						item.Description,
+						item.Value.HasValue
+							? item.Value.Value.ToString ("0.####")
+							: string.Empty,
+						item.Rank > 0
+							? item.Rank.ToString (CultureInfo.InvariantCulture)
+							: string.Empty
+						});
+					}
+
+				doc.TableSections.Add (explain);
+				}
+
 			var table = new TableSection
 				{
 				Title = "Политики плеча (BASE vs ANTI-D)"
 				};
 
-			// Более понятные колонки для человека
 			table.Columns.AddRange (new[]
 			{
 				"Политика",
@@ -191,33 +227,14 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			return doc;
 			}
 
-		/// <summary>
-		/// Форматирует дату прогноза в человекочитаемый UTC-вид без миллисекунд.
-		/// Пример: 2025-11-26 12:00 UTC.
-		/// </summary>
 		private static string FormatDateUtc ( DateTime dtUtc )
 			{
 			var utc = dtUtc.Kind == DateTimeKind.Utc ? dtUtc : dtUtc.ToUniversalTime ();
 			return utc.ToString ("yyyy-MM-dd HH:mm 'UTC'");
 			}
 
-		/// <summary>
-		/// Строит подпись основной дневной модели:
-		/// "Рост", "Падение", "Боковик", "Боковик-Рост", "Боковик-Падение".
-		///
-		/// Важно: здесь используется разумная гипотеза по PredLabel:
-		/// -1 ~ падение, 0 ~ боковик, +1 ~ рост.
-		/// Если в твоей реализации другая кодировка — маппинг нужно
-		/// подправить под фактические значения.
-		/// </summary>
 		private static string BuildMainDirectionLabel ( CurrentPredictionSnapshot snapshot )
 			{
-			// PredLabel в текущей модели — целое (обычно -1/0/+1).
-			// Здесь предполагается:
-			//  -1 → падение
-			//   0 → боковик
-			//  +1 → рост
-			// Если в реальной схеме кодировка другая — маппинг ниже нужно подправить.
 			var rawLabel = snapshot.PredLabel;
 			var raw = rawLabel.ToString (CultureInfo.InvariantCulture);
 			var rawTrim = raw.Trim ();
@@ -226,7 +243,6 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			bool? baseFlat = null;
 			bool? baseUp = null;
 
-			// Базовая интерпретация по числовому коду
 			if (rawLabel == 0)
 				{
 				baseFlat = true;
@@ -242,7 +258,6 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 				baseUp = false;
 				}
 
-			// Доп. обработка текстовых вариантов, если когда-нибудь PredLabel станет строкой
 			if (rawLower.IndexOf ("flat", StringComparison.Ordinal) >= 0
 				|| rawLower.IndexOf ("флэт", StringComparison.Ordinal) >= 0
 				|| rawLower.IndexOf ("sideways", StringComparison.Ordinal) >= 0)
@@ -264,7 +279,6 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 				baseUp ??= false;
 				}
 
-			// Микро-модель: используем для уточнения боковика
 			var micro = snapshot.MicroDisplay?.ToLowerInvariant () ?? string.Empty;
 			bool microUp = micro.Contains ("up") || micro.Contains ("рост");
 			bool microDown = micro.Contains ("down") || micro.Contains ("пад");
@@ -284,15 +298,9 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			if (baseUp == false)
 				return "Падение";
 
-			// Фолбэк: показываем сырой код, если ничего не распознали
 			return string.IsNullOrWhiteSpace (rawTrim) ? "нет данных" : rawTrim;
 			}
 
-		/// <summary>
-		/// Человекочитаемое описание решения SL-модели.
-		/// Тип SlHighDecision заранее неизвестен, поэтому работаем через ToString.
-		/// Для bool / 0/1 возвращаем внятный текст, для остальных значений — сырой вывод.
-		/// </summary>
 		private static string FormatSlDecision ( object? slDecision )
 			{
 			if (slDecision == null)
@@ -307,7 +315,6 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			if (lower == "false" || lower == "0" || lower == "ok")
 				return "Нормальный риск по стопам";
 
-			// Если это какой-то специфический enum/строка — показываем как есть.
 			return raw;
 			}
 		}

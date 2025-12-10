@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
@@ -32,10 +32,10 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (config == null) throw new ArgumentNullException (nameof (config));
 
 			// 1) МИКРО-статистика
-			MicroStatsPrinter.Print (mornings, records);
+			//MicroStatsPrinter.Print (mornings, records);
 
 			// 2) Обычные прогонки WITH SL / NO SL
-			var withSlBase = SimulateAllPolicies (
+		/*	var withSlBase = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: true,
 				config: config,
@@ -47,13 +47,13 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				useStopLoss: false,
 				config: config,
 				useAnti: false
-			);
+			);*/
 
 			// 3) Сравнение политик по SL
-			PolicySlComparisonPrinter.Print (withSlBase, noSlBase);
+			//PolicySlComparisonPrinter.Print (withSlBase, noSlBase);
 
 			// 3.1) Расширенный SL отчёт
-			SlPnlReportPrinter.PrintMatchedDeltaAndPnl (records, withSlBase, noSlBase);
+			//SlPnlReportPrinter.PrintMatchedDeltaAndPnl (records, withSlBase, noSlBase);
 
 			// 4) Policy summary (WITH SL)
 			//PolicyBreakdownPrinter.PrintSummary (withSlBase, "Policy summary (WITH SL)");
@@ -78,14 +78,14 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			// 7) ANTI-DIRECTION OVERLAY (base/anti × with SL / no SL)
 			// =====================================================================
 
-			var withSlAnti = SimulateAllPolicies (
+			/*var withSlAnti = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: true,
 				config: config,
 				useAnti: true
-			);
+			);*/
 
-			var noSlAnti = SimulateAllPolicies (
+			/*var noSlAnti = SimulateAllPolicies (
 				policies, records, candles1m,
 				useStopLoss: false,
 				config: config,
@@ -97,7 +97,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				withSlAnti,
 				noSlBase,
 				noSlAnti
-			);
+			);*/
 			}
 
 		// =====================================================================

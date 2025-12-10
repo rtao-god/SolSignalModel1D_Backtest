@@ -1,17 +1,11 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.Net.Http;
+﻿using System.Globalization;
 using System.Text.Json;
-using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
 	public static class DataLoading
 		{
-		// для DXY
 		private static readonly Dictionary<string, double> DxyWeights = new ()
 			{
 			["EUR"] = 57.6,
@@ -26,9 +20,11 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public static async Task<List<Candle1m>> GetBinance1m (
 			HttpClient http,
 			string symbol,
-			int max,
-			bool allowNull = false )
+			int max )
 			{
+			if (http == null) throw new ArgumentNullException (nameof (http));
+			if (max <= 0) throw new ArgumentOutOfRangeException (nameof (max), "max должен быть > 0");
+
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
 			int ws = symbol.IndexOfAny (new[] { ' ', '\t', '\r', '\n' });
 			if (ws >= 0)
@@ -45,20 +41,21 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				while (all.Count < max)
 					{
 					int need = Math.Min (chunk, max - all.Count);
-					string url = $"https://api.binance.com/api/v3/klines?symbol={symbolEsc}&interval=1m&limit={need}";
+					string url =
+						$"https://api.binance.com/api/v3/klines?symbol={symbolEsc}&interval=1m&limit={need}";
 					if (endTimeMs.HasValue)
 						url += $"&endTime={endTimeMs.Value}";
 
 					using var resp = await http.GetAsync (url);
 					if (!resp.IsSuccessStatusCode)
 						{
-						if (allowNull)
-							return all;
+						Console.WriteLine ($"[binance-1m] HTTP {(int) resp.StatusCode} при загрузке {symbol}, url={url}");
 						resp.EnsureSuccessStatusCode ();
 						}
 
 					await using var s = await resp.Content.ReadAsStreamAsync ();
 					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+
 					if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
 						break;
 
@@ -86,7 +83,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 							earliestOpenMs = openTime;
 						}
 
-					const long oneMinuteMs = 1L * 60 * 1000;
+					const long oneMinuteMs = 60L * 1000;
 					endTimeMs = earliestOpenMs - oneMinuteMs;
 
 					if (all.Count >= max)
@@ -99,10 +96,9 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				return all;
 				}
-			catch
+			catch (Exception ex)
 				{
-				if (allowNull)
-					return new List<Candle1m> ();
+				Console.WriteLine ($"[binance-1m] ошибка при загрузке {symbol}: {ex}");
 				throw;
 				}
 			}
@@ -111,12 +107,16 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public static async Task<List<Candle6h>> GetBinance6h (
 			HttpClient http,
 			string symbol,
-			int max,
-			bool allowNull = false )
+			int max )
 			{
+			if (http == null) throw new ArgumentNullException (nameof (http));
+			if (max <= 0) throw new ArgumentOutOfRangeException (nameof (max), "max должен быть > 0");
+
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
 			int ws = symbol.IndexOfAny (new[] { ' ', '\t', '\r', '\n' });
-			if (ws >= 0) symbol = symbol.Substring (0, ws);
+			if (ws >= 0)
+				symbol = symbol.Substring (0, ws);
+
 			string symbolEsc = Uri.EscapeDataString (symbol);
 
 			const int chunk = 1000;
@@ -137,8 +137,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					using var resp = await http.GetAsync (url);
 					if (!resp.IsSuccessStatusCode)
 						{
-						if (allowNull)
-							return all;
+						Console.WriteLine ($"[binance-6h] HTTP {(int) resp.StatusCode} при загрузке {symbol}, url={url}");
 						resp.EnsureSuccessStatusCode ();
 						}
 
@@ -192,10 +191,9 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				return all;
 				}
-			catch
+			catch (Exception ex)
 				{
-				if (allowNull)
-					return new List<Candle6h> ();
+				Console.WriteLine ($"[binance-6h] ошибка при загрузке {symbol}: {ex}");
 				throw;
 				}
 			}
@@ -204,13 +202,16 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public static async Task<List<Candle1h>> GetBinance1h (
 			HttpClient http,
 			string symbol,
-			int max,
-			bool allowNull = false )
+			int max )
 			{
+			if (http == null) throw new ArgumentNullException (nameof (http));
+			if (max <= 0) throw new ArgumentOutOfRangeException (nameof (max), "max должен быть > 0");
+
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
 			int ws = symbol.IndexOfAny (new[] { ' ', '\t', '\r', '\n' });
 			if (ws >= 0)
 				symbol = symbol.Substring (0, ws);
+
 			string symbolEsc = Uri.EscapeDataString (symbol);
 
 			const int chunk = 1000;
@@ -231,8 +232,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					using var resp = await http.GetAsync (url);
 					if (!resp.IsSuccessStatusCode)
 						{
-						if (allowNull)
-							return all;
+						Console.WriteLine ($"[binance-1h] HTTP {(int) resp.StatusCode} при загрузке {symbol}, url={url}");
 						resp.EnsureSuccessStatusCode ();
 						}
 
@@ -279,24 +279,30 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				return all;
 				}
-			catch
+			catch (Exception ex)
 				{
-				if (allowNull)
-					return new List<Candle1h> ();
+				Console.WriteLine ($"[binance-1h] ошибка при загрузке {symbol}: {ex}");
 				throw;
 				}
 			}
 
-		// ===== FNG / DXY / extra ===== 
+		// ===== FNG / DXY / extra =====
 
 		public static async Task<Dictionary<DateTime, double>> GetFngHistory ( HttpClient http )
 			{
+			if (http == null) throw new ArgumentNullException (nameof (http));
+
 			var dict = new Dictionary<DateTime, double> ();
+
 			try
 				{
 				string url = "https://api.alternative.me/fng/?limit=1000";
 				using var resp = await http.GetAsync (url);
-				resp.EnsureSuccessStatusCode ();
+				if (!resp.IsSuccessStatusCode)
+					{
+					Console.WriteLine ($"[fng] HTTP {(int) resp.StatusCode} при загрузке FNG, url={url}");
+					resp.EnsureSuccessStatusCode ();
+					}
 
 				await using var s = await resp.Content.ReadAsStreamAsync ();
 				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
@@ -312,40 +318,58 @@ namespace SolSignalModel1D_Backtest.Core.Data
 							dict[d] = v;
 						}
 					}
+
+				return dict;
 				}
-			catch
+			catch (Exception ex)
 				{
+				Console.WriteLine ($"[fng] ошибка при загрузке FNG: {ex}");
+				throw;
 				}
-			return dict;
 			}
 
 		public static async Task<Dictionary<DateTime, double>> GetDxySeries ( HttpClient http, DateTime start, DateTime end )
 			{
+			if (http == null) throw new ArgumentNullException (nameof (http));
+			if (end < start)
+				throw new ArgumentException ("end < start для диапазона DXY", nameof (end));
+
 			var dict = new Dictionary<DateTime, double> ();
+
 			try
 				{
 				string to = "EUR,JPY,GBP,CAD,SEK,CHF";
 				string url = $"https://api.frankfurter.app/{start:yyyy-MM-dd}..{end:yyyy-MM-dd}?from=USD&to={to}";
 				using var resp = await http.GetAsync (url);
-				resp.EnsureSuccessStatusCode ();
+				if (!resp.IsSuccessStatusCode)
+					{
+					Console.WriteLine ($"[dxy] HTTP {(int) resp.StatusCode} при загрузке DXY, url={url}");
+					resp.EnsureSuccessStatusCode ();
+					}
+
 				await using var s = await resp.Content.ReadAsStreamAsync ();
 				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+
 				if (root.TryGetProperty ("rates", out var rates))
 					{
 					foreach (var day in rates.EnumerateObject ())
 						{
 						if (!DateTime.TryParse (day.Name, out var d))
 							continue;
+
 						double idx = IndexFromRates (day.Value, out int used);
 						if (!double.IsNaN (idx) && used >= 4)
 							dict[d.Date] = idx;
 						}
 					}
+
+				return dict;
 				}
-			catch
+			catch (Exception ex)
 				{
+				Console.WriteLine ($"[dxy] ошибка при загрузке DXY: {ex}");
+				throw;
 				}
-			return dict;
 			}
 
 		private static double IndexFromRates ( JsonElement rates, out int used )
@@ -369,22 +393,30 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 		public static Dictionary<DateTime, (double Funding, double OI)>? TryLoadExtraDaily ( string path )
 			{
+			if (string.IsNullOrWhiteSpace (path))
+				throw new ArgumentException ("path пустой", nameof (path));
+
+			if (!File.Exists (path))
+				return null;
+
 			try
 				{
-				if (!File.Exists (path)) return null;
 				var txt = File.ReadAllText (path);
 				var arr = JsonSerializer.Deserialize<List<ExtraPoint>> (txt);
-				if (arr == null) return null;
+				if (arr == null)
+					throw new InvalidOperationException ($"[extra] JSON десериализован в null, path='{path}'");
+
 				var dict = new Dictionary<DateTime, (double, double)> ();
 				foreach (var e in arr)
 					dict[e.Date.Date] = (e.Funding, e.OI);
-				Console.WriteLine ($"[extra] загружено {dict.Count} строк доп. данных");
+
+				Console.WriteLine ($"[extra] загружено {dict.Count} строк доп. данных из '{path}'");
 				return dict;
 				}
-			catch
+			catch (Exception ex)
 				{
-				Console.WriteLine ("[extra] не удалось загрузить доп. данные");
-				return null;
+				Console.WriteLine ($"[extra] ошибка при загрузке доп. данных из '{path}': {ex}");
+				throw;
 				}
 			}
 
@@ -396,7 +428,6 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			}
 
 		// ===== диапазонный загрузчик =====
-
 		public static async Task<List<(DateTime openUtc, double open, double high, double low, double close)>> GetBinanceKlinesRange (
 			HttpClient http,
 			string symbol,
@@ -404,6 +435,33 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			DateTime fromUtc,
 			DateTime toUtc )
 			{
+			if (http == null) throw new ArgumentNullException (nameof (http));
+
+			// Пытаемся оценить длину интервала, чтобы корректно обрабатывать случаи to<=from.
+			var intervalLen = TryGetBinanceIntervalLength (interval);
+
+			// Ситуация: toUtc <= fromUtc.
+			// Для хвостовых апдейтов это обычно означает, что следующая свеча ещё
+			// не началась/не закончилась и обновлять нечего.
+			if (toUtc <= fromUtc)
+				{
+				if (intervalLen.HasValue)
+					{
+					var diff = fromUtc - toUtc; // >= 0 при to<=from
+
+					// Если разница не больше одной свечи (+ небольшой запас),
+					// считаем это нормальным "пустым" диапазоном и просто выходим.
+					if (diff <= intervalLen.Value + TimeSpan.FromSeconds (5))
+						{
+						return new List<(DateTime openUtc, double open, double high, double low, double close)> (0);
+						}
+					}
+
+				// Если разрыв больше длины интервала — это уже реально аномалия.
+				// Её лучше не маскировать.
+				throw new ArgumentException ("toUtc < fromUtc для диапазона klines", nameof (toUtc));
+				}
+
 			symbol = (symbol ?? string.Empty).Trim ().ToUpperInvariant ();
 			string symbolEsc = Uri.EscapeDataString (symbol);
 
@@ -456,6 +514,30 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 			result.Sort (( a, b ) => a.openUtc.CompareTo (b.openUtc));
 			return result;
+			}
+
+		// helper 
+		private static TimeSpan? TryGetBinanceIntervalLength ( string interval )
+			{
+			return interval switch
+				{
+					"1m" => TimeSpan.FromMinutes (1),
+					"3m" => TimeSpan.FromMinutes (3),
+					"5m" => TimeSpan.FromMinutes (5),
+					"15m" => TimeSpan.FromMinutes (15),
+					"30m" => TimeSpan.FromMinutes (30),
+					"1h" => TimeSpan.FromHours (1),
+					"2h" => TimeSpan.FromHours (2),
+					"4h" => TimeSpan.FromHours (4),
+					"6h" => TimeSpan.FromHours (6),
+					"8h" => TimeSpan.FromHours (8),
+					"12h" => TimeSpan.FromHours (12),
+					"1d" => TimeSpan.FromDays (1),
+					"3d" => TimeSpan.FromDays (3),
+					"1w" => TimeSpan.FromDays (7),
+					"1M" => TimeSpan.FromDays (30),
+					_ => null
+					};
 			}
 		}
 	}

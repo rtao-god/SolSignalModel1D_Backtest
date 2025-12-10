@@ -1,18 +1,21 @@
-﻿using Microsoft.ML;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.ML.SL;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
-	    public partial class Program
+	public partial class Program
 		{
 		/// <summary>
 		/// Тренируем SL-модель на каузальном оффлайн-датасете (SlOfflineBuilder)
-		/// и проставляем SlProb / SlHighDecision в PredictionRecord.
+		/// и проставляем SlProb / SlHighDecision / Prob*_Total в PredictionRecord.
 		/// Любые проблемы с данными считаем фатальными и пробрасываем исключения.
 		/// Дополнительно в одном прогоне считаем train-метрики SL-модели
 		/// для нескольких порогов MinMove (0.025/0.030/0.035), чтобы видеть,
@@ -42,9 +45,11 @@ namespace SolSignalModel1D_Backtest
 				throw new InvalidOperationException ("[sl-offline] sol1h is null or empty – 1h candles are required for SL-model.");
 
 			if (_trainUntilUtc == default)
+				{
 				throw new InvalidOperationException (
 					"[sl-offline] _trainUntilUtc is not initialized. " +
 					"CreatePredictionEngineOrFallback must be called before TrainAndApplySlModelOffline.");
+				}
 
 			// Кандидаты порогов MinMove для разделения strong/weak-сигналов.
 			// Все значения в долях (0.03 = 3%).
@@ -180,6 +185,7 @@ namespace SolSignalModel1D_Backtest
 
 			int scored = 0;
 			int predHighDays = 0;
+			int overlayApplied = 0;
 
 			double minProb = double.PositiveInfinity;
 			double maxProb = double.NegativeInfinity;
@@ -188,24 +194,27 @@ namespace SolSignalModel1D_Backtest
 
 			foreach (var rec in records)
 				{
-				// Направление по дневной модели (с учётом микро-слоя)
+				// Направление по дневной модели (с учётом микро-слоя).
 				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
 				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+
 				if (!goLong && !goShort)
 					{
-					// нет торгового сигнала — SL тут не нужен
+					// Нет торгового сигнала – SL не считаем и Prob*_Total не трогаем.
 					continue;
 					}
 
-				// Сильный/слабый сигнал теперь определяется по MinMove,
-				// а не по PredLabel напрямую — и в train, и в runtime.
+				// Сильный/слабый сигнал определяется по MinMove,
+				// и используется и в оффлайн-датасете, и в runtime.
 				double dayMinMove = rec.MinMove > 0 ? rec.MinMove : 0.02;
 				bool strong = SlStrongUtils.IsStrongByMinMove (dayMinMove, rec.RegimeDown, MainStrongMinMoveThreshold);
 
 				double entryPrice = rec.Entry;
 				if (entryPrice <= 0)
+					{
 					throw new InvalidOperationException (
 						$"[sl-runtime] Non-positive entry price {entryPrice} for date {rec.DateUtc:O}.");
+					}
 
 				// Фичи для SL-модели строятся из 1h-контекста вокруг entryUtc.
 				var slFeats = SlFeatureBuilder.Build (
@@ -231,7 +240,17 @@ namespace SolSignalModel1D_Backtest
 				rec.SlHighDecision = predHigh;
 				scored++;
 
-				// Агрегация статистики по вероятностям
+				// Применяем SL-оверлей к Day+Micro-вероятностям → Total.
+				SlOverlayApplier.Apply (
+					rec,
+					slProb: p,
+					goLong: goLong,
+					goShort: goShort,
+					strongSignal: strong);
+
+				overlayApplied++;
+
+				// Агрегация статистики по вероятностям.
 				sumProb += p;
 				probCount++;
 				if (p < minProb) minProb = p;
@@ -239,7 +258,7 @@ namespace SolSignalModel1D_Backtest
 				if (predHigh) predHighDays++;
 				}
 
-			// Логируем период records, чтобы понимать, какие даты реально проверяются
+			// Логируем период records, чтобы понимать, какие даты реально проверяются.
 			if (records.Count > 0)
 				{
 				var recMin = records.Min (r => r.DateUtc);
@@ -254,6 +273,7 @@ namespace SolSignalModel1D_Backtest
 				double avgProb = sumProb / probCount;
 				Console.WriteLine (
 					$"[sl-runtime] scored days = {scored}/{records.Count}, " +
+					$"overlayApplied={overlayApplied}, " +
 					$"predHigh={predHighDays}, " +
 					$"prob range = [{minProb:0.000}..{maxProb:0.000}], avg={avgProb:0.000}, " +
 					$"thr={SlRiskThreshold:0.00}, strongMinMove={MainStrongMinMoveThreshold:P1}");

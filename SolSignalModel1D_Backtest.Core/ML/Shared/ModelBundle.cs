@@ -8,7 +8,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	/// </summary>
 	public sealed class ModelBundle
 		{
-		public MLContext? MlCtx { get; init; }
+		// MLContext логически всегда не null:
+		// он создаётся один раз в тренере и всегда прокидывается в бандл.
+		// Инициализация через null! нужна только для успокоения анализатора
+		// до момента, когда значение будет задано через init-сеттер.
+		public MLContext MlCtx { get; init; } = null!;
 
 		// 1. модель "будет ли ход вообще"
 		public ITransformer? MoveModel { get; init; }

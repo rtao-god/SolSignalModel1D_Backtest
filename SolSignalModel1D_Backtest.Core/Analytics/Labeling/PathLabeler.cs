@@ -14,7 +14,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 		/// Горизонт берём не "тупо +24 часа", а до следующего
 		/// рабочего NY-утра (через Windowing.ComputeBaselineExitUtc).
 		/// </summary>
-		
+
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
 		public static int AssignLabel (
@@ -32,12 +32,58 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 			reachedUpPct = 0.0;
 			reachedDownPct = 0.0;
 
-			// базовая защита
-			if (minutes == null || minutes.Count == 0 || entryPrice <= 0.0 || minMove <= 0.0)
-				return 1; // flat по умолчанию
+			// Жёсткая валидация входных аргументов:
+			// если данные не подготовлены или параметры некорректны
+			if (minutes == null)
+				{
+				// null-коллекция – значит не были подтянуты минутки под указанный горизонт
+				throw new ArgumentNullException (
+					nameof (minutes),
+					"PathLabeler.AssignLabel: minutes collection is null. " +
+					"Ensure 1m candles are preloaded for the baseline horizon before calling labeler.");
+				}
 
-			DateTime endUtc;			
-				endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: NyTz);
+			if (minutes.Count == 0)
+				{
+				// Пустая коллекция – также ошибка подготовки данных.
+				throw new InvalidOperationException (
+					"PathLabeler.AssignLabel: minutes collection is empty. " +
+					$"entryUtc={entryUtc:o}. Ensure 1m candles are fetched for the requested horizon.");
+				}
+
+			if (entryPrice <= 0.0)
+				{
+				// Нулевой/отрицательный entryPrice свидетельствует о битых OHLC-данных.
+				throw new ArgumentOutOfRangeException (
+					nameof (entryPrice),
+					entryPrice,
+					"PathLabeler.AssignLabel: entryPrice must be > 0. " +
+					"Check upstream OHLC data source.");
+				}
+
+			if (minMove <= 0.0)
+				{
+				// Порог движения должен быть положительным, иначе стакан меток некорректен.
+				throw new ArgumentOutOfRangeException (
+					nameof (minMove),
+					minMove,
+					"PathLabeler.AssignLabel: minMove must be > 0. " +
+					"Check labeling configuration.");
+				}
+
+			DateTime endUtc;
+			try
+				{
+				endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
+				}
+			catch (Exception ex)
+				{
+				// Явно ломаемся с понятным сообщением
+				throw new InvalidOperationException (
+					$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}. " +
+					"Fix data/windowing logic instead of relying on fallback.",
+					ex);
+				}
 
 			var dayMins = minutes
 				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < endUtc)

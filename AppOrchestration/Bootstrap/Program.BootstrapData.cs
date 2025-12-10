@@ -13,21 +13,24 @@ namespace SolSignalModel1D_Backtest
 		/// 1) UpdateCandlesAsync;
 		/// 2) LoadAllCandlesAndWindow;
 		/// 3) BuildIndicatorsAsync;
-		/// 4) BuildDailyRowsBundleAsync.
+		/// 4) BuildDailyRowsAsync.
 		/// Возвращает единый контейнер BootstrapData вместо out-параметров.
 		/// </summary>
 		private static async Task<BootstrapData> BootstrapDataAsync ()
 			{
 			// HttpClient используется только здесь и корректно утилизируется.
+			// Это избегает глобального статика и даёт явный контроль над временем жизни.
 			using var http = new HttpClient ();
 
 			// --- 1. Обновление свечей (сетевой блок) ---
+			// Обновляем историю по SOL/BTC/PAXG (полный бэкофилл или догонка хвостов).
 			await PerfLogging.MeasureAsync (
 				"UpdateCandlesAsync",
 				() => UpdateCandlesAsync (http)
 			);
 
 			// --- 2. Загрузка всех таймфреймов и окна бэктеста ---
+			// Здесь формируется единый набор рядов (6h/1h/1m) и окно [fromUtc, toUtc].
 			LoadAllCandlesAndWindow (
 				out var solAll6h,
 				out var btcAll6h,
@@ -39,15 +42,19 @@ namespace SolSignalModel1D_Backtest
 			);
 
 			// --- 3. Индикаторы ---
+			// Строим/обновляем дневные индикаторы в расширенном окне,
+			// чтобы на границе fromUtc не было "сырых" значений.
 			var indicators = await PerfLogging.MeasureAsync (
 				"BuildIndicatorsAsync",
 				() => BuildIndicatorsAsync (http, fromUtc, toUtc)
 			);
 
 			// --- 4. Дневные строки (allRows + mornings) ---
+			// Единственный источник правды для построения allRows/mornings — BuildDailyRowsAsync.
+			// Здесь же логируется гистограмма по NY-часам и базовая диагностика.
 			var rowsBundle = await PerfLogging.MeasureAsync (
-				"BuildDailyRowsBundleAsync",
-				() => BuildDailyRowsBundleAsync (
+				"BuildDailyRowsAsync",
+				() => BuildDailyRowsAsync (
 					indicators,
 					fromUtc,
 					toUtc,
@@ -58,7 +65,7 @@ namespace SolSignalModel1D_Backtest
 				)
 			);
 
-			// Собираем всё в один объект, чтобы не плодить out/ref.
+			// Собираем всё в один объект, чтобы не плодить out/ref и не разносить связанное состояние.
 			return new BootstrapData
 				{
 				SolAll6h = solAll6h,

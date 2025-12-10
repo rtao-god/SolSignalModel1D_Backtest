@@ -1,9 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Trading;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 
 namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
@@ -16,30 +12,20 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 	/// </summary>
 	public static partial class PnlCalculator
 		{
-		// === Константы комиссии/капитала ===
-		private const double CommissionRate = 0.0004;     // ~Binance Taker 4 б.п. на вход/выход
+		private const double CommissionRate = 0.0004;
 		private const double TotalCapital = 20000.0;
 
-		// === Распределение капитала по бакетам ===
 		private const double DailyShare = 0.60;
-		private const double IntradayShare = 0.25;        // бакет зарезервирован, сейчас не торгуем
+		private const double IntradayShare = 0.25;
 		private const double DelayedShare = 0.15;
 
-		// === Размер позиции внутри бакета (доля бакета) ===
 		private const double DailyPositionFraction = 1.0;
-		private const double IntradayPositionFraction = 0.0; // интрадей пока отключен
+		private const double IntradayPositionFraction = 0.0;
 		private const double DelayedPositionFraction = 0.4;
 
 		// ---------------------------------------------------------------------
 		// ПОДДЕРЖКА СТАРОГО ВЫЗОВА
 		// ---------------------------------------------------------------------
-		/// <summary>
-		/// Старый вариант сигнатуры (для совместимости).
-		/// useStopLoss → управляет SL и в daily, и в delayed.
-		/// dailyStopPct → дневной SL (% от цены входа).
-		/// TP фиксирован 3%.
-		/// Доп. флаг useAntiDirectionOverlay → включить Anti-D overlay в PnL.
-		/// </summary>
 		public static void ComputePnL (
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
@@ -72,23 +58,14 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				useDelayedIntradayStops: useStopLoss,
 				dailyTpPct: 0.03,
 				dailyStopPct: dailyStopPct <= 0 ? 0.05 : dailyStopPct,
-				useAntiDirectionOverlay: useAntiDirectionOverlay
+				useAntiDirectionOverlay: useAntiDirectionOverlay,
+				predictionMode: PnlPredictionMode.DayOnly
 			);
 			}
 
 		// ---------------------------------------------------------------------
 		// ОСНОВНОЙ СОВРЕМЕННЫЙ ВАРИАНТ
 		// ---------------------------------------------------------------------
-		/// <summary>
-		/// Главный расчёт PnL.
-		/// - useDailyStopLoss: управляет дневным SL (без него — только TP или close по baseline-выходу).
-		/// - useDelayedIntradayStops: управляет уважением к intraday SL в delayed-модели (SlFirst).
-		/// - dailyTpPct: дневной TP (по умолчанию 3%).
-		/// - dailyStopPct: дневной SL (по умолчанию 5%).
-		/// - useAntiDirectionOverlay: переворачивать ли направление сделки (Anti-D) по правилам SL/волатильности.
-		/// Все сделки живут в окне [entryUtc; baselineExitUtc),
-		/// где baselineExitUtc = следующее NY-утро 08:00 рабочего дня минус 2 минуты.
-		/// </summary>
 		public static void ComputePnL (
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
@@ -105,20 +82,15 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			bool useDelayedIntradayStops = true,
 			double dailyTpPct = 0.03,
 			double dailyStopPct = 0.05,
-			bool useAntiDirectionOverlay = false )
+			bool useAntiDirectionOverlay = false,
+			PnlPredictionMode predictionMode = PnlPredictionMode.DayOnly )
 			{
 			if (candles1m == null || candles1m.Count == 0)
 				throw new InvalidOperationException ("[pnl] 1m candles are required for liquidation/TP/SL.");
 
-			// Сортируем минутки по времени, чтобы дальнейшие срезы работали корректно.
 			var m1 = candles1m.OrderBy (m => m.OpenTimeUtc).ToList ();
-
-			// Для быстрого поиска окон по времени (dayStart/dayEnd) собираем
-			// отдельный массив timestamp'ов и используем бинарный поиск.
-			// Это снимает O(N * days) по Where() на весь m1.
 			var m1Times = m1.Select (m => m.OpenTimeUtc).ToList ();
 
-			// Агрегированная статистика по Anti-D overlay за один прогон ComputePnL.
 			int antiDChecked = 0;
 			int antiDApplied = 0;
 			int[] antiDByPredLabel = new int[3];
@@ -129,7 +101,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			double antiDMinMoveMin = double.MaxValue;
 			double antiDMinMoveMax = 0.0;
 
-			// Журналы результатов
 			var resultTrades = new List<PnLTrade> ();
 			var resultBySource = new Dictionary<string, int> (StringComparer.OrdinalIgnoreCase);
 			var buckets = InitBuckets ();
@@ -138,8 +109,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 			bool anyLiquidation = false;
 			bool globalDead = false;
 
-			// Локальная функция: бинарный поиск "нижней границы":
-			// индекс первого элемента >= value.
 			static int LowerBound ( List<DateTime> arr, DateTime value )
 				{
 				int lo = 0;
@@ -157,7 +126,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				return lo;
 				}
 
-			// Локальная функция: срез минуток по [startUtc; endUtc) через индексы.
 			static List<Candle1m> SliceByTime (
 				List<Candle1m> all,
 				List<DateTime> times,
@@ -168,7 +136,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				if (startUtc >= endUtc) return new List<Candle1m> ();
 
 				var startIdx = LowerBound (times, startUtc);
-				var endIdx = LowerBound (times, endUtc); // правая граница, не включительно
+				var endIdx = LowerBound (times, endUtc);
 
 				if (startIdx >= all.Count || startIdx >= endIdx)
 					return new List<Candle1m> ();
@@ -177,7 +145,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				return all.GetRange (startIdx, count);
 				}
 
-			// ЛОКАЛЬНАЯ ФУНКЦИЯ: регистрация трейда + обновление бакета/метрик.
 			void RegisterTrade (
 				DateTime dayUtc,
 				DateTime entryTimeUtc,
@@ -300,14 +267,45 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 					resultBySource[source] = cnt + 1;
 				}
 
-			// ===== Основной цикл по "дневным" записям PredictionRecord =====
+			// ===== Основной цикл по PredictionRecord =====
 			foreach (var rec in records.OrderBy (r => r.DateUtc))
 				{
 				if (globalDead) break;
 
-				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
-				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
-				if (!goLong && !goShort) continue;
+				bool goLong;
+				bool goShort;
+
+				switch (predictionMode)
+					{
+					case PnlPredictionMode.DayOnly:
+							{
+							goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
+							goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+							break;
+							}
+					case PnlPredictionMode.DayPlusMicro:
+							{
+							int cls = rec.PredLabel_DayMicro;
+							goLong = cls == 2;
+							goShort = cls == 0;
+							break;
+							}
+					case PnlPredictionMode.DayPlusMicroPlusSl:
+							{
+							double up = rec.ProbUp_Total;
+							double down = rec.ProbDown_Total;
+							double flat = rec.ProbFlat_Total;
+
+							goLong = up > down && up > flat;
+							goShort = down > up && down > flat;
+							break;
+							}
+					default:
+						throw new ArgumentOutOfRangeException (nameof (predictionMode), predictionMode, "Unknown prediction mode");
+					}
+
+				if (!goLong && !goShort)
+					continue;
 
 				if (TradeSkipRules.ShouldSkipDay (rec, policy))
 					continue;
@@ -358,8 +356,6 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 				DateTime dayStart = rec.DateUtc;
 				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
 
-				// Оптимизированный срез: вместо Where() по всему m1,
-				// берём диапазон индексов через бинарный поиск по времени.
 				var dayMinutes = SliceByTime (m1, m1Times, dayStart, dayEnd);
 
 				if (dayMinutes.Count == 0)
@@ -371,7 +367,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 					throw new InvalidOperationException (
 						$"[pnl] PredictionRecord.Entry must be positive at {rec.DateUtc:yyyy-MM-dd}.");
 
-				// ===== DAILY (TP/SL/Close по baseline-окну) =====
+				// ===== DAILY =====
 					{
 					double slPct = useDailyStopLoss ? dailyStopPct : 0.0;
 
@@ -401,7 +397,7 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Pnl
 
 				if (globalDead) break;
 
-				// ===== DELAYED (отложенный вход + intraday-результат) =====
+				// ===== DELAYED =====
 				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedEntryExecuted)
 					{
 					bool dLong = goLong;

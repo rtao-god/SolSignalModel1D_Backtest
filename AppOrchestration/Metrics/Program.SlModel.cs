@@ -1,6 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using SolSignalModel1D_Backtest.Utils;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -18,11 +19,12 @@ namespace SolSignalModel1D_Backtest
 			List<Candle6h> solAll6h
 		)
 			{
-			var slTrainRows = allRows
-				.Where (r => r.Date <= _trainUntilUtc)
-				.ToList ();
+			// Централизованное разбиение на train/OOS, чтобы везде использовать
+			// один и тот же критерий Date <= _trainUntilUtc.
+			var (slTrainRows, _) = TrainOosSplitHelper.SplitByTrainBoundary (allRows, _trainUntilUtc);
 
 			// Основная логика SL-модели остаётся в отдельном методе, сюда вынесен только «проводящий» код.
+			// На вход TrainAndApplySlModelOffline передаётся уже train-сабсет.
 			TrainAndApplySlModelOffline (
 				allRows: slTrainRows,
 				records: records,

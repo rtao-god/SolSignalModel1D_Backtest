@@ -1,8 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Net.Http;
-using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Data.Candles;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Core.Infra;
 
@@ -10,6 +6,13 @@ namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
+		/// <summary>
+		/// Специальный флаг для тестов:
+		/// если true, UpdateCandlesAsync вообще не трогает сеть и файлы.
+		/// В прод-запуске ДОЛЖЕН оставаться false.
+		/// </summary>
+		public static bool DebugSkipCandleUpdatesForTests { get; set; } = false;
+
 		/// <summary>
 		/// Стартовая дата для полной истории свечей.
 		/// Всё, что раньше, модели не нужно и не гарантируется.
@@ -31,7 +34,6 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine ($"[update] {symbol}-{tfSuffix}: file not found at {path}");
 				return;
 				}
-
 
 			var store = new CandleNdjsonStore (path);
 			var first = store.TryGetFirstTimestampUtc ();
@@ -73,24 +75,32 @@ namespace SolSignalModel1D_Backtest
 			}
 
 		/// <summary>
-		/// После чистки проверяет, нужен ли этому символу полный бэкофилл.
-		/// Критерий: если нет хотя бы одного TF-файла (1m/1h/6h) — нужен полный бэкофилл.
-		/// </summary>
-
-		/// <summary>
 		/// Обновляет свечи SOL/USDT, BTC/USDT и PAXG/USDT.
 		/// Контракт:
 		/// - если по символу нет полной истории (любого TF) → выполняется полный бэкофилл с FullBackfillFromUtc;
 		/// - иначе догоняются только хвосты по всем TF.
 		/// Любые ошибки из CandleDailyUpdater пробрасываются наверх.
+		/// 
+		/// Если DebugSkipCandleUpdatesForTests == true, метод просто логирует и выходит,
+		/// чтобы тесты не ходили в сеть и не трогали диапазоны дат.
 		/// </summary>
 		private static async Task UpdateCandlesAsync ( HttpClient http )
 			{
+			if (DebugSkipCandleUpdatesForTests)
+				{
+				Console.WriteLine (
+					$"[update] DebugSkipCandleUpdatesForTests = true, skipping candle updates (tests). " +
+					$"FullBackfillFromUtc={FullBackfillFromUtc:O}");
+				return;
+				}
+
 			var solSymbol = TradingSymbols.SolUsdtInternal;
 			var btcSymbol = TradingSymbols.BtcUsdtInternal;
 			var paxgSymbol = TradingSymbols.PaxgUsdtInternal;
 
-			Console.WriteLine ($"[update] solSymbol = {solSymbol}, btcSymbol = {btcSymbol}, paxgSymbol = {paxgSymbol}");
+			Console.WriteLine (
+				$"[update] solSymbol = {solSymbol}, btcSymbol = {btcSymbol}, paxgSymbol = {paxgSymbol}");
+			Console.WriteLine ($"[update] FullBackfillFromUtc = {FullBackfillFromUtc:O}");
 
 			// 1. Чистим некорректные/укороченные файлы по каждому символу.
 			EnsureSymbolHistoryOrDeleteBad (solSymbol);
@@ -102,7 +112,8 @@ namespace SolSignalModel1D_Backtest
 			bool btcNeedsFull = NeedsFullBackfill (btcSymbol);
 			bool paxgNeedsFull = NeedsFullBackfill (paxgSymbol);
 
-			Console.WriteLine ($"[update] NeedsFullBackfill: SOL={solNeedsFull}, BTC={btcNeedsFull}, PAXG={paxgNeedsFull}");
+			Console.WriteLine (
+				$"[update] NeedsFullBackfill: SOL={solNeedsFull}, BTC={btcNeedsFull}, PAXG={paxgNeedsFull}");
 
 			var solUpdater = new CandleDailyUpdater (
 				http,
@@ -125,11 +136,23 @@ namespace SolSignalModel1D_Backtest
 				catchupDays: 3
 			);
 
+			// Явно логируем, с каким fromUtc идёт каждый апдейт.
+			DateTime? solFrom = solNeedsFull ? FullBackfillFromUtc : (DateTime?) null;
+			DateTime? btcFrom = btcNeedsFull ? FullBackfillFromUtc : (DateTime?) null;
+			DateTime? paxgFrom = paxgNeedsFull ? FullBackfillFromUtc : (DateTime?) null;
+
+			Console.WriteLine (
+				$"[update] SOL UpdateAllAsync: mode={(solNeedsFull ? "full" : "tail")}, from={(solFrom.HasValue ? solFrom.Value.ToString ("O") : "auto")}");
+			Console.WriteLine (
+				$"[update] BTC UpdateAllAsync: mode={(btcNeedsFull ? "full" : "tail")}, from={(btcFrom.HasValue ? btcFrom.Value.ToString ("O") : "auto")}");
+			Console.WriteLine (
+				$"[update] PAXG UpdateAllAsync: mode={(paxgNeedsFull ? "full" : "tail")}, from={(paxgFrom.HasValue ? paxgFrom.Value.ToString ("O") : "auto")}");
+
 			await Task.WhenAll
 			(
-				solUpdater.UpdateAllAsync (solNeedsFull ? FullBackfillFromUtc : (DateTime?) null),
-				btcUpdater.UpdateAllAsync (btcNeedsFull ? FullBackfillFromUtc : (DateTime?) null),
-				paxgUpdater.UpdateAllAsync (paxgNeedsFull ? FullBackfillFromUtc : (DateTime?) null)
+				solUpdater.UpdateAllAsync (solFrom),
+				btcUpdater.UpdateAllAsync (btcFrom),
+				paxgUpdater.UpdateAllAsync (paxgFrom)
 			);
 			}
 		}

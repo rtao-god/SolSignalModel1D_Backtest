@@ -7,19 +7,26 @@ using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 using SolSignalModel1D_Backtest.Reports.CurrentPrediction;
 using SolSignalModel1D_Backtest.Reports.Reporting;
 using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 	{
 	public static class BacktestReportsOrchestrator
 		{
+		/// <summary>
+		/// Окно истории для бэкфилла "текущего прогноза" (по умолчанию 60 дней).
+		/// Это число можно легко править в будущем.
+		/// </summary>
+		public const int CurrentPredictionHistoryWindowDays = CurrentPredictionSnapshotBuilder.DefaultHistoryWindowDays;
+
 		public static void SavePfiReports ()
 			{
 			try
@@ -246,6 +253,10 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 				}
 			}
 
+		/// <summary>
+		/// Строит и сохраняет ОДИН отчёт "текущий прогноз" по последней записи.
+		/// Поведение старого API сохранено.
+		/// </summary>
 		public static void SaveCurrentPredictionReport (
 			IReadOnlyList<PredictionRecord> records,
 			IReadOnlyList<ILeveragePolicy> leveragePolicies,
@@ -262,14 +273,32 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 					walletBalanceUsd: walletBalanceUsd
 				);
 
+				// Берём глобальные PFI-снимки и добавляем топ-фичи по нужной модели.
+				CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots (
+					snapshot: currentSnapshot,
+					tagFilter: "train:dir-normal"
+				);
+
+				var pfiSnapshots = FeatureImportanceSnapshots.GetSnapshots ();
+				var dirSnapshot = pfiSnapshots
+					.LastOrDefault (s => s.Tag.Contains ("dir", StringComparison.OrdinalIgnoreCase));
+
+				if (dirSnapshot != null)
+					{
+					CurrentPredictionPfiExplanation.AppendTopFeaturesFromSnapshot (
+						snapshot: currentSnapshot,
+						pfiSnapshot: dirSnapshot
+					);
+					}
+
 				if (currentSnapshot == null)
 					{
 					Console.WriteLine ("[current-report] snapshot not built (no records or policies).");
 					return;
 					}
 
-				Core.Analytics.CurrentPrediction.CurrentPredictionPrinter
-					.Print (currentSnapshot);
+				// Полный вывод в консоль (включая ExplanationItems).
+				CurrentPredictionPrinter.Print (currentSnapshot);
 
 				var report = CurrentPredictionReportBuilder.Build (currentSnapshot);
 
@@ -286,6 +315,130 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 			catch (Exception ex)
 				{
 				Console.WriteLine ($"[current-report] error while building/saving snapshot/report: {ex.Message}");
+				}
+			}
+
+		/// <summary>
+		/// Бэкфилл отчётов "текущий прогноз" за последние historyWindowDays дней.
+		/// Для каждого дня строится снапшот + ReportDocument (kind = "current_prediction").
+		/// Отчёты сохраняются через ReportStorage.
+		/// </summary>
+		public static void SaveCurrentPredictionHistoryReports (
+			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<ILeveragePolicy> leveragePolicies,
+			double walletBalanceUsd = 200.0,
+			int historyWindowDays = CurrentPredictionHistoryWindowDays )
+			{
+			if (records == null) throw new ArgumentNullException (nameof (records));
+			if (leveragePolicies == null) throw new ArgumentNullException (nameof (leveragePolicies));
+
+			if (records.Count == 0)
+				{
+				Console.WriteLine ("[current-report-history] no records, history not built.");
+				return;
+				}
+
+			if (leveragePolicies.Count == 0)
+				{
+				Console.WriteLine ("[current-report-history] no leverage policies, history not built.");
+				return;
+				}
+
+			if (historyWindowDays <= 0)
+				{
+				historyWindowDays = CurrentPredictionHistoryWindowDays;
+				}
+
+			try
+				{
+				var snapshots = CurrentPredictionSnapshotBuilder.BuildHistory (
+					records: records,
+					policies: leveragePolicies,
+					walletBalanceUsd: walletBalanceUsd,
+					historyWindowDays: historyWindowDays
+				);
+
+				if (snapshots.Count == 0)
+					{
+					Console.WriteLine ($"[current-report-history] no snapshots for last {historyWindowDays} days.");
+					return;
+					}
+
+				var storage = new ReportStorage ();
+
+				foreach (var snapshot in snapshots)
+					{
+					CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots (
+						snapshot,
+						tagFilter: "train:dir-normal"
+					);
+
+					var report = CurrentPredictionReportBuilder.Build (snapshot);
+					storage.Save (report);
+					}
+
+				var minDateUtc = snapshots.First ().PredictionDateUtc.Date;
+				var maxDateUtc = snapshots.Last ().PredictionDateUtc.Date;
+
+				Console.WriteLine (
+					$"[current-report-history] saved {snapshots.Count} current_prediction reports " +
+					$"for period {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd} (windowDays={historyWindowDays}).");
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[current-report-history] error while building/saving history: {ex.Message}");
+				}
+			}
+
+		/// <summary>
+		/// Строит и сохраняет отчёт "текущий прогноз" за конкретную дату (UTC).
+		/// Берётся последняя PredictionRecord с DateUtc.Date == predictionDateUtc.Date.
+		/// Это заготовка под API/фронт для выбора даты из всей выборки.
+		/// </summary>
+		public static void SaveCurrentPredictionReportForDate (
+			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<ILeveragePolicy> leveragePolicies,
+			DateTime predictionDateUtc,
+			double walletBalanceUsd = 200.0 )
+			{
+			if (records == null) throw new ArgumentNullException (nameof (records));
+			if (leveragePolicies == null) throw new ArgumentNullException (nameof (leveragePolicies));
+
+			if (records.Count == 0)
+				{
+				Console.WriteLine ("[current-report-by-date] no records, report not built.");
+				return;
+				}
+
+			if (leveragePolicies.Count == 0)
+				{
+				Console.WriteLine ("[current-report-by-date] no leverage policies, report not built.");
+				return;
+				}
+
+			try
+				{
+				var snapshot = CurrentPredictionSnapshotBuilder.BuildForDate (
+					records: records,
+					policies: leveragePolicies,
+					walletBalanceUsd: walletBalanceUsd,
+					predictionDateUtc: predictionDateUtc
+				);
+
+				// Выводим в консоль именно выбранный день.
+				CurrentPredictionPrinter.Print (snapshot);
+
+				var report = CurrentPredictionReportBuilder.Build (snapshot);
+
+				var storage = new ReportStorage ();
+				storage.Save (report);
+
+				Console.WriteLine (
+					$"[current-report-by-date] current_prediction report saved for {snapshot.PredictionDateUtc:yyyy-MM-dd} (UTC).");
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[current-report-by-date] error while building/saving report: {ex.Message}");
 				}
 			}
 		}

@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.Indicators;
+﻿using SolSignalModel1D_Backtest.Core.Data.Indicators;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -21,9 +16,11 @@ namespace SolSignalModel1D_Backtest
 			DateTime fromUtc,
 			DateTime toUtc )
 			{
+			// Отдельный апдейтер для дневных индикаторов (FNG/DXY/другие рядовые фичи).
 			var indicators = new IndicatorsDailyUpdater (http);
 
 			// Берётся чуть расширенное окно, чтобы индикаторы были стабильными в начале интервала.
+			// Альтернатива — начинать ровно с fromUtc, но тогда первые дни будут "греться".
 			var indicatorsFrom = fromUtc.AddDays (-90);
 
 			await indicators.UpdateAllAsync (
@@ -31,35 +28,11 @@ namespace SolSignalModel1D_Backtest
 				toUtc,
 				IndicatorsDailyUpdater.FillMode.NeutralFill);
 
+			// Явно валидируем, что для всего интервала есть данные.
+			// Это делает падение ранним и предсказуемым, а не в глубине пайплайна.
 			indicators.EnsureCoverageOrFail (indicatorsFrom, toUtc);
 
 			return indicators;
-			}
-
-		/// <summary>
-		/// Строит дневные строки:
-		/// - allRows — все дни в окне;
-		/// - mornings — отфильтрованные утренние точки в NY-окне.
-		/// </summary>
-		private static async Task<DailyRowsBundle> BuildDailyRowsBundleAsync (
-			IndicatorsDailyUpdater indicators,
-			DateTime fromUtc,
-			DateTime toUtc,
-			List<Candle6h> solAll6h,
-			List<Candle6h> btcAll6h,
-			List<Candle6h> paxgAll6h,
-			List<Candle1m> sol1m )
-			{
-			var rowsBundle = await BuildDailyRowsAsync (
-				indicators,
-				fromUtc,
-				toUtc,
-				solAll6h,
-				btcAll6h,
-				paxgAll6h,
-				sol1m);
-
-			return rowsBundle;
 			}
 		}
 	}

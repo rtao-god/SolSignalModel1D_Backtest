@@ -3,7 +3,7 @@ using System.Linq;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers
 	{

@@ -2,7 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{

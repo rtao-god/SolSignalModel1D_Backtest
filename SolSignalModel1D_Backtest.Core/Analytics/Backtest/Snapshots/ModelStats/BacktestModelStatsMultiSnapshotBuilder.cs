@@ -60,13 +60,19 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			var maxDateUtc = ordered.Last ().DateUtc;
 
 			// 2) Сегменты по границе trainUntilUtc.
-			var trainRecords = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
+			var trainRecords = new List<PredictionRecord> ();
+			var oosRecords = new List<PredictionRecord> ();
 
-			var oosRecords = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+			foreach (var r in ordered)
+				{
+				// та же логика, что и при обучении (DailyDatasetBuilder.FilterByBaselineExit)
+				var exitUtc = Windowing.ComputeBaselineExitUtc (r.DateUtc, nyTz);
+
+				if (exitUtc <= trainUntilUtc)
+					trainRecords.Add (r);  // это "train" и для метрик
+				else
+					oosRecords.Add (r);    // это "OOS" для метрик
+				}
 
 			var fullRecords = ordered;
 

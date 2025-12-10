@@ -1,9 +1,11 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Infra.Perf;
+using SolSignalModel1D_Backtest.Core.ML.Daily;
+using SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL;
+using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -29,25 +31,19 @@ namespace SolSignalModel1D_Backtest
 			// всё, что ниже, попадёт в "фактическое время работы" в PerfLogging.
 			PerfLogging.StartApp ();
 
-			// Логируем инфо о среде — помогает отслеживать странные баги.
-			Console.WriteLine ($".NET runtime: {Environment.Version}, 64bit={Environment.Is64BitProcess}");
-
 			// --- 1. Бутстрап свечей и дневных строк ---
 			// Внешний PerfLogging.MeasureAsync — для общей Σ времени,
 			// внутренний PerfBlockLogger.MeasureAsync — для старых [perf]-логов.
 			var (allRows, mornings, solAll6h, solAll1h, sol1m) =
-				await PerfLogging.MeasureAsync<
-					(List<DataRow> AllRows,
-						List<DataRow> Mornings,
-						List<Candle6h> SolAll6h,
-						List<Candle1h> SolAll1h,
-						List<Candle1m> Sol1m)> (
+				await PerfLogging.MeasureAsync (
 					"(top) BootstrapRowsAndCandlesAsync",
-					() => PerfBlockLogger.MeasureAsync (
-						"(top) BootstrapRowsAndCandlesAsync",
-						() => BootstrapRowsAndCandlesAsync ()
-					)
-				);
+					() =>
+						PerfBlockLogger.MeasureAsync (
+							"(top) BootstrapRowsAndCandlesAsync",
+							() => BootstrapRowsAndCandlesAsync ()
+						)
+			);
+
 
 			// --- 2. Дневная модель: PredictionEngine + forward-метрики ---
 			var records = await PerfLogging.MeasureAsync (
@@ -57,6 +53,14 @@ namespace SolSignalModel1D_Backtest
 					() => BuildPredictionRecordsAsync (allRows, mornings, solAll6h)
 				)
 			);
+
+			// Честная train-accuracy по тем строкам, которые реально попали в train-датасет
+			DumpDailyAccuracyWithDatasetSplit (allRows, records, _trainUntilUtc);
+
+			// Консольная проверка разделения train/OOS и accuracy дневной модели на реальных данных.
+			RuntimeLeakageDebug.PrintDailyModelTrainOosProbe (records, _trainUntilUtc, boundarySampleCount: 2);
+
+			DailyPnlProbe.RunSimpleProbe (records, _trainUntilUtc);
 
 			// --- 3. SL-модель (офлайн) поверх дневных предсказаний ---
 			PerfLogging.Measure (
@@ -168,6 +172,43 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine ("[daily] oos TrueLabel hist: " + Hist (oos.Select (r => r.TrueLabel)));
 				Console.WriteLine ("[daily] oos PredLabel hist: " + Hist (oos.Select (r => r.PredLabel)));
 				}
+			}
+
+		private static void DumpDailyAccuracyWithDatasetSplit (
+			List<DataRow> allRows,
+			List<PredictionRecord> records,
+			DateTime trainUntilUtc )
+			{
+			// собираем датасет так же, как внутри ModelTrainer
+			var dataset = DailyDatasetBuilder.Build (
+				allRows: allRows,
+				trainUntil: trainUntilUtc,
+				balanceMove: false,   // можно подставить те же флаги, что и в ModelTrainer
+				balanceDir: true,
+				balanceTargetFrac: 0.70,
+				datesToExclude: null);
+
+			var trainDates = new HashSet<DateTime> (
+				dataset.TrainRows.Select (r => r.Date));
+
+			var trainRecords = records
+				.Where (r => trainDates.Contains (r.DateUtc))
+				.ToList ();
+
+			var oosRecords = records
+				.Where (r => r.DateUtc > trainUntilUtc)
+				.ToList ();
+
+			double TrainAcc ( List<PredictionRecord> xs ) =>
+				xs.Count == 0
+					? double.NaN
+					: xs.Count (r => r.PredLabel == r.TrueLabel) / (double) xs.Count;
+
+			var trainAcc = TrainAcc (trainRecords);
+			var oosAcc = TrainAcc (oosRecords);
+
+			Console.WriteLine ($"[daily-acc] trainAcc(dataset-based) = {trainAcc:0.000}");
+			Console.WriteLine ($"[daily-acc] oosAcc(date-based)      = {oosAcc:0.000}");
 			}
 		}
 	}

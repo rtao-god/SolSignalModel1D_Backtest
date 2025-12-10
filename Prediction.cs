@@ -1,8 +1,11 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -23,7 +26,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
 			{
-			PredictionEngine.DebugAllowDisabledModels = true;
+			PredictionEngine.DebugAllowDisabledModels = false;
 
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 			if (allRows.Count == 0)
@@ -83,10 +86,10 @@ namespace SolSignalModel1D_Backtest
 
 			var trainer = new ModelTrainer
 				{
-					DisableMoveModel = false,           // отключаем move
-					DisableDirNormalModel = false,
-					DisableDirDownModel = true,
-					DisableMicroFlatModel = false
+				DisableMoveModel = false,           // отключаем move
+				DisableDirNormalModel = false,
+				DisableDirDownModel = false,
+				DisableMicroFlatModel = false
 				};
 			var bundle = trainer.TrainAll (trainRows);
 
@@ -161,11 +164,19 @@ namespace SolSignalModel1D_Backtest
 					"Стратегические метрики будут train-like.");
 				}
 
+			// Локальный argmax для PredLabel_Day / PredLabel_DayMicro / PredLabel_Total.
+			static int ArgmaxLabel ( double pUp, double pFlat, double pDown )
+				{
+				if (pUp >= pFlat && pUp >= pDown) return 2;
+				if (pDown >= pFlat && pDown >= pUp) return 0;
+				return 1;
+				}
+
 			var list = new List<PredictionRecord> (orderedMornings.Count);
 
 			foreach (var r in orderedMornings)
 				{
-				// Предсказание только через PredictionEngine (дневная модель + микро).
+				// Предсказание через PredictionEngine (дневная модель + микро).
 				var pr = engine.Predict (r);
 				var cls = pr.Class;
 				var microUp = pr.Micro.ConsiderUp;
@@ -193,7 +204,7 @@ namespace SolSignalModel1D_Backtest
 						? sorted6h[i + 1].OpenTimeUtc
 						: start.AddHours (6);
 
-					if (exitUtc >= start && exitUtc <= end)
+					if (exitUtc >= start && exitUtc < end)
 						{
 						exitIdx = i;
 						break;
@@ -233,23 +244,65 @@ namespace SolSignalModel1D_Backtest
 
 				var fwdClose = sorted6h[exitIdx].Close;
 
+				// Вероятности из PredictionEngine.
+				var day = pr.Day;
+				var dayWithMicro = pr.DayWithMicro;
+
+				var predLabelDay = ArgmaxLabel (day.PUp, day.PFlat, day.PDown);
+				var predLabelDayMicro = ArgmaxLabel (dayWithMicro.PUp, dayWithMicro.PFlat, dayWithMicro.PDown);
+
+				// На этом этапе Total = Day+Micro. SL-оверлей (RunSlModelOffline) при необходимости обновит эти поля.
+				double probUpTotal = dayWithMicro.PUp;
+				double probFlatTotal = dayWithMicro.PFlat;
+				double probDownTotal = dayWithMicro.PDown;
+				int predLabelTotal = predLabelDayMicro;
+
 				list.Add (new PredictionRecord
 					{
 					DateUtc = r.Date,
+
+					// факт + "старый" PredLabel (как и раньше)
 					TrueLabel = r.Label,
 					PredLabel = cls,
+
+					// Day-слой
+					PredLabel_Day = predLabelDay,
+					ProbUp_Day = day.PUp,
+					ProbFlat_Day = day.PFlat,
+					ProbDown_Day = day.PDown,
+					Conf_Day = day.Confidence,
+
+					// Day+Micro
+					PredLabel_DayMicro = predLabelDayMicro,
+					ProbUp_DayMicro = dayWithMicro.PUp,
+					ProbFlat_DayMicro = dayWithMicro.PFlat,
+					ProbDown_DayMicro = dayWithMicro.PDown,
+					Conf_Micro = dayWithMicro.Confidence,
+
+					// Total (пока = Day+Micro; SL-оверлей обновит при наличии)
+					PredLabel_Total = predLabelTotal,
+					ProbUp_Total = probUpTotal,
+					ProbFlat_Total = probFlatTotal,
+					ProbDown_Total = probDownTotal,
+
+					// микро-факт / прогноз
 					PredMicroUp = microUp,
 					PredMicroDown = microDn,
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown,
+
+					// цены дня
 					Entry = entryPrice,
 					MaxHigh24 = maxHigh,
 					MinLow24 = minLow,
 					Close24 = fwdClose,
+
+					// контекст
 					RegimeDown = r.RegimeDown,
 					Reason = reason,
 					MinMove = r.MinMove,
 
+					// delayed A/B
 					DelayedSource = string.Empty,
 					DelayedEntryAsked = false,
 					DelayedEntryUsed = false,
@@ -261,8 +314,15 @@ namespace SolSignalModel1D_Backtest
 					TargetLevelClass = 0,
 					DelayedWhyNot = null,
 					DelayedEntryExecutedAtUtc = null,
+
+					// SL (оффлайн/онлайн) пока не заполнен; будет обновлён в RunSlModelOffline/DayExecutor
 					SlProb = 0.0,
-					SlHighDecision = false
+					SlHighDecision = false,
+					Conf_SlLong = 0.0,
+					Conf_SlShort = 0.0,
+
+					// Anti-D
+					AntiDirectionApplied = false
 					});
 				}
 

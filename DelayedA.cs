@@ -3,7 +3,7 @@ using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
