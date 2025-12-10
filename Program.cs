@@ -1,8 +1,8 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Infra.Perf;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
@@ -146,7 +146,7 @@ namespace SolSignalModel1D_Backtest
 			PerfLogging.StopAppAndPrintSummary ();
 			}
 
-		private static void DumpDailyPredHistograms ( List<PredictionRecord> records, DateTime trainUntilUtc )
+		private static void DumpDailyPredHistograms ( List<BacktestRecord> records, DateTime trainUntilUtc )
 			{
 			if (records == null || records.Count == 0)
 				return;
@@ -176,7 +176,7 @@ namespace SolSignalModel1D_Backtest
 
 		private static void DumpDailyAccuracyWithDatasetSplit (
 			List<DataRow> allRows,
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
 			// собираем датасет так же, как внутри ModelTrainer
@@ -199,7 +199,7 @@ namespace SolSignalModel1D_Backtest
 				.Where (r => r.DateUtc > trainUntilUtc)
 				.ToList ();
 
-			double TrainAcc ( List<PredictionRecord> xs ) =>
+			double TrainAcc ( List<BacktestRecord> xs ) =>
 				xs.Count == 0
 					? double.NaN
 					: xs.Count (r => r.PredLabel == r.TrueLabel) / (double) xs.Count;

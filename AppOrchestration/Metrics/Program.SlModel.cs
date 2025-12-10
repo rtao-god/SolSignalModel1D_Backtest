@@ -1,5 +1,5 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Utils;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
@@ -13,7 +13,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void RunSlModelOffline (
 			List<DataRow> allRows,
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			List<Candle1h> sol1h,
 			List<Candle1m> sol1m,
 			List<Candle6h> solAll6h

@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.SanityChecks;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 	{
@@ -20,7 +20,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 		public async Task DailyCheck_FlagsTooGoodTrainAccuracy ()
 			{
 			// Arrange: 300 дней, все в train, accuracy = 100%.
-			var records = new List<PredictionRecord> ();
+			var records = new List<BacktestRecord> ();
 			var start = new DateTime (2020, 1, 1, 8, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < 300; i++)
@@ -54,7 +54,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 		public async Task DailyCheck_AllowsReasonableAccuracy ()
 			{
 			// Arrange: 300 дней, accuracy ≈ 60% (адекватный уровень).
-			var records = new List<PredictionRecord> ();
+			var records = new List<BacktestRecord> ();
 			var start = new DateTime (2020, 1, 1, 8, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < 300; i++)

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 	{

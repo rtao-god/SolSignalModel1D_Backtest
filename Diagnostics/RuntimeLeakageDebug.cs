@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Diagnostics
 	{
@@ -16,7 +16,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 		/// Ничего не меняет в логике моделирования/бэктеста.
 		/// </summary>
 		public static void PrintDailyModelTrainOosProbe (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			DateTime trainUntilUtc,
 			int boundarySampleCount = 2 )
 			{
@@ -46,7 +46,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 				.ToList ();
 
 			// Локальная функция для расчёта accuracy по TrueLabel/PredLabel.
-			(int total, int correct, double acc) Acc ( List<PredictionRecord> xs )
+			(int total, int correct, double acc) Acc ( List<BacktestRecord> xs )
 				{
 				if (xs.Count == 0)
 					{
@@ -88,7 +88,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 				}
 
 			// Компактный вывод нескольких строк около границы train/OOS.
-			static void PrintRow ( string kind, PredictionRecord r )
+			static void PrintRow ( string kind, BacktestRecord r )
 				{
 				Console.WriteLine (
 					$"[leak-probe] {kind} {r.DateUtc:yyyy-MM-dd} " +

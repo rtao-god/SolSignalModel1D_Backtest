@@ -1,15 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	public static class DayDebugPrinter
 		{
-		public static void PrintTestDay ( DataRow r, PredictionRecord rec )
+		public static void PrintTestDay ( DataRow r, BacktestRecord rec )
 			{
 			// кратко: дата, класс, микро, вход/выход, что закрыло
 			Console.WriteLine ($"[day] {r.Date:yyyy-MM-dd}  pred={rec.PredLabel} micro=({(rec.PredMicroUp ? "UP" : rec.PredMicroDown ? "DOWN" : "-")})  entry={rec.Entry:F2}  exit24={rec.Close24:F2}  delayedExec={(rec.DelayedEntryExecuted ? "Y" : "N")} src={rec.DelayedSource ?? "-"}");

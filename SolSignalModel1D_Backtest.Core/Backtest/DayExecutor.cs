@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
@@ -9,8 +10,8 @@ using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Aggregation;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.States;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
 
@@ -30,7 +31,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			return 1;
 			}
 
-		public static PredictionRecord ProcessDay (
+		public static BacktestRecord ProcessDay (
 			DataRow dayRow,
 			PredictionEngine dailyEngine,
 			IReadOnlyList<Candle1h> sol1h,
@@ -84,7 +85,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			bool goShort = predCls == 0;
 			bool hasDir = goLong || goShort;
 
-			var rec = new PredictionRecord
+			var rec = new BacktestRecord
 				{
 				DateUtc = dayRow.Date,
 

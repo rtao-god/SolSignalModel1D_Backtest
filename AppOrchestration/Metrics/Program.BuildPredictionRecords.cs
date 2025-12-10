@@ -1,6 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest
 		/// Строит записи прогнозов дневной модели по утренним точкам.
 		/// Здесь инкапсулируется выбор PredictionEngine и вычисление forward-метрик.
 		/// </summary>
-		private static async Task<List<PredictionRecord>> BuildPredictionRecordsAsync (
+		private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsync (
 			List<DataRow> allRows,
 			List<DataRow> mornings,
 			List<Candle6h> solAll6h

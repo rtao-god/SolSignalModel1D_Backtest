@@ -1,7 +1,7 @@
 ﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.ML;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
+
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 using System;
 using System.Collections.Generic;

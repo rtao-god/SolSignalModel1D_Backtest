@@ -1,6 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Data.Windowing;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 	{
@@ -74,7 +74,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 			var totalRows = allRows.Count;
 
 			// Records/1m могут быть null — в этом случае проверяем только SolFwd1.
-			Dictionary<DateTime, PredictionRecord>? recByDate = null;
+			Dictionary<DateTime, BacktestRecord>? recByDate = null;
 			if (records != null && records.Count > 0)
 				{
 				recByDate = records

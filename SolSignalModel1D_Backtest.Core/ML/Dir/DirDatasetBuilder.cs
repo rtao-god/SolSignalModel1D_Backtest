@@ -1,5 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Dir
 	{

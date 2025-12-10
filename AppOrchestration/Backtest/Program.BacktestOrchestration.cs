@@ -1,8 +1,8 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
@@ -44,7 +44,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void RunBacktestAndReports (
 			List<DataRow> mornings,
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			List<Candle1m> sol1m
 		)
 			{

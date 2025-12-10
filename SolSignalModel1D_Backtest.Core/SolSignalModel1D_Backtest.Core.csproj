@@ -9,8 +9,11 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+	  <Compile Remove="Causal\Data\Новая папка\**" />
 	  <Compile Remove="ML\SL\Новая папка\**" />
+	  <EmbeddedResource Remove="Causal\Data\Новая папка\**" />
 	  <EmbeddedResource Remove="ML\SL\Новая папка\**" />
+	  <None Remove="Causal\Data\Новая папка\**" />
 	  <None Remove="ML\SL\Новая папка\**" />
 	</ItemGroup>
 
@@ -20,7 +23,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="Omniscient\" />
+	  <Folder Include="ML\Daily\" />
 	</ItemGroup>
 
 </Project>

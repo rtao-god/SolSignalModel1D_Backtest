@@ -1,5 +1,5 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using System.Collections.Generic;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
@@ -12,7 +12,7 @@ namespace SolSignalModel1D_Backtest
 		/// Константы dipFrac/tpPct/slPct оставлены в том же виде, чтобы не менять поведение.
 		/// </summary>
 		private static void PopulateDelayedAForRecords (
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			List<DataRow> allRows,
 			List<Candle1h> sol1h,
 			List<Candle6h> solAll6h,

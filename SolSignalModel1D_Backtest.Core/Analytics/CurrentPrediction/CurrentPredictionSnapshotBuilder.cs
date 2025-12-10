@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 	{
@@ -30,7 +30,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		/// Старое поведение сохранено, но реализация вынесена в BuildFromRecord.
 		/// </summary>
 		public static CurrentPredictionSnapshot Build (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<ILeveragePolicy> policies,
 			double walletBalanceUsd )
 			{
@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		/// так и для исторических дат.
 		/// </summary>
 		public static CurrentPredictionSnapshot BuildFromRecord (
-			PredictionRecord rec,
+			BacktestRecord rec,
 			IReadOnlyList<ILeveragePolicy> policies,
 			double walletBalanceUsd )
 			{
@@ -120,7 +120,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		/// Используется для бэкфилла "текущего прогноза" (например, за последние 60 дней).
 		/// </summary>
 		public static IReadOnlyList<CurrentPredictionSnapshot> BuildHistory (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<ILeveragePolicy> policies,
 			double walletBalanceUsd,
 			int historyWindowDays )
@@ -162,7 +162,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		/// Используется для запросов "покажи прогноз модели за такой-то день".
 		/// </summary>
 		public static CurrentPredictionSnapshot BuildForDate (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<ILeveragePolicy> policies,
 			double walletBalanceUsd,
 			DateTime predictionDateUtc )
@@ -197,8 +197,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		/// Здесь НЕТ новой математической логики модели, только форматирование уже посчитанных полей.
 		/// </summary>
 		private static void BuildExplanationItems (
-	CurrentPredictionSnapshot snapshot,
-	PredictionRecord rec )
+			CurrentPredictionSnapshot snapshot,
+			BacktestRecord rec )
 			{
 			if (snapshot == null)
 				throw new ArgumentNullException (nameof (snapshot));
@@ -319,7 +319,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 		private static void AppendRowsForPolicy (
 			CurrentPredictionSnapshot snapshot,
-			PredictionRecord rec,
+			BacktestRecord rec,
 			ILeveragePolicy policy,
 			double walletBalanceUsd )
 			{
@@ -379,7 +379,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		private static CurrentPredictionPolicyRow BuildRow (
 			string policyName,
 			string branch,
-			PredictionRecord rec,
+			BacktestRecord rec,
 			bool isRiskDay,
 			bool hasDirection,
 			bool skipped,
@@ -429,7 +429,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			}
 
 		private static TradePlan BuildTradePlan (
-			PredictionRecord rec,
+			BacktestRecord rec,
 			bool goLong,
 			double leverage,
 			double walletBalanceUsd )
@@ -501,7 +501,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			}
 
 		private static bool TryGetDirection (
-			PredictionRecord rec,
+			BacktestRecord rec,
 			out bool goLong,
 			out bool goShort )
 			{
@@ -510,7 +510,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			return goLong || goShort;
 			}
 
-		private static string FormatLabel ( PredictionRecord r )
+		private static string FormatLabel ( BacktestRecord r )
 			{
 			return r.PredLabel switch
 				{
@@ -521,7 +521,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					};
 			}
 
-		private static string FormatMicro ( PredictionRecord r )
+		private static string FormatMicro ( BacktestRecord r )
 			{
 			if (r.PredLabel != 1) return "не используется (не flat)";
 			if (r.PredMicroUp) return "micro UP";

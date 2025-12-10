@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 	{
@@ -34,7 +34,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 		/// Никаких assert'ов/эксепшенов — только лог в консоль.
 		/// </summary>
 		public static void LogDailyBarePnlWithBaselinesAndShuffle (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			DateTime trainUntilUtc,
 			int shuffleRuns = 20 )
 			{
@@ -101,7 +101,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 
 		#region Model / baselines
 
-		private static PnlStats ComputeModelPnlStats ( List<PredictionRecord> records )
+		private static PnlStats ComputeModelPnlStats ( List<BacktestRecord> records )
 			{
 			var pnl = CollectPnlSeries (
 				records,
@@ -111,7 +111,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 			return ComputeStats (pnl);
 			}
 
-		private static PnlStats ComputeAlwaysLongPnlStats ( List<PredictionRecord> records )
+		private static PnlStats ComputeAlwaysLongPnlStats ( List<BacktestRecord> records )
 			{
 			var pnl = CollectPnlSeries (
 				records,
@@ -121,7 +121,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 			return ComputeStats (pnl);
 			}
 
-		private static PnlStats ComputeOraclePnlStats ( List<PredictionRecord> records )
+		private static PnlStats ComputeOraclePnlStats ( List<BacktestRecord> records )
 			{
 			var pnl = CollectPnlSeries (
 				records,
@@ -150,8 +150,8 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 		/// распределение PnL с реальным PnL модели.
 		/// </summary>
 		private static void RunShuffleProbe (
-			List<PredictionRecord> train,
-			List<PredictionRecord> oos,
+			List<BacktestRecord> train,
+			List<BacktestRecord> oos,
 			PnlStats trainModelStats,
 			PnlStats oosModelStats,
 			int shuffleRuns )
@@ -239,7 +239,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 		/// +1 — long, -1 — short, 0 — no trade.
 		/// Логика совпадает с основной: PredLabel + микро-слой.
 		/// </summary>
-		private static int GetModelDirection ( PredictionRecord r )
+		private static int GetModelDirection ( BacktestRecord r )
 			{
 			if (!HasValidPrices (r)) return 0;
 
@@ -262,7 +262,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 		/// <summary>
 		/// Проверка корректности цен для PnL.
 		/// </summary>
-		private static bool HasValidPrices ( PredictionRecord r )
+		private static bool HasValidPrices ( BacktestRecord r )
 			{
 			return r.Entry > 0.0 &&
 				   !double.IsNaN (r.Entry) &&
@@ -286,8 +286,8 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 		/// Вариант с доступом только к PredictionRecord.
 		/// </summary>
 		private static List<double> CollectPnlSeries (
-			IReadOnlyList<PredictionRecord> records,
-			Func<PredictionRecord, int> getDirection )
+			IReadOnlyList<BacktestRecord> records,
+			Func<BacktestRecord, int> getDirection )
 			{
 			var res = new List<double> (records.Count);
 
@@ -315,8 +315,8 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 		/// (используется для shuffle-пробника, где направление берётся из массива).
 		/// </summary>
 		private static List<double> CollectPnlSeries (
-			IReadOnlyList<PredictionRecord> records,
-			Func<int, PredictionRecord, int> getDirection )
+			IReadOnlyList<BacktestRecord> records,
+			Func<int, BacktestRecord, int> getDirection )
 			{
 			var res = new List<double> (records.Count);
 

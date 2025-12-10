@@ -2,11 +2,11 @@
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.ML;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void TrainAndApplySlModelOffline (
 			List<DataRow> allRows,
-			IList<PredictionRecord> records,
+			IList<BacktestRecord> records,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<Candle6h> solAll6h )

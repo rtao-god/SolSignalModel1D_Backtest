@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
@@ -19,7 +19,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 		public IReadOnlyList<DataRow> Mornings { get; init; } = Array.Empty<DataRow> ();
 
 		/// <summary>Прогнозы дневной модели по mornings.</summary>
-		public IReadOnlyList<PredictionRecord> Records { get; init; } = Array.Empty<PredictionRecord> ();
+		public IReadOnlyList<BacktestRecord> Records { get; init; } = Array.Empty<BacktestRecord> ();
 
 		/// <summary>Вся история SOL 6h (для sanity-проверок окон и таргетов).</summary>
 		public IReadOnlyList<Candle6h> SolAll6h { get; init; } = Array.Empty<Candle6h> ();

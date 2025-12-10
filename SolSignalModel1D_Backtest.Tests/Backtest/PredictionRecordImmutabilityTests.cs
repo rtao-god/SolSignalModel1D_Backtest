@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Backtest
 	{
@@ -42,7 +43,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 			// - TrueLabel == PredLabel, чтобы не ловить p_true=0 в логлоссе/агрегации.
 			// - Prob*_Day / Prob*_DayMicro / Prob*_Total суммируются в 1.
 			var utcStart = new DateTime (2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-			var records = new List<PredictionRecord> ();
+			var records = new List<BacktestRecord> ();
 
 			for (int i = 0; i < 20; i++)
 				{
@@ -54,7 +55,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 				double pFlat = 0.2;
 				double pDown = 0.3;
 
-				records.Add (new PredictionRecord
+				records.Add (new BacktestRecord
 					{
 					DateUtc = date,
 					TrueLabel = label,

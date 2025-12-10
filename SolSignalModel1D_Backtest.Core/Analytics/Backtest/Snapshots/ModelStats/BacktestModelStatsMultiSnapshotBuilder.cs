@@ -2,8 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	{
@@ -16,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	public static class BacktestModelStatsMultiSnapshotBuilder
 		{
 		public static BacktestModelStatsMultiSnapshot Build (
-			IReadOnlyList<PredictionRecord> allRecords,
+			IReadOnlyList<BacktestRecord> allRecords,
 			IReadOnlyList<Candle1m> sol1m,
 			TimeZoneInfo nyTz,
 			double dailyTpPct,
@@ -60,8 +61,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			var maxDateUtc = ordered.Last ().DateUtc;
 
 			// 2) Сегменты по границе trainUntilUtc.
-			var trainRecords = new List<PredictionRecord> ();
-			var oosRecords = new List<PredictionRecord> ();
+			var trainRecords = new List<BacktestRecord> ();
+			var oosRecords = new List<BacktestRecord> ();
 
 			foreach (var r in ordered)
 				{
@@ -149,7 +150,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			BacktestModelStatsMultiSnapshot multi,
 			ModelStatsSegmentKind kind,
 			string label,
-			IReadOnlyList<PredictionRecord> segmentRecords,
+			IReadOnlyList<BacktestRecord> segmentRecords,
 			IReadOnlyList<Candle1m> sol1m,
 			TimeZoneInfo nyTz,
 			double dailyTpPct,

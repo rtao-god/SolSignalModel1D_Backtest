@@ -1,11 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
@@ -23,7 +21,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// </summary>
 		public static BacktestSummary RunBacktest (
 			IReadOnlyList<DataRow> mornings,
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
 			BacktestConfig config )
@@ -130,7 +128,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// </summary>
 		private static List<BacktestPolicyResult> SimulateAllPolicies (
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			bool useStopLoss,
 			BacktestConfig config,
@@ -144,7 +142,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 
 				PnlCalculator.ComputePnL (
 					records,
-					candles1m,
 					p.Policy,
 					p.Margin,
 					out var trades,
@@ -158,7 +155,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					useDelayedIntradayStops: useStopLoss,
 					dailyTpPct: config.DailyTpPct,
 					dailyStopPct: config.DailyStopPct,
-					useAntiDirectionOverlay: useAnti
+					useAntiDirectionOverlay: useAnti,
+					predictionMode: PnlPredictionMode.DayOnly
 				);
 
 				results.Add (new BacktestPolicyResult

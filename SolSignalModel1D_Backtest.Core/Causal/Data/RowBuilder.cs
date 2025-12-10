@@ -1,8 +1,8 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Diagnostics;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.Indicators;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	{
@@ -77,16 +77,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 			if (solAll1m == null || solAll1m.Count == 0)
 				throw new InvalidOperationException ("[RowBuilder] solAll1m is required for path-based labels and MinMoveEngine.");
 
-			// Индикаторы по 6h
-			var solAtr = Indicators.Indicators.ComputeAtr6h (solAll6h, AtrPeriod);
-			var solRsi = Indicators.Indicators.ComputeRsi6h (solWinTrain, RsiPeriod);
-			var btcSma200 = Indicators.Indicators.ComputeSma6h (btcWinTrain, BtcSmaPeriod);
+			// Индикаторы по 6h	
+			var solAtr = Indicators.ComputeAtr6h (solAll6h, AtrPeriod);
+			var solRsi = Indicators.ComputeRsi6h (solWinTrain, RsiPeriod);
+			var btcSma200 = Indicators.ComputeSma6h (btcWinTrain, BtcSmaPeriod);
 
-			var solEma50 = Indicators.Indicators.ComputeEma6h (solAll6h, SolEmaFast);
-			var solEma200 = Indicators.Indicators.ComputeEma6h (solAll6h, SolEmaSlow);
+			var solEma50 = Indicators.ComputeEma6h (solAll6h, SolEmaFast);
+			var solEma200 = Indicators.ComputeEma6h (solAll6h, SolEmaSlow);
 
-			var btcEma50 = Indicators.Indicators.ComputeEma6h (btcWinTrain, BtcEmaFast);
-			var btcEma200 = Indicators.Indicators.ComputeEma6h (btcWinTrain, BtcEmaSlow);
+			var btcEma50 = Indicators.ComputeEma6h (btcWinTrain, BtcEmaFast);
+			var btcEma200 = Indicators.ComputeEma6h (btcWinTrain, BtcEmaSlow);
 
 			// Быстрый доступ к 6h SOL по времени открытия (пока не используется, оставлено для совместимости)
 			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
@@ -169,13 +169,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 					throw new InvalidOperationException ($"[RowBuilder] non-positive SOL close price at entry {openUtc:O} or exit {exitUtc:O}.");
 
 				// Ретурны SOL/BTC на разных горизонтах (по 6h-окнам)
-				double solRet1 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 1);
-				double solRet3 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 3);
-				double solRet30 = Indicators.Indicators.Ret6h (solWinTrain, solIdx, 30);
+				double solRet1 = Indicators.Ret6h (solWinTrain, solIdx, 1);
+				double solRet3 = Indicators.Ret6h (solWinTrain, solIdx, 3);
+				double solRet30 = Indicators.Ret6h (solWinTrain, solIdx, 30);
 
-				double btcRet1 = Indicators.Indicators.Ret6h (btcWinTrain, btcIdx, 1);
-				double btcRet3 = Indicators.Indicators.Ret6h (btcWinTrain, btcIdx, 3);
-				double btcRet30 = Indicators.Indicators.Ret6h (btcWinTrain, btcIdx, 30);
+				double btcRet1 = Indicators.Ret6h (btcWinTrain, btcIdx, 1);
+				double btcRet3 = Indicators.Ret6h (btcWinTrain, btcIdx, 3);
+				double btcRet30 = Indicators.Ret6h (btcWinTrain, btcIdx, 30);
 
 				if (double.IsNaN (solRet1) || double.IsNaN (solRet3) || double.IsNaN (solRet30) ||
 					double.IsNaN (btcRet1) || double.IsNaN (btcRet3) || double.IsNaN (btcRet30))
@@ -184,10 +184,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 				double solBtcRet30 = solRet30 - btcRet30;
 
 				// EMA-блок по SOL/BTC (50/200) и производные фичи
-				double solEma50Val = Indicators.Indicators.FindNearest (solEma50, openUtc, 0.0);
-				double solEma200Val = Indicators.Indicators.FindNearest (solEma200, openUtc, 0.0);
-				double btcEma50Val = Indicators.Indicators.FindNearest (btcEma50, openUtc, 0.0);
-				double btcEma200Val = Indicators.Indicators.FindNearest (btcEma200, openUtc, 0.0);
+				double solEma50Val = Indicators.FindNearest (solEma50, openUtc, 0.0);
+				double solEma200Val = Indicators.FindNearest (solEma200, openUtc, 0.0);
+				double btcEma50Val = Indicators.FindNearest (btcEma50, openUtc, 0.0);
+				double btcEma200Val = Indicators.FindNearest (btcEma200, openUtc, 0.0);
 
 				double solAboveEma50 = solEma50Val > 0 && solClose > 0
 					? (solClose - solEma50Val) / solEma50Val
@@ -203,14 +203,14 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 				if (fngHistory == null || fngHistory.Count == 0)
 					throw new InvalidOperationException ("[RowBuilder] fngHistory is null or empty.");
 
-				double fng = Indicators.Indicators.PickNearestFng (fngHistory, openUtc.Date);
+				double fng = Indicators.PickNearestFng (fngHistory, openUtc.Date);
 				double fngNorm = (fng - 50.0) / 50.0;
 
 				// DXY (сжатый 30-дневный change) — без ряда DXY тоже считаем ошибкой
 				if (dxySeries == null || dxySeries.Count == 0)
 					throw new InvalidOperationException ("[RowBuilder] dxySeries is null or empty.");
 
-				double dxyChg30 = Indicators.Indicators.GetDxyChange30 (dxySeries, openUtc.Date);
+				double dxyChg30 = Indicators.GetDxyChange30 (dxySeries, openUtc.Date);
 				dxyChg30 = Math.Clamp (dxyChg30, -0.03, 0.03);
 
 				// GOLD через PAXG (30-дневный change)
@@ -254,18 +254,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 					continue;
 					}
 				double solRsiCentered = solRsiVal - 50.0;
-				double rsiSlope3 = Indicators.Indicators.GetRsiSlope6h (solRsi, openUtc, 3);
+				double rsiSlope3 = Indicators.GetRsiSlope6h (solRsi, openUtc, 3);
 
 				// GAP между BTC и SOL на коротких горизонтах
 				double gapBtcSol1 = btcRet1 - solRet1;
 				double gapBtcSol3 = btcRet3 - solRet3;
 
 				// Волатильность: dynVol + ATR (в процентах)
-				double dynVol = Indicators.Indicators.ComputeDynVol6h (solWinTrain, solIdx, 10);
+				double dynVol = Indicators.ComputeDynVol6h (solWinTrain, solIdx, 10);
 				if (dynVol <= 0)
 					throw new InvalidOperationException ($"[RowBuilder] dynVol is non-positive at {openUtc:O} (solIdx={solIdx}).");
 
-				double atrAbs = Indicators.Indicators.FindNearest (solAtr, openUtc, 0.0);
+				double atrAbs = Indicators.FindNearest (solAtr, openUtc, 0.0);
 				if (atrAbs <= 0)
 					throw new InvalidOperationException ($"[RowBuilder] ATR is non-positive at {openUtc:O}.");
 

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics
 	{
@@ -36,7 +36,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics
 		/// useMicro=true означает: если модель сказала "боковик + микроВверх",
 		/// то мы это считаем как "рост" при подсчёте.
 		/// </summary>
-		public static ClassificationReport Compute ( List<PredictionRecord> records, bool useMicro )
+		public static ClassificationReport Compute ( List<BacktestRecord> records, bool useMicro )
 			{
 			// превращаем предсказания в "финальный" класс
 			var preds = records.Select (r => (Truth: r.TrueLabel, Pred: GetPredictedLabel (r, useMicro))).ToList ();
@@ -97,7 +97,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics
 		/// Мягкая точность: рост считается ок и для "боковикРост", и наоборот.
 		/// Мы не пересчитываем F1 — только долю таких “норм” попаданий.
 		/// </summary>
-		public static LenientReport ComputeLenient ( List<PredictionRecord> records )
+		public static LenientReport ComputeLenient ( List<BacktestRecord> records )
 			{
 			int correct = 0;
 			int total = 0;
@@ -147,7 +147,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics
 		/// <summary>
 		/// Преобразуем предсказание в “микро-осознанный” класс, если надо.
 		/// </summary>
-		private static int GetPredictedLabel ( PredictionRecord r, bool useMicro )
+		private static int GetPredictedLabel ( BacktestRecord r, bool useMicro )
 			{
 			if (!useMicro)
 				return r.PredLabel;

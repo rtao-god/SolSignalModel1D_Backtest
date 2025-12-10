@@ -6,7 +6,7 @@ using SolSignalModel1D_Backtest.Api.Services;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Model;

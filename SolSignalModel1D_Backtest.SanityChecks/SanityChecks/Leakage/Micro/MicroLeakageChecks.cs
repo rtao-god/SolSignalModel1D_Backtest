@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
 
 			var mornings = ctx.Mornings ?? Array.Empty<DataRow> ();
-			var records = ctx.Records ?? Array.Empty<PredictionRecord> ();
+			var records = ctx.Records ?? Array.Empty<BacktestRecord> ();
 
 			if (mornings.Count == 0 || records.Count == 0)
 				{

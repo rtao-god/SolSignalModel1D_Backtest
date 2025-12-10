@@ -1,5 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	{
@@ -257,7 +258,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 		/// что и консольный принтер.
 		/// </summary>
 		public static BacktestModelStatsSnapshot Compute (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> sol1m,
 			double dailyTpPct,
 			double dailySlPct,
@@ -282,7 +283,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			}
 
 		private static void ComputeDailyConfusion (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			DailyConfusionStats daily )
 			{
 			int[,] m = new int[3, 3];
@@ -340,7 +341,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 				};
 
 		private static void ComputeTrendDirectionConfusion (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			TrendDirectionStats trend )
 			{
 			// 0 = DOWN, 1 = UP
@@ -413,7 +414,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			}
 
 		private static void ComputeSlStats (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> sol1m,
 			double dailyTpPct,
 			double dailySlPct,
@@ -576,7 +577,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 		/// полностью копирует правила из консольного принтера.
 		/// </summary>
 		private static DayOutcome GetDayOutcomeFromMinutes (
-			PredictionRecord r,
+			BacktestRecord r,
 			IReadOnlyList<Candle1m> allMinutes,
 			double tpPct,
 			double slPct,

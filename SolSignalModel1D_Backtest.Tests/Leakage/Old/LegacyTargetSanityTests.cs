@@ -1,10 +1,11 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+
 using Xunit;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 using AppProgram = SolSignalModel1D_Backtest.Program;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 	{
@@ -132,7 +133,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 		private sealed class DailyModelRunResult
 			{
 			public required DateTime TrainUntilUtc { get; init; }
-			public required List<PredictionRecord> Records { get; init; }
+			public required List<BacktestRecord> Records { get; init; }
 			}
 
 		/// <summary>
@@ -209,7 +210,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 		/// - Predict через PredictionEngine;
 		/// - forward-окно до baseline-exit по 6h (maxHigh/minLow/close).
 		/// </summary>
-		private static async Task<List<PredictionRecord>> BuildPredictionRecordsAsyncForTests (
+		private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsyncForTests (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<Candle6h> solAll6h,
 			PredictionEngine engine )
@@ -231,7 +232,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 				indexByOpenTime[sorted6h[i].OpenTimeUtc] = i;
 
 			var nyTz = Windowing.NyTz;
-			var list = new List<PredictionRecord> (mornings.Count);
+			var list = new List<BacktestRecord> (mornings.Count);
 
 			foreach (var r in mornings)
 				{
@@ -334,7 +335,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 			}
 
 		private static double ComputeOosAccuracy (
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
 			var oos = records

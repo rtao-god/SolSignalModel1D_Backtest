@@ -1,5 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -46,7 +46,7 @@ namespace SolSignalModel1D_Backtest
 			// - CreatePredictionEngineOrFallback;
 			// - LoadPredictionRecordsAsync.
 			// Это позволяет менять реализацию модели без влияния на API-контракт.
-			List<PredictionRecord> records;
+			List<BacktestRecord> records;
 				{
 				var engine = CreatePredictionEngineOrFallback (allRows);
 

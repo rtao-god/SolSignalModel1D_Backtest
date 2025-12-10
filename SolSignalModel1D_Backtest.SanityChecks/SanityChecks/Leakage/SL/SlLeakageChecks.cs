@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 	{
@@ -23,7 +19,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 			{
 			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
 
-			var records = ctx.Records ?? Array.Empty<PredictionRecord> ();
+			var records = ctx.Records ?? Array.Empty<BacktestRecord> ();
 			var candles1h = ctx.SolAll1h ?? Array.Empty<Candle1h> ();
 
 			if (records.Count == 0 || candles1h.Count == 0)

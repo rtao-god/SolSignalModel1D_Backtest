@@ -1,6 +1,6 @@
 ﻿using Xunit;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Data.Windowing;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder

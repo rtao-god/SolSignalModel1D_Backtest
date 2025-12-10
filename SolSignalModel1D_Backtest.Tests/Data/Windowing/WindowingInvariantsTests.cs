@@ -2,7 +2,7 @@
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Infra;
 // Явный алиас на боевой класс Windowing, чтобы не конфликтовать с namespace теста
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Data.Windowing;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 	{

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.SanityChecks;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
@@ -15,7 +15,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 	public static class DailyLeakageChecks
 		{
 		public static SelfCheckResult CheckDailyTrainVsOosAndShuffle (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
 			if (records == null || records.Count == 0)
@@ -82,7 +82,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 			return result;
 			}
 
-		private static double ComputeAccuracy ( IReadOnlyList<PredictionRecord> records )
+		private static double ComputeAccuracy ( IReadOnlyList<BacktestRecord> records )
 			{
 			if (records.Count == 0) return double.NaN;
 
@@ -97,7 +97,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 			}
 
 		private static double ComputeShuffleAccuracy (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			int classesCount,
 			int seed )
 			{

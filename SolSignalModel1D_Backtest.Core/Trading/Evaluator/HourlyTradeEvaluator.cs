@@ -1,8 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 	{
@@ -175,7 +176,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 		/// Для каждой записи берётся окно [DateUtc; t_exit), где t_exit = ComputeBaselineExitUtc(DateUtc, nyTz).
 		/// </summary>
 		public static HourlyTpSlReport Evaluate (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1h> candles1h,
 			TimeZoneInfo nyTz )
 			{

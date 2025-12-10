@@ -1,6 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -20,7 +20,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void RunStrategyScenarios (
 			List<DataRow> mornings,
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			List<Candle1m> sol1m
 		)
 			{

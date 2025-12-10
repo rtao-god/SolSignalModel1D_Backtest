@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using System;
 using System.Collections.Generic;
 
@@ -36,7 +36,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest.Services
 		/// <returns>BacktestSummary, из которого потом строится ReportDocument/DTO.</returns>
 		public BacktestSummary RunPreview(
 			IReadOnlyList<DataRow> mornings,
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			BacktestConfig config)
 		{

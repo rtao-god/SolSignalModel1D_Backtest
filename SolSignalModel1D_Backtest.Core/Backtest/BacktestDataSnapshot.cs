@@ -1,6 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
@@ -21,7 +21,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// PredictionRecord со всеми нужными полями (dir/micro/SL/Delayed и т.п.),
 		/// построенный на основе дневных строк и моделей.
 		/// </summary>
-		public IReadOnlyList<PredictionRecord> Records { get; init; } = Array.Empty<PredictionRecord> ();
+		public IReadOnlyList<BacktestRecord> Records { get; init; } = Array.Empty<BacktestRecord> ();
 
 		/// <summary>
 		/// 1m-свечи SOL/USDT, которые используются PnL-движком.

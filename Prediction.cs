@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -117,7 +119,7 @@ namespace SolSignalModel1D_Backtest
 		/// - используется в логах и последующей аналитике,
 		///   но не режет список для стратегий/бэктеста.
 		/// </summary>
-		private static async Task<List<PredictionRecord>> LoadPredictionRecordsAsync (
+		private static async Task<List<BacktestRecord>> LoadPredictionRecordsAsync (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<Candle6h> solAll6h,
 			PredictionEngine engine )
@@ -172,7 +174,7 @@ namespace SolSignalModel1D_Backtest
 				return 1;
 				}
 
-			var list = new List<PredictionRecord> (orderedMornings.Count);
+			var list = new List<BacktestRecord> (orderedMornings.Count);
 
 			foreach (var r in orderedMornings)
 				{
@@ -257,7 +259,7 @@ namespace SolSignalModel1D_Backtest
 				double probDownTotal = dayWithMicro.PDown;
 				int predLabelTotal = predLabelDayMicro;
 
-				list.Add (new PredictionRecord
+				list.Add (new BacktestRecord
 					{
 					DateUtc = r.Date,
 

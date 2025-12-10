@@ -1,4 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+﻿using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Reports.Model;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
@@ -28,7 +30,7 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				BacktestPolicyTableDefinitions.Policies,
 				policyResults,
 				TableDetailLevel.Technical,
-				explicitTitle: "Политики (технические детали)");
+				explicitTitle: "Политики (технически)");
 
 			return (simple, technical);
 			}

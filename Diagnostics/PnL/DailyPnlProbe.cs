@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 	{
@@ -19,7 +19,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 		/// Данные делятся по trainUntilUtc, направление берётся из PredLabel + микро.
 		/// </summary>
 		public static void RunSimpleProbe (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
 			if (records == null || records.Count == 0)
@@ -65,7 +65,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 		/// - эквити считается как последовательное умножение (1 + ret);
 		/// - считается суммарный PnL, win-rate, max DD, среднее и std.
 		/// </summary>
-		private static SimplePnlStats ComputeSimplePnlStats ( IReadOnlyList<PredictionRecord> records )
+		private static SimplePnlStats ComputeSimplePnlStats ( IReadOnlyList<BacktestRecord> records )
 			{
 			if (records == null || records.Count == 0)
 				{

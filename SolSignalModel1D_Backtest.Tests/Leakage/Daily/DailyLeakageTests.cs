@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using Xunit;
 
@@ -21,7 +21,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			// Здесь строится выборка с умеренной точностью (~60%)
 			// как на train, так и на OOS. Ошибок быть не должно.
 
-			var records = new List<PredictionRecord> ();
+			var records = new List<BacktestRecord> ();
 
 			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
 
@@ -68,7 +68,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			// Сценарий: train нормальный, OOS почти идеальный.
 			// Должна появиться ошибка про подозрительно высокую точность на OOS.
 
-			var records = new List<PredictionRecord> ();
+			var records = new List<BacktestRecord> ();
 			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < 200; i++)
@@ -120,7 +120,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			// Сценарий: все дни попадают в train-часть, OOS нет.
 			// Должно быть предупреждение про пустую OOS-часть.
 
-			var records = new List<PredictionRecord> ();
+			var records = new List<BacktestRecord> ();
 			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < 50; i++)

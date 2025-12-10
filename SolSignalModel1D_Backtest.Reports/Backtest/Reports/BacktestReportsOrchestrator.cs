@@ -1,14 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
 using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
-using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 using SolSignalModel1D_Backtest.Reports.CurrentPrediction;
 using SolSignalModel1D_Backtest.Reports.Reporting;
@@ -16,6 +12,10 @@ using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 	{
@@ -77,7 +77,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// </summary>
 		public static void SaveBacktestReports (
 			IReadOnlyList<DataRow> mornings,
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
 			BacktestConfig backtestConfig,
@@ -130,7 +130,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 				baselineResults = RollingLoop.SimulateAllPolicies (
 					policies: policies,
 					records: records,
-					candles1m: sol1m,
 					useStopLoss: true,
 					config: backtestConfig,
 					useAnti: false
@@ -258,7 +257,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// Поведение старого API сохранено.
 		/// </summary>
 		public static void SaveCurrentPredictionReport (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<ILeveragePolicy> leveragePolicies,
 			double walletBalanceUsd = 200.0 )
 			{
@@ -324,7 +323,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// Отчёты сохраняются через ReportStorage.
 		/// </summary>
 		public static void SaveCurrentPredictionHistoryReports (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<ILeveragePolicy> leveragePolicies,
 			double walletBalanceUsd = 200.0,
 			int historyWindowDays = CurrentPredictionHistoryWindowDays )
@@ -396,7 +395,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// Это заготовка под API/фронт для выбора даты из всей выборки.
 		/// </summary>
 		public static void SaveCurrentPredictionReportForDate (
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<ILeveragePolicy> leveragePolicies,
 			DateTime predictionDateUtc,
 			double walletBalanceUsd = 200.0 )

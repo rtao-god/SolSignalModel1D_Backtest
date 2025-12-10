@@ -1,5 +1,5 @@
 ﻿using System;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 		/// - обновляет PredLabel_Total и Conf_SlLong / Conf_SlShort.
 		/// </summary>
 		public static void Apply (
-			PredictionRecord rec,
+			BacktestRecord rec,
 			double slProb,
 			bool goLong,
 			bool goShort,

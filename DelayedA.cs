@@ -1,7 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
 
@@ -24,7 +26,7 @@ namespace SolSignalModel1D_Backtest
 		/// Любые проблемы с исходными рядами считаются фатальными – бросаем исключение.
 		/// </summary>
 		private static void PopulateDelayedA (
-			IList<PredictionRecord> records,
+			IList<BacktestRecord> records,
 			List<DataRow> allRows,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle6h> solAll6h,

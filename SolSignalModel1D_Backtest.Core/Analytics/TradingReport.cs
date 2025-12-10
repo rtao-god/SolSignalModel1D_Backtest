@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics
 	{
@@ -17,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics
 
 	public static class TradingMetrics
 		{
-		public static TradingReport Compute ( IEnumerable<PredictionRecord> records, double tpPct )
+		public static TradingReport Compute ( IEnumerable<BacktestRecord> records, double tpPct )
 			{
 			var recs = records.ToList ();
 

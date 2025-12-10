@@ -1,16 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Printers;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using System;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	/// <summary>
 	/// Верхнеуровневый “дирижёр”, куда Program.cs/тесты передают уже готовые данные:
-	/// mornings (NY-окна), records (PredictionRecord), 1m-свечи и политики плеча.
+	/// mornings (NY-окна), records (BacktestRecord), 1m-свечи и политики плеча.
 	/// Он получает BacktestConfig, конфигурирует RollingLoop и печатает модельные метрики.
 	/// </summary>
 	public sealed class BacktestRunner
@@ -25,7 +27,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// </summary>
 		public void Run (
 			IReadOnlyList<DataRow> mornings,
-			IReadOnlyList<PredictionRecord> records,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
 			BacktestConfig config,
@@ -42,7 +44,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			// Это не меняет поведение бэктеста, только даёт доп. лог в консоль.
 			// =====================================================================
 
-			// Диапазон и разбивка train/OOS по PredictionRecord
+			// Диапазон и разбивка train/OOS по BacktestRecord
 			int recordsCount = records.Count;
 			int trainCount = 0;
 			int oosCount = 0;
@@ -165,33 +167,49 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 					}
 				}
 
-			// 1) Модельные метрики (дневная confusion + SL path-based, 1m)
-			BacktestModelStatsPrinter.Print (
-			   records,
-			   candles1m,
-			   config.DailyTpPct,
-			   config.DailyStopPct,
-			   NyTz,
-			   trainUntilUtc
-		   );
+			// =====================================================================
+			// Каузальные записи для аналитических принтеров.
+			// =====================================================================
 
-			// 2) Запуск AggregationProbsPrinter
+			var causalRecords = new List<CausalPredictionRecord> (recordsCount);
+			for (int i = 0; i < recordsCount; i++)
+				{
+				var c = records[i].Causal;
+				if (c == null)
+					{
+					throw new InvalidOperationException (
+						$"[BacktestRunner] records[{i}].Causal is null for date {records[i].DateUtc:O}.");
+					}
+
+				causalRecords.Add (c);
+				}
+
+			// 2) Запуск AggregationProbsPrinter (аггрегированные вероятности)
 			AggregationProbsPrinter.Print (
-				records,
+				causalRecords,
 				trainUntilUtc,
-				recentDays: 240,     // можно менять
-				debugLastDays: 10    // сколько последних дней детализировать
-			);
+				recentDays: 240,
+				debugLastDays: 10);
 
 			// 3) Метрики accuracy / micro-F1 / logloss по Day / Day+Micro / Total
 			AggregationMetricsPrinter.Print (
-				records,
+				causalRecords,
 				trainUntilUtc,
-				recentDays: 240
-			);
+				recentDays: 240);
 
-			// 3) Запуск PnL/Delayed/окон по политикам
-			/*var loop = new RollingLoop();
+			// === 2. Omniscient-аналитика (BacktestRecord + 1m) ===
+			// 1) Модельные метрики (дневная confusion + SL path-based, 1m)
+			BacktestModelStatsPrinter.Print (
+				records,
+				candles1m,
+				config.DailyTpPct,
+				config.DailyStopPct,
+				NyTz,
+				trainUntilUtc);
+
+			// 4) Запуск PnL/Delayed/окон по политикам — оставлен закомментированным
+			/*
+			var loop = new RollingLoop();
 			loop.Run(
 				mornings: mornings,
 				records: records,
@@ -200,7 +218,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				config: config
 			);
 
-			DelayedStatsPrinter.Print(records);*/
+			DelayedStatsPrinter.Print(records);
+			*/
 			}
 		}
 	}

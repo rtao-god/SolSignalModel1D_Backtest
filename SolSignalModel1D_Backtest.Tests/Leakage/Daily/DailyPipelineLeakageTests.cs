@@ -2,11 +2,12 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Tests.Leakage.Old;
 using Xunit;
 using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
@@ -24,7 +25,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		private sealed class DailyRunResult
 			{
 			public required DateTime TrainUntilUtc { get; init; }
-			public required List<PredictionRecord> Records { get; init; }
+			public required List<BacktestRecord> Records { get; init; }
 			}
 
 		// =====================================================================
@@ -190,7 +191,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// через PredictionEngine и 6h-свечи до baseline-exit.
 		/// Это копия логики из LegacyTargetSanityTests.
 		/// </summary>
-		private static async Task<List<PredictionRecord>> BuildPredictionRecordsAsyncForTests (
+		private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsyncForTests (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<Candle6h> solAll6h,
 			PredictionEngine engine )
@@ -212,7 +213,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				indexByOpenTime[sorted6h[i].OpenTimeUtc] = i;
 
 			var nyTz = Windowing.NyTz;
-			var list = new List<PredictionRecord> (mornings.Count);
+			var list = new List<BacktestRecord> (mornings.Count);
 
 			foreach (var r in mornings)
 				{
@@ -314,7 +315,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			}
 
 		private static double ComputeOosAccuracy (
-			List<PredictionRecord> records,
+			List<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
 			var oos = records
