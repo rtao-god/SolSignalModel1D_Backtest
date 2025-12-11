@@ -2,8 +2,8 @@
 using System.Linq;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 	{

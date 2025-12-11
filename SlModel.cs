@@ -1,13 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Microsoft.ML;
+﻿using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
+using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -15,7 +20,7 @@ namespace SolSignalModel1D_Backtest
 		{
 		/// <summary>
 		/// Тренируем SL-модель на каузальном оффлайн-датасете (SlOfflineBuilder)
-		/// и проставляем SlProb / SlHighDecision / Prob*_Total в PredictionRecord.
+		/// и проставляем SlProb / SlHighDecision / Prob*_Total в CausalPredictionRecord.
 		/// Любые проблемы с данными считаем фатальными и пробрасываем исключения.
 		/// Дополнительно в одном прогоне считаем train-метрики SL-модели
 		/// для нескольких порогов MinMove (0.025/0.030/0.035), чтобы видеть,
@@ -55,7 +60,7 @@ namespace SolSignalModel1D_Backtest
 			// Все значения в долях (0.03 = 3%).
 			double[] strongMinMoveThresholds = { 0.025, 0.030, 0.035 };
 
-			// Основной порог, который будет использоваться в рантайме (rec.SlProb / SlHighDecision).
+			// Основной порог, который будет использоваться в runtime (SlProb / SlHighDecision).
 			const double MainStrongMinMoveThreshold = 0.030;
 
 			// ===== 1. Каузальный train-сабсет для SL-модели =====
@@ -181,7 +186,7 @@ namespace SolSignalModel1D_Backtest
 					tag: $"thr={thr:0.000}");
 				}
 
-			// ===== 4. Runtime-применение SL к PredictionRecord =====
+			// ===== 4. Runtime-применение SL к CausalPredictionRecord через BacktestRecord =====
 
 			int scored = 0;
 			int predHighDays = 0;
@@ -194,9 +199,17 @@ namespace SolSignalModel1D_Backtest
 
 			foreach (var rec in records)
 				{
+				if (rec.Causal == null)
+					{
+					throw new InvalidOperationException (
+						$"[sl-runtime] BacktestRecord.Causal is null for date {rec.DateUtc:O}.");
+					}
+
+				var causal = rec.Causal;
+
 				// Направление по дневной модели (с учётом микро-слоя).
-				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
-				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+				bool goLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
+				bool goShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
 
 				if (!goLong && !goShort)
 					{
@@ -206,8 +219,8 @@ namespace SolSignalModel1D_Backtest
 
 				// Сильный/слабый сигнал определяется по MinMove,
 				// и используется и в оффлайн-датасете, и в runtime.
-				double dayMinMove = rec.MinMove > 0 ? rec.MinMove : 0.02;
-				bool strong = SlStrongUtils.IsStrongByMinMove (dayMinMove, rec.RegimeDown, MainStrongMinMoveThreshold);
+				double dayMinMove = causal.MinMove > 0 ? causal.MinMove : 0.02;
+				bool strong = SlStrongUtils.IsStrongByMinMove (dayMinMove, causal.RegimeDown, MainStrongMinMoveThreshold);
 
 				double entryPrice = rec.Entry;
 				if (entryPrice <= 0)
@@ -236,13 +249,13 @@ namespace SolSignalModel1D_Backtest
 				double p = slPred.Probability;
 				bool predHigh = slPred.PredictedLabel && p >= SlRiskThreshold;
 
-				rec.SlProb = p;
-				rec.SlHighDecision = predHigh;
+				causal.SlProb = p;
+				causal.SlHighDecision = predHigh;
 				scored++;
 
 				// Применяем SL-оверлей к Day+Micro-вероятностям → Total.
 				SlOverlayApplier.Apply (
-					rec,
+					causal,
 					slProb: p,
 					goLong: goLong,
 					goShort: goShort,
@@ -266,6 +279,10 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine (
 					$"[sl-runtime] records period = {recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}, " +
 					$"count = {records.Count}");
+				}
+			else
+				{
+				Console.WriteLine ("[sl-runtime] records: count=0");
 				}
 
 			if (probCount > 0)

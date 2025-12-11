@@ -4,19 +4,18 @@ using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest.Tests.Backtest
 	{
 	/// <summary>
-	/// Тест-инвариант: аналитика/бэктест не должны менять базовые поля PredictionRecord.
-	/// Если какой-то принтер/движок начнёт мутировать Date/TrueLabel/PredLabel/MinMove и т.п.,
-	/// этот тест должен упасть.
-	///
-	/// Тест специально использует BacktestRunner.Run — тот же путь,
-	/// что и консольный пайплайн.
+	/// Инвариант: аналитика/бэктест не должны менять базовые поля BacktestRecord
+	/// (каузальная часть + forward-исходы).
+	/// Если какой-то принтер/движок начнёт мутировать Date/TrueLabel/PredLabel/Entry/MinMove и т.п.,
+	/// этот тест должен падать.
 	/// </summary>
 	public sealed class PredictionRecordImmutabilityTests
 		{
@@ -36,12 +35,8 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 			}
 
 		[Fact]
-		public void BacktestRunner_DoesNotMutate_CorePredictionRecordFields ()
+		public void BacktestRunner_DoesNotMutate_CoreBacktestRecordFields ()
 			{
-			// Arrange: синтетический набор PredictionRecord с валидными вероятностями.
-			// Важно:
-			// - TrueLabel == PredLabel, чтобы не ловить p_true=0 в логлоссе/агрегации.
-			// - Prob*_Day / Prob*_DayMicro / Prob*_Total суммируются в 1.
 			var utcStart = new DateTime (2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 			var records = new List<BacktestRecord> ();
 
@@ -50,50 +45,76 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 				var date = utcStart.AddDays (i);
 				int label = i % 3;
 
-				// Одна и та же нормализованная тройка вероятностей по всем слоям.
 				double pUp = 0.5;
 				double pFlat = 0.2;
 				double pDown = 0.3;
 
-				records.Add (new BacktestRecord
+				var causal = new CausalPredictionRecord
 					{
 					DateUtc = date,
 					TrueLabel = label,
 					PredLabel = label,
 
-					FactMicroUp = false,
-					FactMicroDown = false,
+					PredLabel_Day = label,
+					PredLabel_DayMicro = label,
+					PredLabel_Total = label,
 
-					Entry = 100.0,
-					MaxHigh24 = 110.0,
-					MinLow24 = 90.0,
-					Close24 = 102.0,
-
-					RegimeDown = (i % 5 == 0),
-					MinMove = 0.02,
-
-					// Вероятности для дневного слоя
 					ProbUp_Day = pUp,
 					ProbFlat_Day = pFlat,
 					ProbDown_Day = pDown,
 
-					// Вероятности для Day+Micro слоя
 					ProbUp_DayMicro = pUp,
 					ProbFlat_DayMicro = pFlat,
 					ProbDown_DayMicro = pDown,
 
-					// Вероятности для Total слоя (Day+Micro+SL)
 					ProbUp_Total = pUp,
 					ProbFlat_Total = pFlat,
 					ProbDown_Total = pDown,
 
-					// Остальные поля (SL / Delayed / Anti и т.п.) в этом тесте не контролируются
-					// и могут использоваться как внутреннее состояние, поэтому оставляем по умолчанию.
+					Conf_Day = 0.7,
+					Conf_Micro = 0.7,
+
+					MicroPredicted = false,
+					PredMicroUp = false,
+					PredMicroDown = false,
+					FactMicroUp = false,
+					FactMicroDown = false,
+
+					RegimeDown = (i % 5 == 0),
+					Reason = "test",
+					MinMove = 0.02,
+
+					SlProb = 0.0,
+					SlHighDecision = false,
+					Conf_SlLong = 0.0,
+					Conf_SlShort = 0.0,
+
+					DelayedSource = null,
+					DelayedEntryAsked = false,
+					DelayedEntryUsed = false,
+					DelayedIntradayTpPct = 0.0,
+					DelayedIntradaySlPct = 0.0,
+					TargetLevelClass = 0
+					};
+
+				var forward = new ForwardOutcomes
+					{
+					Entry = 100.0,
+					MaxHigh24 = 110.0,
+					MinLow24 = 90.0,
+					Close24 = 102.0,
+					MinMove = 0.02,
+					WindowEndUtc = date.AddDays (1),
+					DayMinutes = Array.Empty<Candle1m> ()
+					};
+
+				records.Add (new BacktestRecord
+					{
+					Causal = causal,
+					Forward = forward
 					});
 				}
 
-			// Утренние точки: используем те же даты, чтобы путь данных был консистентным,
-			// но фичи пустые — BacktestRunner/aggregation сейчас их не читает.
 			var mornings = records
 				.Select (r => new DataRow
 					{
@@ -116,7 +137,6 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
 			var trainUntilUtc = utcStart.AddDays (10);
 
-			// Снимаем "снимок" базовых полей до запуска аналитики.
 			var snapshots = records
 				.Select (r => new CoreSnapshot
 					{
@@ -134,7 +154,6 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 					})
 				.ToList ();
 
-			// Act: запускаем тот же рантайм-путь, что и в консоли.
 			var runner = new BacktestRunner ();
 			runner.Run (
 				mornings: mornings,
@@ -144,7 +163,6 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 				config: config,
 				trainUntilUtc: trainUntilUtc);
 
-			// Assert: проверяем, что базовые поля каждого PredictionRecord не изменились.
 			Assert.Equal (snapshots.Count, records.Count);
 
 			for (int i = 0; i < records.Count; i++)

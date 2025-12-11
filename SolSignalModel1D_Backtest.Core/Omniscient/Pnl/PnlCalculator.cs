@@ -1,10 +1,11 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 	{
@@ -93,7 +94,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 				double entryPrice,
 				double exitPrice,
 				double leverage,
-				List<Candle1m> tradeMinutes )
+				IReadOnlyList<Candle1m> tradeMinutes )
 				{
 				if (globalDead) return;
 
@@ -348,18 +349,31 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					bool dLong = goLong;
 					double dEntry = rec.DelayedEntryPrice;
 					if (dEntry <= 0.0)
+						{
 						throw new InvalidOperationException (
 							$"[pnl] DelayedEntryPrice должен быть > 0 на {rec.DateUtc:yyyy-MM-dd}.");
+						}
 
 					DateTime delayedEntryTime = rec.DelayedEntryExecutedAtUtc ?? rec.DateUtc;
 
-					var delayedMinutes = dayMinutes
-						.Where (m => m.OpenTimeUtc >= delayedEntryTime)
-						.ToList ();
+					// Находим индекс первой 1m-свечи не раньше времени delayedEntryTime.
+					int delayedStartIndex = -1;
+					for (int i = 0; i < dayMinutes.Count; i++)
+						{
+						if (dayMinutes[i].OpenTimeUtc >= delayedEntryTime)
+							{
+							delayedStartIndex = i;
+							break;
+							}
+						}
 
-					if (delayedMinutes.Count == 0)
+					if (delayedStartIndex < 0 || delayedStartIndex >= dayMinutes.Count)
+						{
 						throw new InvalidOperationException (
 							$"[pnl] не найдены 1m-свечи для delayed-окна, начинающегося {rec.DateUtc:yyyy-MM-dd}.");
+						}
+
+					var delayedMinutes = new TradeMinutesSlice (dayMinutes, delayedStartIndex);
 
 					double dExit;
 					DateTime delayedExitTime;
@@ -368,17 +382,17 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						{
 						double tpPctD = rec.DelayedIntradayTpPct;
 						dExit = dLong ? dEntry * (1.0 + tpPctD) : dEntry * (1.0 - tpPctD);
-						delayedExitTime = delayedMinutes.First ().OpenTimeUtc;
+						delayedExitTime = delayedMinutes[0].OpenTimeUtc;
 						}
 					else if (rec.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst && useDelayedIntradayStops)
 						{
 						double slPctD = rec.DelayedIntradaySlPct;
 						dExit = dLong ? dEntry * (1.0 - slPctD) : dEntry * (1.0 + slPctD);
-						delayedExitTime = delayedMinutes.First ().OpenTimeUtc;
+						delayedExitTime = delayedMinutes[0].OpenTimeUtc;
 						}
 					else
 						{
-						var last = delayedMinutes.Last ();
+						var last = delayedMinutes[delayedMinutes.Count - 1];
 						dExit = last.Close;
 						delayedExitTime = dayEnd;
 						}
@@ -469,6 +483,159 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					);
 					}
 				}
+			}
+
+		/// <summary>
+		/// Лёгкий срез 1m-свечей без копирования данных.
+		/// Используется для delayed-сделок, чтобы не аллоцировать List на каждый день.
+		/// </summary>
+		private readonly struct TradeMinutesSlice : IReadOnlyList<Candle1m>
+			{
+			private readonly IReadOnlyList<Candle1m> _source;
+			private readonly int _startIndex;
+
+			public TradeMinutesSlice ( IReadOnlyList<Candle1m> source, int startIndex )
+				{
+				_source = source ?? throw new ArgumentNullException (nameof (source));
+
+				if (startIndex < 0 || startIndex > source.Count)
+					throw new ArgumentOutOfRangeException (nameof (startIndex));
+
+				_startIndex = startIndex;
+				}
+
+			public int Count => _source.Count - _startIndex;
+
+			public Candle1m this[int index]
+				{
+				get
+					{
+					if (index < 0 || index >= Count)
+						throw new ArgumentOutOfRangeException (nameof (index));
+
+					return _source[_startIndex + index];
+					}
+				}
+
+			public IEnumerator<Candle1m> GetEnumerator ()
+				{
+				for (int i = _startIndex; i < _source.Count; i++)
+					{
+					yield return _source[i];
+					}
+				}
+
+			IEnumerator IEnumerable.GetEnumerator () => GetEnumerator ();
+			}
+
+		/// <summary>
+		/// Расчёт MAE/MFE в долях от entry по 1m-пути сделки.
+		/// Работает поверх IReadOnlyList, чтобы одинаково обрабатывать и полный день,
+		/// и срезы (TradeMinutesSlice) без лишних ToList().
+		/// </summary>
+		private static (double mae, double mfe) ComputeMaeMfe (
+			double entryPrice,
+			bool isLong,
+			IReadOnlyList<Candle1m> minutes )
+			{
+			if (minutes == null) throw new ArgumentNullException (nameof (minutes));
+			if (minutes.Count == 0)
+				throw new InvalidOperationException ("[pnl] ComputeMaeMfe: minutes пуст.");
+
+			if (entryPrice <= 0.0)
+				throw new InvalidOperationException ("[pnl] ComputeMaeMfe: entryPrice должен быть > 0.");
+
+			double maxAdverse = 0.0;
+			double maxFavorable = 0.0;
+
+			for (int i = 0; i < minutes.Count; i++)
+				{
+				var m = minutes[i];
+
+				if (m.High <= 0.0 || m.Low <= 0.0)
+					continue;
+
+				double adverseMove;
+				double favorableMove;
+
+				if (isLong)
+					{
+					// Для long: неблагоприятный ход — падение до Low,
+					// благоприятный — рост до High.
+					adverseMove = (entryPrice - m.Low) / entryPrice;
+					if (adverseMove < 0.0) adverseMove = 0.0;
+
+					favorableMove = (m.High - entryPrice) / entryPrice;
+					if (favorableMove < 0.0) favorableMove = 0.0;
+					}
+				else
+					{
+					// Для short: неблагоприятный ход — рост до High,
+					// благоприятный — падение до Low.
+					adverseMove = (m.High - entryPrice) / entryPrice;
+					if (adverseMove < 0.0) adverseMove = 0.0;
+
+					favorableMove = (entryPrice - m.Low) / entryPrice;
+					if (favorableMove < 0.0) favorableMove = 0.0;
+					}
+
+				if (adverseMove > maxAdverse) maxAdverse = adverseMove;
+				if (favorableMove > maxFavorable) maxFavorable = favorableMove;
+				}
+
+			return (maxAdverse, maxFavorable);
+			}
+
+		// ============================================================
+		// Обёртки над старыми реализациями под List<Candle1m>,
+		// чтобы новые вызовы с IReadOnlyList<Candle1m> компилились
+		// и логика оставалась прежней.
+		// ============================================================
+
+		private static (double exitPrice, DateTime exitTimeUtc) TryHitDailyExit (
+			double entryPrice,
+			bool isLong,
+			double tpPct,
+			double slPct,
+			IReadOnlyList<Candle1m> minutes,
+			DateTime dayEndUtc )
+			{
+			if (minutes is List<Candle1m> list)
+				{
+				// Используем существующую реализацию без копий.
+				return TryHitDailyExit (entryPrice, isLong, tpPct, slPct, list, dayEndUtc);
+				}
+
+			// Фоллбек для произвольных IReadOnlyList (например, если где-то появится другой тип).
+			var listCopy = new List<Candle1m> (minutes.Count);
+			for (int i = 0; i < minutes.Count; i++)
+				{
+				listCopy.Add (minutes[i]);
+				}
+
+			return TryHitDailyExit (entryPrice, isLong, tpPct, slPct, listCopy, dayEndUtc);
+			}
+
+		private static (bool liqHit, double liqExitPrice) CheckLiquidation (
+			double entryPrice,
+			bool isLong,
+			double leverage,
+			IReadOnlyList<Candle1m> minutes )
+			{
+			if (minutes is List<Candle1m> list)
+				{
+				// Используем существующую реализацию без копий.
+				return CheckLiquidation (entryPrice, isLong, leverage, list);
+				}
+
+			// Фоллбек для TradeMinutesSlice и др.
+			var listCopy = new List<Candle1m> (minutes.Count);
+			for (int i = 0; i < minutes.Count; i++)
+				{
+				listCopy.Add (minutes[i]);
+				}
+
+			return CheckLiquidation (entryPrice, isLong, leverage, listCopy);
 			}
 		}
 	}

@@ -153,7 +153,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				{
 				if (al == 0.0) return ag == 0.0 ? 50.0 : 100.0;
 				double rs = ag / al;
-				return 100.0 - (100.0 / (1.0 + rs));
+				return 100.0 - 100.0 / (1.0 + rs);
 				}
 			}
 

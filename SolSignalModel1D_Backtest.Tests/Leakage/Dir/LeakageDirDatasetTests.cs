@@ -1,5 +1,5 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.ML.Dir;
+﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Dir;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Dir

@@ -10,22 +10,21 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 	/// NDJSON-стор для дневных индикаторов вида:
 	/// {"d":"YYYY-MM-DD","v":123.45}
 	/// </summary>
-	public sealed class IndicatorsNdjsonStore
+	public sealed class IndicatorsNdjsonStore ( string path )
 		{
-		private readonly string _path;
-		public IndicatorsNdjsonStore ( string path ) { _path = path; }
+		private readonly string _path = path;
 
-		public sealed class IndicatorLine
+		public sealed class IndicatorLine ( DateTime dateUtc, double value )
 			{
-			public IndicatorLine ( DateTime dateUtc, double value )
-				{
-				D = dateUtc.Date;
-				V = value;
-				}
-			public DateTime D { get; }
-			public double V { get; }
+			public DateTime D { get; } = dateUtc.Date;
+			public double V { get; } = value;
 			}
 
+		/// <summary>
+		/// Возвращает дату последней строки в NDJSON.
+		/// Любые проблемы с JSON/датой приводят к InvalidOperationException –
+		/// это лучше, чем молча потерять хвост индикаторов.
+		/// </summary>
 		public DateTime? TryGetLastDate ()
 			{
 			if (!File.Exists (_path)) return null;
@@ -45,15 +44,22 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 
 			try
 				{
-				var doc = JsonDocument.Parse (last);
+				using var doc = JsonDocument.Parse (last);
 				if (doc.RootElement.TryGetProperty ("d", out var dEl))
 					{
 					if (DateTime.TryParse (dEl.GetString (), out var d))
 						return DateTime.SpecifyKind (d.Date, DateTimeKind.Utc);
 					}
+
+				throw new InvalidOperationException (
+					$"[indicators] invalid last NDJSON line in '{_path}': '{last}'");
 				}
-			catch { }
-			return null;
+			catch (Exception ex)
+				{
+				throw new InvalidOperationException (
+					$"[indicators] failed to parse last NDJSON line in '{_path}': '{last}'",
+					ex);
+				}
 			}
 
 		public void Append ( IEnumerable<IndicatorLine> lines )
@@ -71,6 +77,11 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				}
 			}
 
+		/// <summary>
+		/// Читает словарь Date->value в диапазоне [startUtc.Date, endUtc.Date].
+		/// Любая битая строка приводит к InvalidOperationException – это как раз то,
+		/// чего ты хочешь: не маскировать ошибки в кэше индикаторов.
+		/// </summary>
 		public Dictionary<DateTime, double> ReadRange ( DateTime startUtc, DateTime endUtc )
 			{
 			var res = new Dictionary<DateTime, double> ();
@@ -79,24 +90,39 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 			using var fs = new FileStream (_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 			using var sr = new StreamReader (fs);
 			string? line;
+			int lineIndex = 0;
+
 			while ((line = sr.ReadLine ()) != null)
 				{
+				lineIndex++;
 				if (string.IsNullOrWhiteSpace (line)) continue;
 				try
 					{
-					var doc = JsonDocument.Parse (line);
+					using var doc = JsonDocument.Parse (line);
 					var root = doc.RootElement;
-					if (!root.TryGetProperty ("d", out var dEl)) continue;
-					if (!root.TryGetProperty ("v", out var vEl)) continue;
+					if (!root.TryGetProperty ("d", out var dEl))
+						throw new InvalidOperationException (
+							$"[indicators] property 'd' not found in '{_path}' at line #{lineIndex}: '{line}'");
+					if (!root.TryGetProperty ("v", out var vEl))
+						throw new InvalidOperationException (
+							$"[indicators] property 'v' not found in '{_path}' at line #{lineIndex}: '{line}'");
 
-					if (!DateTime.TryParse (dEl.GetString (), out var d)) continue;
+					if (!DateTime.TryParse (dEl.GetString (), out var d))
+						throw new InvalidOperationException (
+							$"[indicators] cannot parse 'd' as DateTime in '{_path}' at line #{lineIndex}: '{line}'");
+
 					var date = DateTime.SpecifyKind (d.Date, DateTimeKind.Utc);
 					if (date < startUtc.Date || date > endUtc.Date) continue;
 
 					double v = vEl.GetDouble ();
 					res[date] = v;
 					}
-				catch { /* skip bad rows */ }
+				catch (Exception ex)
+					{
+					throw new InvalidOperationException (
+						$"[indicators] invalid NDJSON in '{_path}' at line #{lineIndex}: '{line}'",
+						ex);
+					}
 				}
 			return res;
 			}

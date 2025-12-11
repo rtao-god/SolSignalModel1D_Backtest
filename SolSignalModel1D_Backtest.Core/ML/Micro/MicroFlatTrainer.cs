@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Micro

@@ -5,7 +5,7 @@ using SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -61,6 +61,8 @@ namespace SolSignalModel1D_Backtest
 			RuntimeLeakageDebug.PrintDailyModelTrainOosProbe (records, _trainUntilUtc, boundarySampleCount: 2);
 
 			DailyPnlProbe.RunSimpleProbe (records, _trainUntilUtc);
+
+			RunDailyPfi (allRows);
 
 			// --- 3. SL-модель (офлайн) поверх дневных предсказаний ---
 			PerfLogging.Measure (

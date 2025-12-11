@@ -5,9 +5,8 @@ using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -115,7 +114,7 @@ namespace SolSignalModel1D_Backtest
 		/// <summary>
 		/// Строит PredictionRecord'ы для ВСЕХ mornings (train + OOS).
 		/// Граница _trainUntilUtc:
-		/// - по-прежнему задаёт разделение train/OOS;
+		/// - задаёт разделение train/OOS;
 		/// - используется в логах и последующей аналитике,
 		///   но не режет список для стратегий/бэктеста.
 		/// </summary>
@@ -135,14 +134,10 @@ namespace SolSignalModel1D_Backtest
 					"Сначала должен быть вызван CreatePredictionEngineOrFallback.");
 				}
 
-			// Подготавливаем отсортированный список 6h-свечей для forward-метрик.
 			var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList ();
 			if (sorted6h.Count == 0)
 				throw new InvalidOperationException ("[forward] Пустая серия 6h для SOL");
 
-			// Предподготавливаем индекс свечей по времени открытия.
-			// Строим словарь в обратном порядке, чтобы при дублях времени
-			// использовался минимальный индекс (совпадает с FindIndex).
 			var indexByOpenTime = new Dictionary<DateTime, int> (sorted6h.Count);
 			for (int i = sorted6h.Count - 1; i >= 0; i--)
 				{
@@ -150,7 +145,6 @@ namespace SolSignalModel1D_Backtest
 				indexByOpenTime[openTime] = i;
 				}
 
-			// Все mornings по времени.
 			var orderedMornings = mornings as List<DataRow> ?? mornings.ToList ();
 
 			var oosCount = orderedMornings.Count (r => r.Date > _trainUntilUtc);
@@ -166,7 +160,6 @@ namespace SolSignalModel1D_Backtest
 					"Стратегические метрики будут train-like.");
 				}
 
-			// Локальный argmax для PredLabel_Day / PredLabel_DayMicro / PredLabel_Total.
 			static int ArgmaxLabel ( double pUp, double pFlat, double pDown )
 				{
 				if (pUp >= pFlat && pUp >= pDown) return 2;
@@ -178,18 +171,27 @@ namespace SolSignalModel1D_Backtest
 
 			foreach (var r in orderedMornings)
 				{
-				// Предсказание через PredictionEngine (дневная модель + микро).
+				// 1. Каузальное предсказание.
 				var pr = engine.Predict (r);
 				var cls = pr.Class;
 				var microUp = pr.Micro.ConsiderUp;
 				var microDn = pr.Micro.ConsiderDown;
 				var reason = pr.Reason;
 
-				// Вычисляем показатели по forward-окну (до базового выхода t_exit).
-				var entryUtc = r.Date;
+				var day = pr.Day;
+				var dayWithMicro = pr.DayWithMicro;
 
-				// Общий NyTz (определён в другом partial Program), чтобы baseline-окно
-				// совпадало с PnL/SL/Delayed.
+				var predLabelDay = ArgmaxLabel (day.PUp, day.PFlat, day.PDown);
+				var predLabelDayMicro = ArgmaxLabel (dayWithMicro.PUp, dayWithMicro.PFlat, dayWithMicro.PDown);
+
+				// На этом этапе Total = Day+Micro, SL-оверлей может обновить позже.
+				double probUpTotal = dayWithMicro.PUp;
+				double probFlatTotal = dayWithMicro.PFlat;
+				double probDownTotal = dayWithMicro.PDown;
+				int predLabelTotal = predLabelDayMicro;
+
+				// 2. Forward-окно по 6h-свечам.
+				var entryUtc = r.Date;
 				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
 
 				if (!indexByOpenTime.TryGetValue (entryUtc, out var entryIdx))
@@ -246,85 +248,73 @@ namespace SolSignalModel1D_Backtest
 
 				var fwdClose = sorted6h[exitIdx].Close;
 
-				// Вероятности из PredictionEngine.
-				var day = pr.Day;
-				var dayWithMicro = pr.DayWithMicro;
-
-				var predLabelDay = ArgmaxLabel (day.PUp, day.PFlat, day.PDown);
-				var predLabelDayMicro = ArgmaxLabel (dayWithMicro.PUp, dayWithMicro.PFlat, dayWithMicro.PDown);
-
-				// На этом этапе Total = Day+Micro. SL-оверлей (RunSlModelOffline) при необходимости обновит эти поля.
-				double probUpTotal = dayWithMicro.PUp;
-				double probFlatTotal = dayWithMicro.PFlat;
-				double probDownTotal = dayWithMicro.PDown;
-				int predLabelTotal = predLabelDayMicro;
-
-				list.Add (new BacktestRecord
+				// 3. Сборка каузальной части.
+				var causal = new CausalPredictionRecord
 					{
 					DateUtc = r.Date,
 
-					// факт + "старый" PredLabel (как и раньше)
 					TrueLabel = r.Label,
 					PredLabel = cls,
 
-					// Day-слой
 					PredLabel_Day = predLabelDay,
+					PredLabel_DayMicro = predLabelDayMicro,
+					PredLabel_Total = predLabelTotal,
+
 					ProbUp_Day = day.PUp,
 					ProbFlat_Day = day.PFlat,
 					ProbDown_Day = day.PDown,
-					Conf_Day = day.Confidence,
 
-					// Day+Micro
-					PredLabel_DayMicro = predLabelDayMicro,
 					ProbUp_DayMicro = dayWithMicro.PUp,
 					ProbFlat_DayMicro = dayWithMicro.PFlat,
 					ProbDown_DayMicro = dayWithMicro.PDown,
-					Conf_Micro = dayWithMicro.Confidence,
 
-					// Total (пока = Day+Micro; SL-оверлей обновит при наличии)
-					PredLabel_Total = predLabelTotal,
 					ProbUp_Total = probUpTotal,
 					ProbFlat_Total = probFlatTotal,
 					ProbDown_Total = probDownTotal,
 
-					// микро-факт / прогноз
+					Conf_Day = day.Confidence,
+					Conf_Micro = dayWithMicro.Confidence,
+
+					MicroPredicted = microUp || microDn,
 					PredMicroUp = microUp,
 					PredMicroDown = microDn,
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown,
 
-					// цены дня
-					Entry = entryPrice,
-					MaxHigh24 = maxHigh,
-					MinLow24 = minLow,
-					Close24 = fwdClose,
-
-					// контекст
 					RegimeDown = r.RegimeDown,
 					Reason = reason,
 					MinMove = r.MinMove,
 
-					// delayed A/B
-					DelayedSource = string.Empty,
-					DelayedEntryAsked = false,
-					DelayedEntryUsed = false,
-					DelayedEntryExecuted = false,
-					DelayedEntryPrice = 0.0,
-					DelayedIntradayResult = 0,
-					DelayedIntradayTpPct = 0.0,
-					DelayedIntradaySlPct = 0.0,
-					TargetLevelClass = 0,
-					DelayedWhyNot = null,
-					DelayedEntryExecutedAtUtc = null,
-
-					// SL (оффлайн/онлайн) пока не заполнен; будет обновлён в RunSlModelOffline/DayExecutor
 					SlProb = 0.0,
 					SlHighDecision = false,
 					Conf_SlLong = 0.0,
 					Conf_SlShort = 0.0,
 
-					// Anti-D
-					AntiDirectionApplied = false
+					DelayedSource = null,
+					DelayedEntryAsked = false,
+					DelayedEntryUsed = false,
+					DelayedIntradayTpPct = 0.0,
+					DelayedIntradaySlPct = 0.0,
+					TargetLevelClass = 0
+					};
+
+				// 4. Сборка forward-части.
+				var forward = new ForwardOutcomes
+					{
+					Entry = entryPrice,
+					MaxHigh24 = maxHigh,
+					MinLow24 = minLow,
+					Close24 = fwdClose,
+					MinMove = r.MinMove,
+					WindowEndUtc = exitUtc,
+					DayMinutes = Array.Empty<Candle1m> ()
+					};
+
+				// 5. Финальный BacktestRecord.
+				list.Add (new BacktestRecord
+					{
+					Causal = causal,
+					Forward = forward
 					});
 				}
 

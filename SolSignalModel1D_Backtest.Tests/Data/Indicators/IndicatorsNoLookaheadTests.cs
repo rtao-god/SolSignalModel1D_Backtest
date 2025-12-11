@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
+using SolSignalModel1D_Backtest.Core.Data.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
@@ -38,7 +38,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				}
 
 			// Берём ретурн на индексе 5 относительно 1 и 3 окон назад.
-			double r1_before = CoreIndicators.Ret6h (arr, idx: 5, windowsBack: 1);
+			double r1_before = Indicators.Ret6h (arr, idx: 5, windowsBack: 1);
 			double r3_before = CoreIndicators.Ret6h (arr, idx: 5, windowsBack: 3);
 
 			// Мутируем СОВСЕМ будущее: свечу с индексом 9.
@@ -107,7 +107,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 
 			const int period = 14;
 
-			var rsiBefore = CoreIndicators.ComputeRsi6h (arr, period);
+			var rsiBefore = Indicators.ComputeRsi6h (arr, period);
 			var key = arr[period + 2].OpenTimeUtc; // достаточно далеко от хвоста
 
 			Assert.True (rsiBefore.ContainsKey (key), "RSI должен быть посчитан для выбранного ключа.");

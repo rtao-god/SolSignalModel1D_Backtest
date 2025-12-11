@@ -9,21 +9,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <Compile Remove="Causal\Data\Новая папка\**" />
-	  <Compile Remove="ML\SL\Новая папка\**" />
-	  <EmbeddedResource Remove="Causal\Data\Новая папка\**" />
-	  <EmbeddedResource Remove="ML\SL\Новая папка\**" />
-	  <None Remove="Causal\Data\Новая папка\**" />
-	  <None Remove="ML\SL\Новая папка\**" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<PackageReference Include="Microsoft.ML" Version="4.0.3" />
 		<PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.3" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="ML\Daily\" />
 	</ItemGroup>
 
 </Project>

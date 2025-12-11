@@ -1,11 +1,11 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -78,32 +78,40 @@ namespace SolSignalModel1D_Backtest
 			// *** Итерируем по каждому дню и решаем, использовать ли отложенный вход A. ***
 			foreach (var rec in records)
 				{
+				if (rec.Causal == null)
+					{
+					throw new InvalidOperationException (
+						$"[PopulateDelayedA] BacktestRecord.Causal is null for date {rec.DateUtc:O}.");
+					}
+
+				var causal = rec.Causal;
+
 				// Направление дневной сделки
-				bool wantLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
-				bool wantShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+				bool wantLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
+				bool wantShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
 
 				if (!wantLong && !wantShort)
 					{
-					// Нет торгового сигнала – это нормальная ситуация, не ошибка данных
-					rec.DelayedEntryUsed = false;
+					// Нет торгового сигнала – это нормальная ситуация, не ошибка данных.
+					causal.DelayedEntryUsed = false;
 					continue;
 					}
 
-				// 1. Гейт по SL-модели: используем A только если SL-модель считает день рискованным
-				if (!rec.SlHighDecision)
+				// 1. Гейт по SL-модели: используем A только если SL-модель считает день рискованным.
+				if (!causal.SlHighDecision)
 					{
-					rec.DelayedEntryUsed = false;
+					causal.DelayedEntryUsed = false;
 					continue;
 					}
 
-				// dayStart = NY-утро (через PredictionRecord.DateUtc)
+				// dayStart = NY-утро (через BacktestRecord.DateUtc)
 				DateTime dayStart = rec.DateUtc;
 
 				// t_exit (baseline) = следующее рабочее NY-утро 08:00 (минус 2 минуты) в UTC.
 				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
 
-				bool strongSignal = (rec.PredLabel == 2 || rec.PredLabel == 0);
-				double dayMinMove = rec.MinMove > 0 ? rec.MinMove : 0.02;
+				bool strongSignal = (causal.PredLabel == 2 || causal.PredLabel == 0);
+				double dayMinMove = causal.MinMove > 0 ? causal.MinMove : 0.02;
 
 				// 1h внутри baseline-окна — для фич модели A
 				var dayHours = sol1h
@@ -136,14 +144,14 @@ namespace SolSignalModel1D_Backtest
 				// 2. Гейт по модели A
 				if (!predA.PredictedLabel || predA.Probability < 0.70f)
 					{
-					rec.DelayedEntryUsed = false;
+					causal.DelayedEntryUsed = false;
 					continue;
 					}
 
-				// 3. Если дошли сюда — A сказала "да", SL сказал "рискованно"
-				rec.DelayedSource = "A";
-				rec.DelayedEntryAsked = true;
-				rec.DelayedEntryUsed = true;
+				// 3. Если дошли сюда — A сказала "да", SL сказал "рискованно".
+				causal.DelayedSource = "A";
+				causal.DelayedEntryAsked = true;
+				causal.DelayedEntryUsed = true;
 
 				// Минутки внутри baseline-окна
 				var dayMinutes = sol1m
@@ -194,19 +202,19 @@ namespace SolSignalModel1D_Backtest
 				rec.DelayedEntryExecutedAtUtc = fillBar.OpenTimeUtc;
 				rec.DelayedEntryPrice = triggerPrice;
 
-				// Привязка TP/SL к MinMove
+				// Привязка TP/SL к MinMove (каузальные параметры уходят в CausalPredictionRecord).
 				double effectiveTpPct = tpPct;
 				double effectiveSlPct = slPct;
 
-				if (rec.MinMove > 0.0)
+				if (causal.MinMove > 0.0)
 					{
-					double linkedTp = rec.MinMove * 1.2;
+					double linkedTp = causal.MinMove * 1.2;
 					if (linkedTp > effectiveTpPct)
 						effectiveTpPct = linkedTp;
 					}
 
-				rec.DelayedIntradayTpPct = effectiveTpPct;
-				rec.DelayedIntradaySlPct = effectiveSlPct;
+				causal.DelayedIntradayTpPct = effectiveTpPct;
+				causal.DelayedIntradaySlPct = effectiveSlPct;
 
 				// Уровни TP/SL от цены фактического исполнения
 				double tpLevel = wantLong

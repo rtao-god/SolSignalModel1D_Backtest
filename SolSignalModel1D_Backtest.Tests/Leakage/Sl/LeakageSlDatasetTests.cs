@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl

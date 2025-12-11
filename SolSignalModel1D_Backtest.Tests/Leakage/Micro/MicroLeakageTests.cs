@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Microsoft.ML;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 	{

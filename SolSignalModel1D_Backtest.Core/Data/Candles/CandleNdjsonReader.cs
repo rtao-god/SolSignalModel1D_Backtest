@@ -19,8 +19,11 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			using var sr = new StreamReader (fs);
 
 			string? line;
+			int lineIndex = 0;
+
 			while ((line = sr.ReadLine ()) != null)
 				{
+				lineIndex++;
 				if (line.Length == 0) continue;
 
 				try
@@ -50,9 +53,12 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 						Close = c
 						});
 					}
-				catch
+				catch (Exception ex)
 					{
-					// пропускаем битые строки
+					// Любая проблема с JSON/датой/числами – явный фейл.
+					throw new InvalidOperationException (
+						$"[candles:LoadRange1m] invalid NDJSON in '{path}' at line #{lineIndex}: '{line}'",
+						ex);
 					}
 				}
 			return res;

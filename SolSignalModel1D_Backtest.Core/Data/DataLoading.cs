@@ -428,7 +428,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			}
 
 		// ===== диапазонный загрузчик =====
-		public static async Task<List<(DateTime openUtc, double open, double high, double low, double close)>> GetBinanceKlinesRange (
+		public static async Task<List<(DateTime openUtc, double open, double high, double low,     double close)>> GetBinanceKlinesRange (
 			HttpClient http,
 			string symbol,
 			string interval,
@@ -437,28 +437,23 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			{
 			if (http == null) throw new ArgumentNullException (nameof (http));
 
-			// Пытаемся оценить длину интервала, чтобы корректно обрабатывать случаи to<=from.
 			var intervalLen = TryGetBinanceIntervalLength (interval);
 
-			// Ситуация: toUtc <= fromUtc.
-			// Для хвостовых апдейтов это обычно означает, что следующая свеча ещё
-			// не началась/не закончилась и обновлять нечего.
 			if (toUtc <= fromUtc)
 				{
 				if (intervalLen.HasValue)
 					{
 					var diff = fromUtc - toUtc; // >= 0 при to<=from
 
-					// Если разница не больше одной свечи (+ небольшой запас),
-					// считаем это нормальным "пустым" диапазоном и просто выходим.
+					// Маленький "отрицательный" диапазон (ещё не началась следующая свеча) — нормально,
+					// просто ничего не загружаем.
 					if (diff <= intervalLen.Value + TimeSpan.FromSeconds (5))
 						{
 						return new List<(DateTime openUtc, double open, double high, double low, double close)> (0);
 						}
 					}
 
-				// Если разрыв больше длины интервала — это уже реально аномалия.
-				// Её лучше не маскировать.
+				// Реальная аномалия — toUtc сильно меньше fromUtc.
 				throw new ArgumentException ("toUtc < fromUtc для диапазона klines", nameof (toUtc));
 				}
 
@@ -481,7 +476,11 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				using var resp = await http.GetAsync (url);
 				if (!resp.IsSuccessStatusCode)
+					{
+					Console.WriteLine (
+						$"[binance-range] HTTP {(int) resp.StatusCode} при загрузке {symbol} {interval}, url={url}");
 					resp.EnsureSuccessStatusCode ();
+					}
 
 				await using var s = await resp.Content.ReadAsStreamAsync ();
 				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
@@ -507,7 +506,19 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					}
 
 				if (maxTs == 0)
-					break;
+					{
+					// Ненормальная ситуация: Binance вернул непустой массив,
+					// но ни одной валидной метки времени мы не увидели.
+					var cursorDt = DateTimeOffset.FromUnixTimeMilliseconds (cursor).UtcDateTime;
+					var endDt = DateTimeOffset.FromUnixTimeMilliseconds (endMs).UtcDateTime;
+
+					var msg =
+						$"[binance-range] {symbol} {interval}: invalid klines payload, maxTs=0 " +
+						$"for page [{cursorDt:O}..{endDt:O}], url={url}";
+
+					Console.WriteLine (msg);
+					throw new InvalidOperationException (msg);
+					}
 
 				cursor = maxTs + 1;
 				}

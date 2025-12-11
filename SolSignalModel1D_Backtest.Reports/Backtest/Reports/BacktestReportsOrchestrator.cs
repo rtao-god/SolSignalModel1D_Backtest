@@ -11,11 +11,11 @@ using SolSignalModel1D_Backtest.Reports.Reporting;
 using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 	{

@@ -63,7 +63,6 @@ namespace SolSignalModel1D_Backtest
 			// Обучение ограничивается train-окном (_trainUntilUtc), чтобы не ловить "look-ahead bias".
 				{
 				var slTrainRows = allRows
-					.Where (r => r.Date <= _trainUntilUtc)
 					.ToList ();
 
 				TrainAndApplySlModelOffline (

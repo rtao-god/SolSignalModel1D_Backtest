@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 using AppProgram = SolSignalModel1D_Backtest.Program;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;

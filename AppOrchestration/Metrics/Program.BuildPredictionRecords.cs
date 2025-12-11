@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{

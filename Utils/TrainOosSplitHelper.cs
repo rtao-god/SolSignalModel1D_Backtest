@@ -1,4 +1,4 @@
-﻿using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+﻿using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest.Utils
 	{
