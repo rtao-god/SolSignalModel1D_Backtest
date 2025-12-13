@@ -1,4 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
@@ -6,8 +8,7 @@ using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using System;
-using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
@@ -20,12 +21,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		/// <summary>
-		/// Запускает бэктест по готовым данным и заранее собранным PolicySpec.
-		/// Все "магические числа" (SL/TP, набор политик) приходят через BacktestConfig.
-		/// Граница trainUntilUtc передаётся снаружи (из Program), чтобы Core не зависел
-		/// от верхнего проекта.
-		/// </summary>
 		public void Run (
 			IReadOnlyList<DataRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
@@ -40,32 +35,41 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (policies == null) throw new ArgumentNullException (nameof (policies));
 			if (config == null) throw new ArgumentNullException (nameof (config));
 
+			// ЕДИНСТВЕННЫЙ контракт train/OOS — через baseline-exit (TrainBoundary).
+			// Это убирает "ручные" <=/> по датам и режет boundary leakage.
+			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
+
 			// =====================================================================
 			// Диагностика пути данных: диапазоны дат и расхождения mornings vs records.
-			// Это не меняет поведение бэктеста, только даёт доп. лог в консоль.
 			// =====================================================================
 
-			// Диапазон и разбивка train/OOS по BacktestRecord
 			int recordsCount = records.Count;
-			int trainCount = 0;
-			int oosCount = 0;
+
 			DateTime? recMin = null;
 			DateTime? recMax = null;
+
+			var recordDates = new HashSet<DateTime> ();
+			var causalRecords = new List<CausalPredictionRecord> (recordsCount);
 
 			for (int i = 0; i < recordsCount; i++)
 				{
 				var r = records[i];
-				var d = r.DateUtc;
 
-				if (!recMin.HasValue || d < recMin.Value)
-					recMin = d;
-				if (!recMax.HasValue || d > recMax.Value)
-					recMax = d;
+				var c = r.Causal;
+				if (c == null)
+					{
+					throw new InvalidOperationException (
+						$"[BacktestRunner] records[{i}].Causal is null.");
+					}
 
-				if (d <= trainUntilUtc)
-					trainCount++;
-				else
-					oosCount++;
+				causalRecords.Add (c);
+
+				var d = c.DateUtc;
+
+				if (!recMin.HasValue || d < recMin.Value) recMin = d;
+				if (!recMax.HasValue || d > recMax.Value) recMax = d;
+
+				recordDates.Add (d.Date);
 				}
 
 			if (recordsCount > 0)
@@ -73,28 +77,34 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				Console.WriteLine (
 					$"[diag-path] records: count={recordsCount}, " +
 					$"range={recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}");
-				Console.WriteLine (
-					$"[diag-path] trainUntil={trainUntilUtc:yyyy-MM-dd}, " +
-					$"train={trainCount}, oos={oosCount}");
 				}
 			else
 				{
 				Console.WriteLine ("[diag-path] records: count=0");
 				}
 
+			// Разбиение records по boundary (exit<=trainUntil / exit>trainUntil / excluded).
+			var splitRecords = boundary.Split (records, r => r.Causal.DateUtc);
+
+			Console.WriteLine (
+				$"[diag-path] boundary trainUntil={boundary.TrainUntilIsoDate}, " +
+				$"train={splitRecords.Train.Count}, oos={splitRecords.Oos.Count}, excluded={splitRecords.Excluded.Count}");
+
 			// Диапазон по mornings (DataRow.Date)
 			int morningsCount = mornings.Count;
 			DateTime? mornMin = null;
 			DateTime? mornMax = null;
 
+			var morningDates = new HashSet<DateTime> ();
+
 			for (int i = 0; i < morningsCount; i++)
 				{
 				var d = mornings[i].Date;
 
-				if (!mornMin.HasValue || d < mornMin.Value)
-					mornMin = d;
-				if (!mornMax.HasValue || d > mornMax.Value)
-					mornMax = d;
+				if (!mornMin.HasValue || d < mornMin.Value) mornMin = d;
+				if (!mornMax.HasValue || d > mornMax.Value) mornMax = d;
+
+				morningDates.Add (d.Date);
 				}
 
 			if (morningsCount > 0)
@@ -108,19 +118,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				Console.WriteLine ("[diag-path] mornings: count=0");
 				}
 
-			// Сравниваем множества календарных дат
-			var recordDates = new HashSet<DateTime> ();
-			for (int i = 0; i < recordsCount; i++)
-				{
-				recordDates.Add (records[i].DateUtc.Date);
-				}
-
-			var morningDates = new HashSet<DateTime> ();
-			for (int i = 0; i < morningsCount; i++)
-				{
-				morningDates.Add (mornings[i].Date.Date);
-				}
-
+			// Сравниваем множества календарных дат (помогает ловить "дырки" и смещения пайплайна).
 			var recordOnly = new List<DateTime> ();
 			foreach (var d in recordDates)
 				{
@@ -137,69 +135,44 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				}
 			morningOnly.Sort ();
 
-			if (recordOnly.Count > 10)
-				recordOnly = recordOnly.GetRange (0, 10);
-			if (morningOnly.Count > 10)
-				morningOnly = morningOnly.GetRange (0, 10);
+			if (recordOnly.Count > 10) recordOnly = recordOnly.GetRange (0, 10);
+			if (morningOnly.Count > 10) morningOnly = morningOnly.GetRange (0, 10);
 
 			Console.WriteLine ("[diag-path] dates in records but not in mornings (first 10):");
-			if (recordOnly.Count == 0)
-				{
-				Console.WriteLine ("  (none)");
-				}
+			if (recordOnly.Count == 0) Console.WriteLine ("  (none)");
 			else
 				{
 				for (int i = 0; i < recordOnly.Count; i++)
-					{
 					Console.WriteLine ($"  {recordOnly[i]:yyyy-MM-dd}");
-					}
 				}
 
 			Console.WriteLine ("[diag-path] dates in mornings but not in records (first 10):");
-			if (morningOnly.Count == 0)
-				{
-				Console.WriteLine ("  (none)");
-				}
+			if (morningOnly.Count == 0) Console.WriteLine ("  (none)");
 			else
 				{
 				for (int i = 0; i < morningOnly.Count; i++)
-					{
 					Console.WriteLine ($"  {morningOnly[i]:yyyy-MM-dd}");
-					}
 				}
 
 			// =====================================================================
-			// Каузальные записи для аналитических принтеров.
+			// Каузальная аналитика (не должна зависеть от forward и 1m-path).
 			// =====================================================================
 
-			var causalRecords = new List<CausalPredictionRecord> (recordsCount);
-			for (int i = 0; i < recordsCount; i++)
-				{
-				var c = records[i].Causal;
-				if (c == null)
-					{
-					throw new InvalidOperationException (
-						$"[BacktestRunner] records[{i}].Causal is null for date {records[i].DateUtc:O}.");
-					}
-
-				causalRecords.Add (c);
-				}
-
-			// 2) Запуск AggregationProbsPrinter (аггрегированные вероятности)
 			AggregationProbsPrinter.Print (
 				causalRecords,
-				trainUntilUtc,
+				boundary,
 				recentDays: 240,
 				debugLastDays: 10);
 
-			// 3) Метрики accuracy / micro-F1 / logloss по Day / Day+Micro / Total
 			AggregationMetricsPrinter.Print (
 				causalRecords,
-				trainUntilUtc,
+				boundary,
 				recentDays: 240);
 
-			// === 2. Omniscient-аналитика (BacktestRecord + 1m) ===
-			// 1) Модельные метрики (дневная confusion + SL path-based, 1m)
+			// =====================================================================
+			// Omniscient-аналитика (BacktestRecord + 1m)
+			// =====================================================================
+
 			BacktestModelStatsPrinter.Print (
 				records,
 				candles1m,

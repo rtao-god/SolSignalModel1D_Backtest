@@ -1,5 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.Indicators;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			{
 			var arr = BuildTrendingSeries (50, 100.0, 2.0);
 
-			var atr = Indicators.ComputeAtr6h (arr, period: 14);
+			var atr = CoreIndicators.ComputeAtr6h (arr, period: 14);
 
 			// Должны быть какие-то значения и все они > 0.
 			Assert.NotEmpty (atr);

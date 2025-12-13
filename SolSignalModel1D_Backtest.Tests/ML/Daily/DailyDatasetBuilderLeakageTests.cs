@@ -1,132 +1,90 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using System;
-using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 	{
-	/// <summary>
-	/// Тесты, которые проверяют, что DailyDatasetBuilder:
-	/// - режет трейновый набор по baseline-exit, а не просто по r.Date;
-	/// - не даёт утечки path-based факта за trainUntil.
-	/// </summary>
 	public sealed class DailyDatasetBuilderLeakageTests
 		{
-		/// <summary>
-		/// Сценарий:
-		/// - берём один будний день (entryUtc);
-		/// - вычисляем его baseline-exit через Windowing.ComputeBaselineExitUtc;
-		/// - собираем два датасета:
-		///   1) trainUntil строго между entryUtc и exitUtc — строка ДОЛЖНА быть выкинута;
-		///   2) trainUntil после exitUtc — строка ДОЛЖНА остаться.
-		///
-		/// Если кто-то в будущем уберёт фильтрацию по baseline-exit и будет смотреть только на Date,
-		/// этот тест развалится: при trainUntil между entry и exit строка окажется в TrainRows.
-		/// </summary>
 		[Fact]
-		public void Build_UsesBaselineExitToCutTrainRows ()
+		public void Build_CutsTrainRowsByBaselineExit_NotByEntryUtc ()
 			{
-			var nyTz = TimeZones.NewYork;
+			var nyTz = Windowing.NyTz;
 
-			// Берём заведомо будний день в NY (понедельник, 08:00 NY).
-			var entryLocalNy = new DateTime (2025, 1, 6, 8, 0, 0, DateTimeKind.Unspecified);
-			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocalNy, nyTz);
-
+			var entryUtc = NyTestDates.ToUtc (NyTestDates.NyLocal (2025, 1, 6, 8, 0)); // понедельник
 			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			Assert.True (exitUtc > entryUtc);
 
 			var rows = new List<DataRow>
 			{
-				CreateRow(
-					dateUtc: entryUtc,
-					label: 2,
-					regimeDown: false)
+				CreateRow(dateUtc: entryUtc, label: 2, regimeDown: false)
 			};
 
-			// trainUntil строго между entry и exit → baseline-окно залезает в "будущее".
-			var trainUntilBeforeExit = entryUtc + TimeSpan.FromTicks ((exitUtc - entryUtc).Ticks / 2);
+			// trainUntil между entry и exit => baseline-окно пересекает "будущее" => row обязана быть выкинута из train.
+			var midTicks = entryUtc.Ticks + (exitUtc.Ticks - entryUtc.Ticks) / 2;
+			var trainUntilBetween = new DateTime (midTicks, DateTimeKind.Utc);
 
-			var dsBeforeExit = DailyDatasetBuilder.Build (
-				allRows: rows,
-				trainUntil: trainUntilBeforeExit,
-				balanceMove: false,
-				balanceDir: false,
-				balanceTargetFrac: 0.5,
-				datesToExclude: null);
-
-			// Строка НЕ должна попасть в train-набор:
+			// Позиционный вызов: переименование trainUntil* в Core не ломает тест.
+			var dsBeforeExit = DailyDatasetBuilder.Build (rows, trainUntilBetween, false, false, 0.5, null);
 			Assert.Empty (dsBeforeExit.TrainRows);
 
-			// Теперь ставим trainUntil после baseline-exit — строка уже полностью "в прошлом".
+			// trainUntil после exit => row должна попасть.
 			var trainUntilAfterExit = exitUtc.AddMinutes (1);
-
-			var dsAfterExit = DailyDatasetBuilder.Build (
-				allRows: rows,
-				trainUntil: trainUntilAfterExit,
-				balanceMove: false,
-				balanceDir: false,
-				balanceTargetFrac: 0.5,
-				datesToExclude: null);
+			var dsAfterExit = DailyDatasetBuilder.Build (rows, trainUntilAfterExit, false, false, 0.5, null);
 
 			Assert.Single (dsAfterExit.TrainRows);
 			Assert.Equal (entryUtc, dsAfterExit.TrainRows[0].Date);
 			}
 
-		/// <summary>
-		/// Дополнительный sanity-тест:
-		/// - строим разумный диапазон будних дат;
-		/// - выбираем trainUntil где-то "внутри";
-		/// - убеждаемся, что все TrainRows удовлетворяют двум условиям:
-		///   1) r.Date <= trainUntil;
-		///   2) baseline-exit(r.Date) <= trainUntil.
-		///
-		/// Это уже именно инвариант "нет утечек через baseline-exit", а не просто проверка куска кода.
-		/// </summary>
 		[Fact]
-		public void Build_TrainRowsHaveBaselineExitNotAfterTrainUntil ()
+		public void Build_AllTrainListsContainOnlyTrainEntries_ByTrainBoundary ()
 			{
-			var nyTz = TimeZones.NewYork;
+			var nyTz = Windowing.NyTz;
 
-			var rows = new List<DataRow> ();
-			var local = new DateTime (2025, 1, 1, 8, 0, 0, DateTimeKind.Unspecified);
+			var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
+				startNyLocalDate: NyTestDates.NyLocal (2025, 1, 1, 0),
+				count: 120,
+				hour: 8);
 
-			// Берём ~40 NY-утр подряд, пропуская выходные.
-			while (rows.Count < 40)
+			var rows = new List<DataRow> (datesUtc.Count);
+			for (int i = 0; i < datesUtc.Count; i++)
 				{
-				if (local.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday)
-					{
-					var entryUtc = TimeZoneInfo.ConvertTimeToUtc (local, nyTz);
-					rows.Add (CreateRow (dateUtc: entryUtc, label: 2, regimeDown: false));
-					}
-
-				local = local.AddDays (1);
+				rows.Add (CreateRow (
+					dateUtc: datesUtc[i],
+					label: i % 3,
+					regimeDown: (i % 5 == 0)));
 				}
 
-			// В качестве trainUntil берём baseline-exit последнего дня + чуть-чуть.
-			var lastEntry = rows[^1].Date;
-			var lastExit = Windowing.ComputeBaselineExitUtc (lastEntry, nyTz);
-			var trainUntil = lastExit.AddMinutes (1);
+			// trainUntil задаём как baseline-exit одной из поздних дат, чтобы граница была "реалистичной" (как в проде).
+			var pivotEntry = datesUtc[^20];
+			var pivotExit = Windowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
+			var trainUntilUtc = pivotExit.AddMinutes (1);
 
-			var ds = DailyDatasetBuilder.Build (
-				allRows: rows,
-				trainUntil: trainUntil,
-				balanceMove: false,
-				balanceDir: false,
-				balanceTargetFrac: 0.5,
-				datesToExclude: null);
+			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
+
+			// Позиционный вызов: переименование trainUntil* в Core не ломает тест.
+			var ds = DailyDatasetBuilder.Build (rows, trainUntilUtc, false, false, 0.5, null);
 
 			Assert.NotEmpty (ds.TrainRows);
 
-			foreach (var r in ds.TrainRows)
+			static void AssertAllTrain ( IEnumerable<DataRow> xs, TrainBoundary b, string tag )
 				{
-				Assert.True (r.Date <= trainUntil);
-
-				var exit = Windowing.ComputeBaselineExitUtc (r.Date, nyTz);
-				Assert.True (exit <= trainUntil);
+				foreach (var r in xs)
+					{
+					Assert.True (
+						b.IsTrainEntry (r.Date),
+						$"{tag} contains non-train entry by TrainBoundary: {r.Date:O}");
+					}
 				}
+
+			AssertAllTrain (ds.TrainRows, boundary, nameof (ds.TrainRows));
+			AssertAllTrain (ds.MoveTrainRows, boundary, nameof (ds.MoveTrainRows));
+			AssertAllTrain (ds.DirNormalRows, boundary, nameof (ds.DirNormalRows));
+			AssertAllTrain (ds.DirDownRows, boundary, nameof (ds.DirDownRows));
 			}
 
 		private static DataRow CreateRow ( DateTime dateUtc, int label, bool regimeDown )
@@ -136,8 +94,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				Date = dateUtc,
 				Label = label,
 				RegimeDown = regimeDown,
-				IsMorning = true,   // имитируем утреннюю строку RowBuilder'а
-				MinMove = 0.02,     // разумный минимум, чтобы сильно не отличаться от живых данных
+				IsMorning = true,
+				MinMove = 0.02,
 				Features = new double[4]
 				};
 			}

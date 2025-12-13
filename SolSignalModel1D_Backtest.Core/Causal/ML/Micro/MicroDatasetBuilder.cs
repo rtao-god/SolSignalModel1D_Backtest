@@ -1,58 +1,79 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Utils;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 	{
-	/// <summary>
-	/// Датасет для микро-слоя:
-	/// - TrainRows — все train-дни;
-	/// - MicroRows — только дни с FactMicroUp/FactMicroDown.
-	/// </summary>
 	public sealed class MicroDataset
 		{
-		public List<DataRow> TrainRows { get; }
-		public List<DataRow> MicroRows { get; }
+		public IReadOnlyList<DataRow> TrainRows { get; }
+		public IReadOnlyList<DataRow> MicroRows { get; }
 		public DateTime TrainUntilUtc { get; }
 
 		public MicroDataset (
-			List<DataRow> trainRows,
-			List<DataRow> microRows,
+			IReadOnlyList<DataRow> trainRows,
+			IReadOnlyList<DataRow> microRows,
 			DateTime trainUntilUtc )
 			{
 			TrainRows = trainRows ?? throw new ArgumentNullException (nameof (trainRows));
 			MicroRows = microRows ?? throw new ArgumentNullException (nameof (microRows));
+
+			if (trainUntilUtc == default)
+				throw new ArgumentException ("trainUntilUtc must be initialized (non-default).", nameof (trainUntilUtc));
+			if (trainUntilUtc.Kind != DateTimeKind.Utc)
+				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
+
 			TrainUntilUtc = trainUntilUtc;
 			}
 		}
 
-	/// <summary>
-	/// Dataset-builder для микро-слоя:
-	/// режет по trainUntil и выбирает размеченные микро-дни.
-	/// </summary>
 	public static class MicroDatasetBuilder
 		{
 		public static MicroDataset Build (
-			List<DataRow> allRows,
-			DateTime trainUntil )
+			IReadOnlyList<DataRow> allRows,
+			DateTime trainUntilUtc )
 			{
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
+			if (allRows.Count == 0) throw new ArgumentException ("allRows must be non-empty.", nameof (allRows));
 
-			var ordered = allRows
-				.OrderBy (r => r.Date)
-				.ToList ();
+			if (trainUntilUtc == default)
+				throw new ArgumentException ("trainUntilUtc must be initialized (non-default).", nameof (trainUntilUtc));
+			if (trainUntilUtc.Kind != DateTimeKind.Utc)
+				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
 
-			var trainRows = ordered
-				.Where (r => r.Date <= trainUntil)
-				.ToList ();
+			// Контракт: порядок уже стабилен (бутстрап/RowBuilder).
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Date, "micro-dataset.allRows");
 
-			var microRows = trainRows
+			var ordered = allRows as List<DataRow> ?? allRows.ToList ();
+
+			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+			var split = boundary.Split (ordered, r => r.Date);
+
+			if (split.Excluded.Count > 0)
+				{
+				var sample = split.Excluded
+					.Take (Math.Min (10, split.Excluded.Count))
+					.Select (r => r.Date.ToString ("O"));
+
+				throw new InvalidOperationException (
+					$"[micro-dataset] Found excluded days (baseline-exit undefined). " +
+					$"count={split.Excluded.Count}. sample=[{string.Join (", ", sample)}].");
+				}
+
+			var trainRows = split.Train;
+
+			// Порядок сохраняется фильтрацией.
+			var microRowsList = trainRows
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
-			return new MicroDataset (trainRows, microRows, trainUntil);
+			var trainFrozen = (trainRows as List<DataRow> ?? trainRows.ToList ()).ToArray ();
+			var microFrozen = microRowsList.ToArray ();
+
+			return new MicroDataset (trainFrozen, microFrozen, trainUntilUtc);
 			}
 		}
 	}

@@ -1,26 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 	{
 	/// <summary>
-	/// Простейший PnL-пробник по PredictionRecord:
-	/// - делит записи на train/OOS по trainUntilUtc;
+	/// Простейший PnL-пробник по BacktestRecord:
+	/// - делит записи на train/OOS по TrainBoundary (baseline-exit);
 	/// - строит "наивный" PnL без плеча, SL, delayed и Anti-D;
 	/// - печатает метрики отдельно для train и OOS.
-	/// Используется только для диагностики возможной утечки.
 	/// </summary>
 	public static class DailyPnlProbe
 		{
-		/// <summary>
-		/// Запускает простой PnL-анализ по дневным PredictionRecord.
-		/// Данные делятся по trainUntilUtc, направление берётся из PredLabel + микро.
-		/// </summary>
 		public static void RunSimpleProbe (
 			IReadOnlyList<BacktestRecord> records,
-			DateTime trainUntilUtc )
+			DateTime trainUntilUtc,
+			TimeZoneInfo nyTz )
 			{
 			if (records == null || records.Count == 0)
 				{
@@ -28,29 +26,43 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 				return;
 				}
 
-			// Сначала сортируем по дате, чтобы эквити считалось в правильном порядке.
+			if (trainUntilUtc == default)
+				{
+				Console.WriteLine ("[pnl-probe] trainUntilUtc is default(DateTime) – nothing to compute.");
+				return;
+				}
+
+			if (nyTz == null)
+				{
+				Console.WriteLine ("[pnl-probe] nyTz is null – nothing to compute.");
+				return;
+				}
+
+			// Стабильный порядок по entryUtc.
 			var ordered = records
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
-			var train = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
+			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
 
-			var oos = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+			var train = split.Train;
+			var oos = split.Oos;
 
 			Console.WriteLine (
-				$"[pnl-probe] trainUntilUtc = {trainUntilUtc:yyyy-MM-dd}, " +
-				$"totalRecords = {ordered.Count}, train = {train.Count}, oos = {oos.Count}");
+				$"[pnl-probe] trainUntil(baseline-exit) = {boundary.TrainUntilIsoDate}, " +
+				$"totalRecords={ordered.Count}, train={train.Count}, oos={oos.Count}, excluded={split.Excluded.Count}");
 
 			if (train.Count == 0 || oos.Count == 0)
 				{
 				Console.WriteLine ("[pnl-probe] WARNING: one of splits (train/OOS) is empty – results may be uninformative.");
 				}
 
-			// Считаем PnL для train и OOS отдельно.
+			if (split.Excluded.Count > 0)
+				{
+				Console.WriteLine ("[pnl-probe] WARNING: excluded days exist (baseline-exit undefined). They are ignored.");
+				}
+
 			var trainStats = ComputeSimplePnlStats (train);
 			var oosStats = ComputeSimplePnlStats (oos);
 
@@ -58,13 +70,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 			PrintStats ("[pnl-probe] OOS  ", oosStats);
 			}
 
-		/// <summary>
-		/// Вычисляет наивный PnL по списку PredictionRecord:
-		/// - направление сделки определяется PredLabel + микро;
-		/// - доходность = (Close24 - Entry) / Entry (для long), с минусом для short;
-		/// - эквити считается как последовательное умножение (1 + ret);
-		/// - считается суммарный PnL, win-rate, max DD, среднее и std.
-		/// </summary>
 		private static SimplePnlStats ComputeSimplePnlStats ( IReadOnlyList<BacktestRecord> records )
 			{
 			if (records == null || records.Count == 0)
@@ -79,47 +84,44 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 
 			double equity = 1.0;
 			double peakEquity = 1.0;
-			double maxDrawdown = 0.0; // отрицательное значение (процент падения от пика)
+			double maxDrawdown = 0.0;
 
 			foreach (var rec in records)
 				{
-				// Направление по дневной модели с учётом микро-слоя.
+				var c = rec.Causal;
+				var f = rec.Forward;
+
 				bool goLong =
-					rec.PredLabel == 2 ||
-					(rec.PredLabel == 1 && rec.PredMicroUp);
+					c.PredLabel == 2 ||
+					(c.PredLabel == 1 && c.PredMicroUp);
 
 				bool goShort =
-					rec.PredLabel == 0 ||
-					(rec.PredLabel == 1 && rec.PredMicroDown);
+					c.PredLabel == 0 ||
+					(c.PredLabel == 1 && c.PredMicroDown);
 
-				// Если нет торгового сигнала — день пропускается.
 				if (!goLong && !goShort)
 					{
 					continue;
 					}
 
-				if (rec.Entry <= 0.0 || rec.Close24 <= 0.0)
+				if (f.Entry <= 0.0 || f.Close24 <= 0.0)
 					{
-					// Некорректные цены, пропускаем день, чтобы не ломать статистику.
 					Console.WriteLine (
-						$"[pnl-probe] skip {rec.DateUtc:yyyy-MM-dd}: invalid prices Entry={rec.Entry}, Close24={rec.Close24}");
+						$"[pnl-probe] skip {c.DateUtc:yyyy-MM-dd}: invalid prices Entry={f.Entry}, Close24={f.Close24}");
 					continue;
 					}
 
-				// Дневная доходность без плеча.
-				double dayRet = (rec.Close24 - rec.Entry) / rec.Entry;
+				double dayRet = (f.Close24 - f.Entry) / f.Entry;
 
-				// Для short инвертируем знак.
 				if (goShort && !goLong)
 					{
 					dayRet = -dayRet;
 					}
 				else if (goLong && goShort)
 					{
-					// Теоретически не должно происходить. На всякий случай логируем и пропускаем.
 					Console.WriteLine (
-						$"[pnl-probe] ambiguous direction on {rec.DateUtc:yyyy-MM-dd}, " +
-						$"PredLabel={rec.PredLabel}, PredMicroUp={rec.PredMicroUp}, PredMicroDown={rec.PredMicroDown} – skip.");
+						$"[pnl-probe] ambiguous direction on {c.DateUtc:yyyy-MM-dd}, " +
+						$"PredLabel={c.PredLabel}, PredMicroUp={c.PredMicroUp}, PredMicroDown={c.PredMicroDown} – skip.");
 					continue;
 					}
 
@@ -131,7 +133,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 					wins++;
 					}
 
-				// Обновляем эквити и максимум.
 				equity *= (1.0 + dayRet);
 
 				if (equity > peakEquity)
@@ -151,10 +152,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 				return SimplePnlStats.Empty;
 				}
 
-			double totalRet = equity - 1.0; // в долях
+			double totalRet = equity - 1.0;
 			double winRate = (double) wins / trades;
 
-			// Среднее и стандартное отклонение по дневным доходностям.
 			double mean = returns.Average ();
 			double variance = returns
 				.Select (r => (r - mean) * (r - mean))
@@ -172,10 +172,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 				StdReturn: std);
 			}
 
-		/// <summary>
-		/// Печатает сводку по PnL в консоль.
-		/// Все проценты выводятся в человекочитаемом виде.
-		/// </summary>
 		private static void PrintStats ( string prefix, SimplePnlStats stats )
 			{
 			if (stats.Trades == 0)
@@ -193,10 +189,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 				$"std={stats.StdReturn * 100.0:0.00} %");
 			}
 
-		/// <summary>
-		/// Небольшой контейнер с метриками PnL-пробника.
-		/// Используется только внутри диагностического кода.
-		/// </summary>
 		private readonly record struct SimplePnlStats (
 			int Trades,
 			double TotalReturn,

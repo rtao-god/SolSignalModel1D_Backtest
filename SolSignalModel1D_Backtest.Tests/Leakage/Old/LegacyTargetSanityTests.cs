@@ -1,11 +1,16 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using Xunit;
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 using AppProgram = SolSignalModel1D_Backtest.Program;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 	{
@@ -106,8 +111,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 		// ---------------------------------------------------------------------
 
 		/// <summary>
-		/// Использует debug-фасад Program.DebugBootstrapRowsAndCandlesAsync
-		/// вместо рефлексии.
+		/// Использует debug-фасад Program.DebugBootstrapRowsAndCandlesAsync вместо рефлексии.
 		/// </summary>
 		internal static async Task<(
 			List<DataRow> AllRows,
@@ -206,7 +210,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 			}
 
 		/// <summary>
-		/// Строит PredictionRecord'ы для всех mornings:
+		/// Строит BacktestRecord'ы для всех mornings:
 		/// - Predict через PredictionEngine;
 		/// - forward-окно до baseline-exit по 6h (maxHigh/minLow/close).
 		/// </summary>
@@ -218,6 +222,20 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
 			if (solAll6h == null) throw new ArgumentNullException (nameof (solAll6h));
 			if (engine == null) throw new ArgumentNullException (nameof (engine));
+
+			static (double Up, double Flat, double Down) MakeTriProbs ( int predLabel )
+				{
+				const double Hi = 0.90;
+				const double Lo = 0.05;
+
+				return predLabel switch
+					{
+						2 => (Hi, Lo, Lo),
+						1 => (Lo, Hi, Lo),
+						0 => (Lo, Lo, Hi),
+						_ => throw new ArgumentOutOfRangeException (nameof (predLabel), predLabel, "PredLabel must be in [0..2].")
+						};
+				}
 
 			var sorted6h = solAll6h is List<Candle6h> list6h
 				? list6h
@@ -295,39 +313,70 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 
 				var fwdClose = sorted6h[exitIdx].Close;
 
-				list.Add (new PredictionRecord
+				var (pUp, pFlat, pDown) = MakeTriProbs (pr.Class);
+
+				var causal = new CausalPredictionRecord
 					{
 					DateUtc = r.Date,
 					TrueLabel = r.Label,
-					PredLabel = pr.Class,
 
+					PredLabel = pr.Class,
+					PredLabel_Day = pr.Class,
+					PredLabel_DayMicro = pr.Class,
+
+					ProbUp_Day = pUp,
+					ProbFlat_Day = pFlat,
+					ProbDown_Day = pDown,
+
+					ProbUp_DayMicro = pUp,
+					ProbFlat_DayMicro = pFlat,
+					ProbDown_DayMicro = pDown,
+
+					ProbUp_Total = pUp,
+					ProbFlat_Total = pFlat,
+					ProbDown_Total = pDown,
+
+					Conf_Day = Math.Max (pUp, Math.Max (pFlat, pDown)),
+
+					MicroPredicted = pr.Micro.ConsiderUp || pr.Micro.ConsiderDown,
 					PredMicroUp = pr.Micro.ConsiderUp,
 					PredMicroDown = pr.Micro.ConsiderDown,
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown,
+
+					RegimeDown = r.RegimeDown,
+					Reason = pr.Reason,
+					MinMove = r.MinMove,
+
+					SlProb = 0.0,
+					SlHighDecision = false,
+
+					DelayedSource = null,
+					DelayedEntryAsked = false,
+					DelayedEntryUsed = false,
+					DelayedIntradayTpPct = 0.0,
+					DelayedIntradaySlPct = 0.0,
+					TargetLevelClass = 0
+					};
+
+				var forward = new ForwardOutcomes
+					{
+					DateUtc = r.Date,
+					WindowEndUtc = exitUtc,
 
 					Entry = entryPrice,
 					MaxHigh24 = maxHigh,
 					MinLow24 = minLow,
 					Close24 = fwdClose,
 
-					RegimeDown = r.RegimeDown,
-					Reason = pr.Reason,
 					MinMove = r.MinMove,
+					DayMinutes = Array.Empty<Candle1m> ()
+					};
 
-					DelayedSource = string.Empty,
-					DelayedEntryAsked = false,
-					DelayedEntryUsed = false,
-					DelayedEntryExecuted = false,
-					DelayedEntryPrice = 0.0,
-					DelayedIntradayResult = 0,
-					DelayedIntradayTpPct = 0.0,
-					DelayedIntradaySlPct = 0.0,
-					TargetLevelClass = 0,
-					DelayedWhyNot = null,
-					DelayedEntryExecutedAtUtc = null,
-					SlProb = 0.0,
-					SlHighDecision = false
+				list.Add (new BacktestRecord
+					{
+					Causal = causal,
+					Forward = forward
 					});
 				}
 
@@ -515,7 +564,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Old
 
 			double monthVol = sumRange / cnt;
 
-			// 2.5% считаем "нормой", как в старом коде.
+			// 2.5% считаем "нормой"
 			double factor = monthVol / 0.025;
 			return factor;
 			}

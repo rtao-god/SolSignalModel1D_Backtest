@@ -1,25 +1,14 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 	{
-	/// <summary>
-	/// Собирает обучающие выборки для дневной модели:
-	/// - moveTrainRows: все дни (и с ходом, и без), с опциональным oversample;
-	/// - dirNormalRows / dirDownRows: только дни с фактическим ходом, разложенные по режиму.
-	/// ВАЖНО: "есть ход" и направление берутся из тех же фактов, что и Label:
-	///   Label: 0 = down, 1 = flat, 2 = up (path-based).
-	/// </summary>
 	public static class DailyTrainingDataBuilder
 		{
-		/// <summary>
-		/// Собирает и при необходимости балансирует выборки для move/dir-моделей.
-		/// Move-цель: "день НЕ flat" (Label != 1).
-		/// Dir-цель: up vs down по Label (2 = up, 0 = down).
-		/// </summary>
 		public static void Build (
 			List<DataRow> trainRows,
 			bool balanceMove,
@@ -30,47 +19,42 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 			out List<DataRow> dirDownRows )
 			{
 			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
+			if (trainRows.Count == 0)
+				throw new InvalidOperationException ("[daily-train] trainRows is empty.");
 
-			// Общая сортировка по времени, чтобы всё было каузально.
-			var ordered = trainRows
-				.OrderBy (r => r.Date)
-				.ToList ();
+			// Контракт: trainRows уже отсортирован по Date и в UTC.
+			SeriesGuards.EnsureStrictlyAscendingUtc (trainRows, r => r.Date, "daily-train.trainRows");
 
-			// ===== 1. Модель "есть ли ход" (move) видит ВСЕ дни =====
-			// Позитивный класс: Label != 1 (т.е. path-based не-flat: up/down).
+			// ===== 1. Move-датасет: все дни =====
 			if (balanceMove)
 				{
 				moveTrainRows = MlTrainingUtils.OversampleBinary (
-					ordered,
+					trainRows,
 					r => r.Label != 1,
 					balanceTargetFrac);
 				}
 			else
 				{
-				moveTrainRows = ordered;
+				// Без копии: дальше всё равно будет "freeze" в DailyDatasetBuilder.
+				moveTrainRows = trainRows;
 				}
 
-			// ===== 2. Модели направления (dir) — только дни с фактическим ходом =====
-			// "Есть ход" по факту: Label = 0 (down) или 2 (up).
-			var moveRows = ordered
+			// ===== 2. Dir-датасеты: только дни с фактическим ходом =====
+			// Порядок сохраняется фильтрацией (trainRows уже отсортирован).
+			var moveRows = trainRows
 				.Where (r => r.Label == 0 || r.Label == 2)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
-			// Разделяем по режиму (NORMAL / DOWN)
 			dirNormalRows = moveRows
 				.Where (r => !r.RegimeDown)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			dirDownRows = moveRows
 				.Where (r => r.RegimeDown)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			if (balanceDir)
 				{
-				// Для обоих режимов бинарная цель: "up?" по Label (2 = up, 0 = down).
 				dirNormalRows = MlTrainingUtils.OversampleBinary (
 					dirNormalRows,
 					r => r.Label == 2,

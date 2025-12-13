@@ -13,8 +13,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public static readonly string BaseDir =
 			AppContext.BaseDirectory;
 
-		// папка, где мы держим наши ручные индикаторы
-		// (ты её уже сделал и назвал JsonIndicators)
+		// папка, где мы держим ручные индикаторы
 		public static readonly string IndicatorsDir =
 			Path.Combine (BaseDir, "JsonIndicators");
 

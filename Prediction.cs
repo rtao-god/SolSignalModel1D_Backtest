@@ -6,6 +6,7 @@ using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -13,17 +14,17 @@ namespace SolSignalModel1D_Backtest
 	public partial class Program
 		{
 		/// <summary>
-		/// Глобальная граница train-периода для дневной модели.
-		/// Всё, что ≤ этой даты, используется только для обучения.
-		/// Всё, что > этой даты, считается OOS (для логов/аналитики).
+		/// Глобальная граница train-периода дневной модели в терминах baseline-exit.
+		/// Любая классификация train/OOS должна происходить через TrainBoundary (baseline-exit контракт),
+		/// а не через ручные сравнения entry-даты.
 		/// </summary>
 		private static DateTime _trainUntilUtc;
 
 		/// <summary>
 		/// Создаёт PredictionEngine:
-		/// - выбирает обучающую часть истории (train) по дате;
-		/// - тренирует дневной move+dir и микро-слой через ModelTrainer;
-		/// - запоминает границу train-периода в _trainUntilUtc.
+		/// - выбирает train-часть истории через TrainBoundary (baseline-exit);
+		/// - тренирует дневной move+dir и микро-слой;
+		/// - фиксирует границу train-периода в _trainUntilUtc (baseline-exit).
 		/// </summary>
 		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
 			{
@@ -37,17 +38,32 @@ namespace SolSignalModel1D_Backtest
 				.OrderBy (r => r.Date)
 				.ToList ();
 
-			var minDate = ordered.First ().Date;
-			var maxDate = ordered.Last ().Date;
+			var minEntryUtc = ordered.First ().Date;
+			var maxEntryUtc = ordered.Last ().Date;
 
-			// Простой временной hold-out: последние N дней не участвуют в обучении,
-			// чтобы модели не видели самые свежие дни, по которым считаются forward-метрики.
+			// Простой временной hold-out: последние N дней (по entry) исключаем из train.
+			// ВАЖНО: сама граница хранится/применяется в терминах baseline-exit, чтобы не было boundary leakage.
 			const int HoldoutDays = 120;
-			var trainUntil = maxDate.AddDays (-HoldoutDays);
 
-			var trainRows = ordered
-				.Where (r => r.Date <= trainUntil)
-				.ToList ();
+			var trainUntilUtc = DeriveTrainUntilUtcFromHoldout (
+				maxEntryUtc: maxEntryUtc,
+				holdoutDays: HoldoutDays,
+				nyTz: NyTz);
+
+			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
+
+			// Train/OOS режем только через baseline-exit контракт.
+			var split = boundary.Split (ordered, r => r.Date);
+			var trainRows = split.Train;
+
+			if (split.Excluded.Count > 0)
+				{
+				// Эти дни нельзя “молча” относить к train/OOS (baseline-окно по контракту не определено).
+				// В прод-пайплайне такие строки обычно вообще не должны существовать.
+				Console.WriteLine (
+					$"[engine] WARNING: excluded={split.Excluded.Count} rows because baseline-exit is undefined (weekend by contract). " +
+					"Проверь генерацию daily-строк/окон.");
+				}
 
 			// --- Диагностика распределения таргетов на train ---
 			var labelHist = trainRows
@@ -68,41 +84,39 @@ namespace SolSignalModel1D_Backtest
 			if (trainRows.Count < 100)
 				{
 				// Если данных мало — лучше обучиться на всём, чем падать.
+				// Границу выставляем как максимум baseline-exit по всей доступной истории,
+				// чтобы дальнейшие метрики/аналитика использовали тот же контракт.
 				Console.WriteLine (
 					$"[engine] trainRows too small ({trainRows.Count}), " +
 					"используем всю историю без hold-out (метрики будут train-like)");
 
 				trainRows = ordered;
-				// по сути, train == вся история → OOS нет
-				_trainUntilUtc = ordered.Last ().Date;
+
+				_trainUntilUtc = DeriveMaxBaselineExitUtc (
+					rows: ordered,
+					nyTz: NyTz);
 				}
 			else
 				{
-				_trainUntilUtc = trainUntil;
+				_trainUntilUtc = trainUntilUtc;
 
 				Console.WriteLine (
-					$"[engine] training on rows <= {trainUntil:yyyy-MM-dd} " +
-					$"({trainRows.Count} из {ordered.Count}, диапазон [{minDate:yyyy-MM-dd}; {trainUntil:yyyy-MM-dd}])");
+					$"[engine] training on rows with baseline-exit <= {boundary.TrainUntilIsoDate} " +
+					$"(train={split.Train.Count}, oos={split.Oos.Count}, total={ordered.Count}, entryRange=[{minEntryUtc:yyyy-MM-dd}; {maxEntryUtc:yyyy-MM-dd}])");
 				}
 
 			var trainer = new ModelTrainer
 				{
-				DisableMoveModel = false,           // отключаем move
+				DisableMoveModel = false,
 				DisableDirNormalModel = false,
 				DisableDirDownModel = false,
 				DisableMicroFlatModel = false
 				};
+
 			var bundle = trainer.TrainAll (trainRows);
 
 			if (bundle.MlCtx == null)
 				throw new InvalidOperationException ("[engine] ModelTrainer вернул ModelBundle с MlCtx == null");
-
-			/*if (bundle.MoveModel == null)
-				throw new InvalidOperationException ("[engine] ModelBundle.MoveModel == null после обучения");*/
-
-			//if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
-			//	throw new InvalidOperationException (
-			//		"[engine] Оба направления (DirModelNormal/DirModelDown) == null после обучения");
 
 			Console.WriteLine (
 				"[engine] ModelBundle trained: move+dir " +
@@ -112,11 +126,8 @@ namespace SolSignalModel1D_Backtest
 			}
 
 		/// <summary>
-		/// Строит PredictionRecord'ы для ВСЕХ mornings (train + OOS).
-		/// Граница _trainUntilUtc:
-		/// - задаёт разделение train/OOS;
-		/// - используется в логах и последующей аналитике,
-		///   но не режет список для стратегий/бэктеста.
+		/// Строит BacktestRecord'ы для ВСЕХ mornings (train + OOS).
+		/// Разбиение train/OOS — строго через TrainBoundary (baseline-exit).
 		/// </summary>
 		private static async Task<List<BacktestRecord>> LoadPredictionRecordsAsync (
 			IReadOnlyList<DataRow> mornings,
@@ -134,6 +145,8 @@ namespace SolSignalModel1D_Backtest
 					"Сначала должен быть вызван CreatePredictionEngineOrFallback.");
 				}
 
+			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
+
 			var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList ();
 			if (sorted6h.Count == 0)
 				throw new InvalidOperationException ("[forward] Пустая серия 6h для SOL");
@@ -147,17 +160,26 @@ namespace SolSignalModel1D_Backtest
 
 			var orderedMornings = mornings as List<DataRow> ?? mornings.ToList ();
 
-			var oosCount = orderedMornings.Count (r => r.Date > _trainUntilUtc);
-			Console.WriteLine (
-				$"[forward] mornings total = {orderedMornings.Count}, " +
-				$"OOS (Date > trainUntil={_trainUntilUtc:yyyy-MM-dd}) = {oosCount}");
+			// Диагностика сплита: только через baseline-exit контракт.
+			var split = boundary.Split (orderedMornings, r => r.Date);
 
-			if (oosCount == 0)
+			Console.WriteLine (
+				$"[forward] mornings total={orderedMornings.Count}, " +
+				$"train={split.Train.Count}, oos={split.Oos.Count}, excluded={split.Excluded.Count}, " +
+				$"trainUntil(baseline-exit)={boundary.TrainUntilIsoDate}");
+
+			if (split.Oos.Count == 0)
 				{
 				Console.WriteLine (
-					$"[forward] предупреждение: нет out-of-sample mornings " +
-					$"(все дни <= trainUntil={_trainUntilUtc:O}). " +
+					"[forward] предупреждение: нет out-of-sample mornings по baseline-exit контракту. " +
 					"Стратегические метрики будут train-like.");
+				}
+
+			if (split.Excluded.Count > 0)
+				{
+				Console.WriteLine (
+					"[forward] WARNING: есть excluded-дни, для которых baseline-exit не определён (weekend по контракту). " +
+					"Такие дни будут пропущены при сборке records.");
 				}
 
 			static int ArgmaxLabel ( double pUp, double pFlat, double pDown )
@@ -171,7 +193,18 @@ namespace SolSignalModel1D_Backtest
 
 			foreach (var r in orderedMornings)
 				{
-				// 1. Каузальное предсказание.
+				var entryUtc = r.Date;
+
+				// Baseline-exit по контракту.
+				if (!boundary.TryGetBaselineExitUtc (entryUtc, out var exitUtc))
+					{
+					// Нельзя “молча” классифицировать такие дни как train/OOS.
+					Console.WriteLine (
+						$"[forward] skip entry {entryUtc:O}: baseline-exit undefined by contract (weekend).");
+					continue;
+					}
+
+				// 1) Каузальное предсказание.
 				var pr = engine.Predict (r);
 				var cls = pr.Class;
 				var microUp = pr.Micro.ConsiderUp;
@@ -190,10 +223,7 @@ namespace SolSignalModel1D_Backtest
 				double probDownTotal = dayWithMicro.PDown;
 				int predLabelTotal = predLabelDayMicro;
 
-				// 2. Forward-окно по 6h-свечам.
-				var entryUtc = r.Date;
-				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
-
+				// 2) Forward-окно по 6h-свечам.
 				if (!indexByOpenTime.TryGetValue (entryUtc, out var entryIdx))
 					{
 					throw new InvalidOperationException (
@@ -248,10 +278,10 @@ namespace SolSignalModel1D_Backtest
 
 				var fwdClose = sorted6h[exitIdx].Close;
 
-				// 3. Сборка каузальной части.
+				// 3) Каузальная часть.
 				var causal = new CausalPredictionRecord
 					{
-					DateUtc = r.Date,
+					DateUtc = entryUtc,
 
 					TrueLabel = r.Label,
 					PredLabel = cls,
@@ -298,7 +328,7 @@ namespace SolSignalModel1D_Backtest
 					TargetLevelClass = 0
 					};
 
-				// 4. Сборка forward-части.
+				// 4) Forward-часть.
 				var forward = new ForwardOutcomes
 					{
 					Entry = entryPrice,
@@ -310,7 +340,7 @@ namespace SolSignalModel1D_Backtest
 					DayMinutes = Array.Empty<Candle1m> ()
 					};
 
-				// 5. Финальный BacktestRecord.
+				// 5) Финальный BacktestRecord.
 				list.Add (new BacktestRecord
 					{
 					Causal = causal,
@@ -319,6 +349,77 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			return await Task.FromResult (list);
+			}
+
+		/// <summary>
+		/// Преобразует "holdout по entry" в границу trainUntilUtc в терминах baseline-exit.
+		/// Это нужно, чтобы последующая классификация train/OOS была согласована с таргетом/forward-окном.
+		/// </summary>
+		private static DateTime DeriveTrainUntilUtcFromHoldout ( DateTime maxEntryUtc, int holdoutDays, TimeZoneInfo nyTz )
+			{
+			if (holdoutDays < 0) throw new ArgumentOutOfRangeException (nameof (holdoutDays));
+			if (maxEntryUtc == default) throw new ArgumentException ("maxEntryUtc must be initialized.", nameof (maxEntryUtc));
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+
+			var candidateEntry = maxEntryUtc.AddDays (-holdoutDays);
+
+			// Если внезапно попали на weekend — отступаем назад до ближайшего рабочего entry-дня.
+			for (int i = 0; i < 14; i++)
+				{
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (candidateEntry, nyTz);
+				if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+					{
+					return Windowing.ComputeBaselineExitUtc (candidateEntry, nyTz);
+					}
+
+				candidateEntry = candidateEntry.AddDays (-1);
+				}
+
+			throw new InvalidOperationException (
+				"[engine] failed to derive trainUntilUtc from holdout: too many consecutive non-working days. " +
+				"Проверь корректность entry-дат и timezone.");
+			}
+
+		/// <summary>
+		/// Максимальный baseline-exit по заданному списку дней.
+		/// Используется как "граница" в режиме train==full-history, чтобы метрики не делали ручных <=/>.
+		/// </summary>
+		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<DataRow> rows, TimeZoneInfo nyTz )
+			{
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+
+			bool hasAny = false;
+			DateTime maxExit = default;
+
+			for (int i = 0; i < rows.Count; i++)
+				{
+				var entryUtc = rows[i].Date;
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
+
+				// По контракту weekend baseline-окна не имеют; такие строки должны отсутствовать.
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					{
+					continue;
+					}
+
+				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+
+				if (!hasAny || exitUtc > maxExit)
+					{
+					maxExit = exitUtc;
+					hasAny = true;
+					}
+				}
+
+			if (!hasAny)
+				{
+				throw new InvalidOperationException (
+					"[engine] failed to derive max baseline-exit: no working-day entries found.");
+				}
+
+			return maxExit;
 			}
 		}
 	}

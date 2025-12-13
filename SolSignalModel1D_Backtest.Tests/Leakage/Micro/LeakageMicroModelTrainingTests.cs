@@ -1,10 +1,12 @@
 ﻿using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,12 +14,6 @@ using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 	{
-	/// <summary>
-	/// Тесты утечки на уровне обучения микро-модели.
-	/// Предполагается, что MicroDatasetBuilder уже гарантирует future-blind.
-	/// Здесь проверяем инвариант: прогнозы на микро-днях не меняются
-	/// при изменении хвоста после trainUntil.
-	/// </summary>
 	public class LeakageMicroModelTrainingTests
 		{
 		private sealed class BinaryOutput
@@ -28,89 +24,85 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			}
 
 		[Fact]
-		public void MicroModel_Training_IsFutureBlind_ToTailMutation ()
+		public void MicroModel_Training_IsFutureBlind_ToOosTailMutation_ByTrainBoundary ()
 			{
-			// 1. Синтетические DataRow с разметкой FactMicroUp / FactMicroDown.
-			var allRows = BuildSyntheticRows (250);
+			var nyTz = Windowing.NyTz;
 
-			var maxDate = allRows.Last ().Date;
-			var trainUntil = maxDate.AddDays (-40);
+			var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
+				startNyLocalDate: NyTestDates.NyLocal (2024, 1, 2, 0),
+				count: 260,
+				hour: 8);
+
+			var allRows = BuildSyntheticRows (datesUtc);
+
+			// trainUntil берём как baseline-exit близко к концу ряда.
+			var pivotEntry = datesUtc[^40];
+			var pivotExit = Windowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
+			var trainUntilUtc = pivotExit.AddMinutes (1);
+
+			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
 
 			var rowsA = CloneRows (allRows);
 			var rowsB = CloneRows (allRows);
 
-			MutateFutureTail (rowsB, trainUntil);
+			MutateOosTail (rowsB, boundary);
 
-			// 2. Датасеты микро-слоя A/B.
-			var dsA = MicroDatasetBuilder.Build (rowsA, trainUntil);
-			var dsB = MicroDatasetBuilder.Build (rowsB, trainUntil);
+			var dsA = MicroDatasetBuilder.Build (rowsA, trainUntilUtc);
+			var dsB = MicroDatasetBuilder.Build (rowsB, trainUntilUtc);
 
 			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
 			AssertRowsEqual (dsA.MicroRows, dsB.MicroRows);
 
 			if (dsA.MicroRows.Count < 50)
-				{
-				// защитный guard: при слишком маленьком датасете MicroFlatTrainer по
-				// контракту может просто вернуть null. Тогда лучше явно упасть,
-				// чем иметь "тихий" тест, ничего не проверяющий.
 				throw new InvalidOperationException (
-					$"LeakageMicroModelTrainingTests: synthetic micro dataset too small ({dsA.MicroRows.Count}).");
-				}
+					$"LeakageMicroModelTrainingTests: micro dataset too small ({dsA.MicroRows.Count}).");
 
 			var mlA = new MLContext (seed: 42);
-			var modelA = MicroFlatTrainer.BuildMicroFlatModel (mlA, dsA.TrainRows);
+			// ВАЖНО: тренер ожидает List<DataRow>, а датасет отдаёт IReadOnlyList<DataRow>.
+			// Приводим явно, чтобы не расширять контракт Core ради тестов.
+			var modelA = MicroFlatTrainer.BuildMicroFlatModel (mlA, new List<DataRow> (dsA.TrainRows));
 			Assert.NotNull (modelA);
 
 			var mlB = new MLContext (seed: 42);
-			var modelB = MicroFlatTrainer.BuildMicroFlatModel (mlB, dsB.TrainRows);
+			var modelB = MicroFlatTrainer.BuildMicroFlatModel (mlB, new List<DataRow> (dsB.TrainRows));
 			Assert.NotNull (modelB);
 
-			var predsA = GetMicroPredictions (mlA, modelA!, dsA.MicroRows);
-			var predsB = GetMicroPredictions (mlB, modelB!, dsB.MicroRows);
+			var predsA = GetMicroPredictions (mlA, modelA!, dsA.MicroRows.ToList ());
+			var predsB = GetMicroPredictions (mlB, modelB!, dsB.MicroRows.ToList ());
 
 			AssertBinaryOutputsEqual (predsA, predsB);
 			}
 
-		// === helpers ===
-
-		private static List<DataRow> BuildSyntheticRows ( int count )
+		private static List<DataRow> BuildSyntheticRows ( IReadOnlyList<DateTime> datesUtc )
 			{
-			var rows = new List<DataRow> (count);
-			var start = new DateTime (2022, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+			var rows = new List<DataRow> (datesUtc.Count);
 
-			for (var i = 0; i < count; i++)
+			for (int i = 0; i < datesUtc.Count; i++)
 				{
-				var date = start.AddDays (i);
-
 				var isMicro = (i % 3 == 0);
 				var up = isMicro && (i % 6 == 0);
 
-				var features = new[]
-				{
-					i / (double) count,
-					Math.Sin(i * 0.03),
-					Math.Cos(i * 0.05),
-					isMicro ? 1.0 : 0.0
-				};
-
-				var row = new DataRow
+				rows.Add (new DataRow
 					{
-					Date = date,
-					Features = features,
+					Date = datesUtc[i],
+					Features = new[]
+					{
+						i / (double)datesUtc.Count,
+						Math.Sin(i * 0.03),
+						Math.Cos(i * 0.05),
+						isMicro ? 1.0 : 0.0
+					},
 					FactMicroUp = up,
 					FactMicroDown = isMicro && !up
-					};
-
-				rows.Add (row);
+					});
 				}
 
-			return rows.OrderBy (r => r.Date).ToList ();
+			return rows;
 			}
 
 		private static List<DataRow> CloneRows ( List<DataRow> src )
 			{
 			var res = new List<DataRow> (src.Count);
-
 			foreach (var r in src)
 				{
 				res.Add (new DataRow
@@ -121,36 +113,34 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 					FactMicroDown = r.FactMicroDown
 					});
 				}
-
 			return res;
 			}
 
-		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntil )
+		private static void MutateOosTail ( List<DataRow> rows, TrainBoundary boundary )
 			{
-			foreach (var r in rows.Where (r => r.Date > trainUntil))
+			// Мутируем всё, что boundary НЕ считает train:
+			// цель — доказать, что обучение/датасет не зависит от OOS “будущего”.
+			foreach (var r in rows)
 				{
-				// Инвертируем микро-факт и рушим фичи.
-				var wasUp = r.FactMicroUp;
-				var wasDown = r.FactMicroDown;
+				if (boundary.IsTrainEntry (r.Date))
+					continue;
 
-				r.FactMicroUp = !wasUp;
-				r.FactMicroDown = !wasDown;
+				r.FactMicroUp = !r.FactMicroUp;
+				r.FactMicroDown = !r.FactMicroDown;
 
 				if (r.Features is { Length: > 0 })
 					{
-					for (var i = 0; i < r.Features.Length; i++)
-						{
+					for (int i = 0; i < r.Features.Length; i++)
 						r.Features[i] = 9999.0 + i;
-						}
 					}
 				}
 			}
 
-		private static void AssertRowsEqual ( List<DataRow> xs, List<DataRow> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<DataRow> xs, IReadOnlyList<DataRow> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
-			for (var i = 0; i < xs.Count; i++)
+			for (int i = 0; i < xs.Count; i++)
 				{
 				var a = xs[i];
 				var b = ys[i];
@@ -163,10 +153,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				var fb = b.Features ?? Array.Empty<double> ();
 
 				Assert.Equal (fa.Length, fb.Length);
-				for (var j = 0; j < fa.Length; j++)
-					{
+				for (int j = 0; j < fa.Length; j++)
 					Assert.Equal (fa[j], fb[j]);
-					}
 				}
 			}
 
@@ -199,7 +187,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			{
 			Assert.Equal (a.Count, b.Count);
 
-			for (var i = 0; i < a.Count; i++)
+			for (int i = 0; i < a.Count; i++)
 				{
 				Assert.Equal (a[i].PredictedLabel, b[i].PredictedLabel);
 				Assert.InRange (Math.Abs (a[i].Score - b[i].Score), 0.0, tol);

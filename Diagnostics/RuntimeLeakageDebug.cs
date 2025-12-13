@@ -1,23 +1,25 @@
-﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Diagnostics
 	{
 	/// <summary>
 	/// Вспомогательный класс для консольной проверки разделения train/OOS
-	/// на реальных PredictionRecord, без участия тестового проекта.
+	/// на реальных BacktestRecord, без участия тестового проекта.
 	/// </summary>
 	internal static class RuntimeLeakageDebug
 		{
 		/// <summary>
 		/// Печатает в консоль:
-		/// - границу trainUntilUtc;
+		/// - границу trainUntilUtc (в терминах baseline-exit);
 		/// - accuracy по train и по OOS;
 		/// - несколько строк около границы (последние train и первые OOS дни).
-		/// Ничего не меняет в логике моделирования/бэктеста.
 		/// </summary>
 		public static void PrintDailyModelTrainOosProbe (
 			IReadOnlyList<BacktestRecord> records,
 			DateTime trainUntilUtc,
+			TimeZoneInfo nyTz,
 			int boundarySampleCount = 2 )
 			{
 			if (records == null || records.Count == 0)
@@ -32,36 +34,44 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 				return;
 				}
 
-			// Упорядочиваем по дате, чтобы корректно выделять последний train и первый OOS.
-			var ordered = records
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
-
-			var train = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
-
-			var oos = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
-
-			// Локальная функция для расчёта accuracy по TrueLabel/PredLabel.
-			(int total, int correct, double acc) Acc ( List<BacktestRecord> xs )
+			if (nyTz == null)
 				{
+				Console.WriteLine ("[leak-probe] nyTz is null; probe is not meaningful.");
+				return;
+				}
+
+			// Упорядочиваем по entryUtc (Causal.DateUtc), чтобы корректно выделять последний train и первый OOS.
+			var ordered = records
+				.OrderBy (r => r.Causal.DateUtc)
+				.ToList ();
+
+			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+
+			var train = split.Train;
+			var oos = split.Oos;
+
+			if (split.Excluded.Count > 0)
+				{
+				Console.WriteLine (
+					$"[leak-probe] WARNING: excluded={split.Excluded.Count} days (baseline-exit undefined by contract). " +
+					"Эти дни не учитываются ни в train, ни в OOS.");
+				}
+
+			// Локальная функция для расчёта accuracy по (TrueLabel, PredLabel).
+			(int total, int correct, double acc) Acc ( IReadOnlyList<BacktestRecord> xs )
+				{
+				if (xs == null) throw new ArgumentNullException (nameof (xs));
 				if (xs.Count == 0)
-					{
 					return (0, 0, double.NaN);
-					}
 
 				int correct = 0;
 
 				for (int i = 0; i < xs.Count; i++)
 					{
-					var r = xs[i];
-					if (r.TrueLabel == r.PredLabel)
-						{
+					var c = xs[i].Causal;
+					if (c.TrueLabel == c.PredLabel)
 						correct++;
-						}
 					}
 
 				double accVal = (double) correct / xs.Count;
@@ -72,14 +82,14 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 			var oosAcc = Acc (oos);
 
 			Console.WriteLine (
-				$"[leak-probe] trainUntilUtc = {trainUntilUtc:yyyy-MM-dd}, totalRecords = {ordered.Count}");
+				$"[leak-probe] trainUntil(baseline-exit) = {boundary.TrainUntilIsoDate}, totalRecords = {ordered.Count}");
 
 			Console.WriteLine (
 				$"[leak-probe] TRAIN: count={trainAcc.total}, correct={trainAcc.correct}, acc={trainAcc.acc:P2}");
 
 			if (oos.Count == 0)
 				{
-				Console.WriteLine ("[leak-probe] OOS: count=0 (нет дней DateUtc > trainUntilUtc)");
+				Console.WriteLine ("[leak-probe] OOS: count=0 (нет дней после границы по baseline-exit контракту)");
 				}
 			else
 				{
@@ -87,24 +97,25 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 					$"[leak-probe] OOS:   count={oosAcc.total}, correct={oosAcc.correct}, acc={oosAcc.acc:P2}");
 				}
 
-			// Компактный вывод нескольких строк около границы train/OOS.
 			static void PrintRow ( string kind, BacktestRecord r )
 				{
+				var c = r.Causal;
+
 				Console.WriteLine (
-					$"[leak-probe] {kind} {r.DateUtc:yyyy-MM-dd} " +
-					$"true={r.TrueLabel} pred={r.PredLabel} " +
-					$"microUp={r.PredMicroUp} microDown={r.PredMicroDown} " +
-					$"minMove={r.MinMove:0.000}");
+					$"[leak-probe] {kind} {c.DateUtc:yyyy-MM-dd} " +
+					$"true={c.TrueLabel} pred={c.PredLabel} " +
+					$"microUp={c.PredMicroUp} microDown={c.PredMicroDown} " +
+					$"minMove={c.MinMove:0.000}");
 				}
 
 			var trainSample = train
-				.OrderByDescending (r => r.DateUtc)
+				.OrderByDescending (r => r.Causal.DateUtc)
 				.Take (boundarySampleCount)
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			var oosSample = oos
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.Take (boundarySampleCount)
 				.ToList ();
 

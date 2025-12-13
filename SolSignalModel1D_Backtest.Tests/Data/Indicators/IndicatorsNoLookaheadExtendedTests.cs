@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using Xunit;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{

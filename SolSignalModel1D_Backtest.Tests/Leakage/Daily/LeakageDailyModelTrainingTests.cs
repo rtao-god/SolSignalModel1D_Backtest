@@ -4,6 +4,9 @@ using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
@@ -12,9 +15,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	/// Тесты утечки на уровне обучения дневной модели (move + dir).
 	/// Предполагается, что DailyDatasetBuilder уже прошёл свои future-blind тесты.
 	/// Здесь проверяется:
-	///   - изменение хвоста (Date > trainUntil) не меняет предсказания на train-наборе.
+	///   - изменение хвоста (Date > trainUntilUtc) не меняет предсказания на train-наборе.
 	/// </summary>
-	public class LeakageDailyModelTrainingTests
+	public sealed class LeakageDailyModelTrainingTests
 		{
 		private sealed class BinaryOutput
 			{
@@ -32,20 +35,20 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			const int HoldoutDays = 120;
 			var maxDate = allRows.Last ().Date;
-			var trainUntil = maxDate.AddDays (-HoldoutDays);
+			var trainUntilUtc = maxDate.AddDays (-HoldoutDays);
 
-			Assert.Contains (allRows, r => r.Date > trainUntil);
+			Assert.Contains (allRows, r => r.Date > trainUntilUtc);
 
 			// 2. Две копии: A — оригинал, B — с жёстко замутивированным хвостом.
 			var rowsA = CloneRows (allRows);
 			var rowsB = CloneRows (allRows);
 
-			MutateFutureTail (rowsB, trainUntil);
+			MutateFutureTail (rowsB, trainUntilUtc);
 
 			// 3. Датасеты A и B (они уже future-blind, то есть train-часть совпадает).
 			var dsA = DailyDatasetBuilder.Build (
 				allRows: rowsA,
-				trainUntil: trainUntil,
+				trainUntilUtc: trainUntilUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
@@ -53,14 +56,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			var dsB = DailyDatasetBuilder.Build (
 				allRows: rowsB,
-				trainUntil: trainUntil,
+				trainUntilUtc: trainUntilUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
 				datesToExclude: null);
 
-			// sanity: train-чать у датасетов совпадает (это уже проверяет отдельный dataset-тест,
-			// но здесь дублируем asserty, чтобы не зависеть от другого класса).
+			// sanity: train-часть у датасетов совпадает
 			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
 			AssertRowsEqual (dsA.MoveTrainRows, dsB.MoveTrainRows);
 			AssertRowsEqual (dsA.DirNormalRows, dsB.DirNormalRows);
@@ -68,13 +70,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			// 4. Обучаем дневные модели на train-части A и B.
 			var trainerA = new ModelTrainer ();
-			var bundleA = trainerA.TrainAll (new List<DataRow> (dsA.TrainRows));
+			var bundleA = trainerA.TrainAll (dsA.TrainRows);
 
 			var trainerB = new ModelTrainer ();
-			var bundleB = trainerB.TrainAll (new List<DataRow> (dsB.TrainRows));
+			var bundleB = trainerB.TrainAll (dsB.TrainRows);
 
 			// 5. Сравниваем предсказания move/dir на одних и тех же train-данных.
-			// Если кто-то начнёт использовать будущий хвост в обучении — модели разъедутся.
 			var movePredsA = GetMovePredictions (bundleA, dsA.MoveTrainRows);
 			var movePredsB = GetMovePredictions (bundleB, dsB.MoveTrainRows);
 			AssertBinaryOutputsEqual (movePredsA, movePredsB);
@@ -105,20 +106,18 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				var features = new[]
 				{
 					i / (double) count,
-					Math.Sin(i * 0.05),
-					Math.Cos(i * 0.07),
+					Math.Sin (i * 0.05),
+					Math.Cos (i * 0.07),
 					label
 				};
 
-				var row = new DataRow
+				rows.Add (new DataRow
 					{
 					Date = date,
 					Label = label,
 					RegimeDown = (i % 5 == 0),
 					Features = features
-					};
-
-				rows.Add (row);
+					});
 				}
 
 			return rows.OrderBy (r => r.Date).ToList ();
@@ -143,11 +142,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			}
 
 		/// <summary>
-		/// Мутируем только хвост Date &gt; trainUntil, имитируя "инородное будущее".
+		/// Мутируем только хвост Date &gt; trainUntilUtc, имитируя "инородное будущее".
 		/// </summary>
-		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntil )
+		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntilUtc )
 			{
-			foreach (var r in rows.Where (r => r.Date > trainUntil))
+			foreach (var r in rows.Where (r => r.Date > trainUntilUtc))
 				{
 				r.Label = 2;
 				r.RegimeDown = !r.RegimeDown;
@@ -155,14 +154,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				if (r.Features is { Length: > 0 })
 					{
 					for (var i = 0; i < r.Features.Length; i++)
-						{
 						r.Features[i] = 10_000.0 + i;
-						}
 					}
 				}
 			}
 
-		private static void AssertRowsEqual ( List<DataRow> xs, List<DataRow> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<DataRow> xs, IReadOnlyList<DataRow> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
@@ -180,15 +177,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 				Assert.Equal (fa.Length, fb.Length);
 				for (var j = 0; j < fa.Length; j++)
-					{
 					Assert.Equal (fa[j], fb[j]);
-					}
 				}
 			}
 
-		private static List<BinaryOutput> GetMovePredictions (
-			ModelBundle bundle,
-			List<DataRow> rows )
+		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<DataRow> rows )
 			{
 			if (bundle.MoveModel == null || rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -204,19 +197,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			var scored = bundle.MoveModel.Transform (data);
 
-			return ml.Data
-				.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false)
-				.ToList ();
+			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
-		private static List<BinaryOutput> GetDirPredictions (
-			ModelBundle bundle,
-			List<DataRow> rows )
+		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<DataRow> rows )
 			{
-			if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
-				return new List<BinaryOutput> ();
-
-			if (rows.Count == 0)
+			if ((bundle.DirModelNormal == null && bundle.DirModelDown == null) || rows.Count == 0)
 				return new List<BinaryOutput> ();
 
 			var ml = bundle.MlCtx ?? new MLContext (seed: 42);
@@ -228,42 +214,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					Features = MlTrainingUtils.ToFloatFixed (r.Features)
 					}));
 
-			// Здесь намеренно не различаем dir-normal / dir-down:
-			// тест вызывается с нужным подмножеством rows, и мы передаём
-			// сюда уже подготовленный bundle.[DirModelX].
-			// Выберем нужную модель снаружи.
-			ITransformer? model = null;
-
-			if (rows.Any (r => r.RegimeDown))
-				{
-				model = bundle.DirModelDown;
-				}
-			else
-				{
-				model = bundle.DirModelNormal;
-				}
-
+			// Выбор модели зависит от поднабора, который подаётся в тест (normal vs down).
+			ITransformer? model = rows.Any (r => r.RegimeDown) ? bundle.DirModelDown : bundle.DirModelNormal;
 			if (model == null)
 				return new List<BinaryOutput> ();
 
 			var scored = model.Transform (data);
 
-			return ml.Data
-				.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false)
-				.ToList ();
+			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
-		/// <summary>
-		/// Сравнивает два списка бинарных предсказаний:
-		/// - PredictedLabel — строго;
-		/// - Score/Probability — с небольшим допуском по плавающей точке.
-		/// Такой инвариант гарантирует, что обучение не стало зависеть от мутированного хвоста.
-		/// Альтернатива — сравнивать только Score или только Probability, но тогда сложнее
-		/// отлавливать мелкие дрожания в пороге.
-		/// </summary>
-		private static void AssertBinaryOutputsEqual (
-			IReadOnlyList<BinaryOutput> a,
-			IReadOnlyList<BinaryOutput> b )
+		private static void AssertBinaryOutputsEqual ( IReadOnlyList<BinaryOutput> a, IReadOnlyList<BinaryOutput> b )
 			{
 			Assert.Equal (a.Count, b.Count);
 

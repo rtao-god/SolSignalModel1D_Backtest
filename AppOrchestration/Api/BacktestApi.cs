@@ -1,5 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -62,8 +64,16 @@ namespace SolSignalModel1D_Backtest
 			// 3. SL-модель: оффлайн-обучение и применение на основе дневных предсказаний.
 			// Обучение ограничивается train-окном (_trainUntilUtc), чтобы не ловить "look-ahead bias".
 				{
-				var slTrainRows = allRows
-					.ToList ();
+				var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
+				var split = boundary.Split (allRows, r => r.Date);
+
+				var slTrainRows = split.Train;
+
+				if (split.Excluded.Count > 0)
+					{
+					Console.WriteLine (
+						$"[sl] WARNING: excluded={split.Excluded.Count} rows (baseline-exit undefined). Они не участвуют в обучении SL.");
+					}
 
 				TrainAndApplySlModelOffline (
 					allRows: slTrainRows,

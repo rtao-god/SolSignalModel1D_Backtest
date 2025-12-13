@@ -1,10 +1,8 @@
-﻿using Microsoft.ML;
-using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML;
-
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using System;
 using System.Collections.Generic;
@@ -109,7 +107,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			Assert.NotNull (bundle.MlCtx);
 			Assert.NotNull (bundle.MoveModel);
 			// Микро-слой здесь опционален: если микро-датасет мал, MicroFlatModel == null — это допустимо.
-			// Любые реальные проблемы с микро-датасетом при нормальном объёме приведут к InvalidOperationException из MicroFlatTrainer.
 
 			var engine = new PredictionEngine (bundle);
 
@@ -199,7 +196,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				double price = solPriceFunc (i);
 
 				if (price <= 0.0)
-					price = 1.0; // защитный костыль, чтобы не словить нулевую/отрицательную цену в синтетике
+					throw new InvalidOperationException ($"Synthetic SOL price is non-positive at i={i}, t={t:O}: {price}.");
 
 				solPrices[i] = price;
 

@@ -1,7 +1,8 @@
 ﻿
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Utils;
+using SolSignalModel1D_Backtest.Core.Utils;
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -15,9 +16,11 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void RunDailyPfi ( List<DataRow> allRows )
 			{
-			// Раньше здесь было два прохода по allRows через Where(...<=)... и Where(...>...).
-			// Теперь всё делается за один проход в хелпере, что уменьшает время на больших выборках.
-			var (dailyTrainRows, dailyOosRows) = TrainOosSplitHelper.SplitByTrainBoundary (allRows, _trainUntilUtc);
+			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
+			var split = boundary.Split (allRows, r => r.Date);
+
+			var dailyTrainRows = split.Train;
+			var dailyOosRows = split.Oos;
 
 			if (dailyTrainRows.Count < 50)
 				{
@@ -26,14 +29,10 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			var dailyTrainer = new ModelTrainer ();
-
-			// Обучение всех дневных моделей на train-окне.
 			var bundle = dailyTrainer.TrainAll (dailyTrainRows, datesToExclude: null);
 
-			// PFI по train-сетам.
 			DailyModelDiagnostics.LogFeatureImportanceOnDailyModels (bundle, dailyTrainRows, "train");
 
-			// При наличии OOS-хвоста — отдельный PFI по нему.
 			if (dailyOosRows.Count > 0)
 				{
 				var tag = dailyOosRows.Count >= 50 ? "oos" : "oos-small";
@@ -41,7 +40,13 @@ namespace SolSignalModel1D_Backtest
 				}
 			else
 				{
-				Console.WriteLine ("[pfi:daily] no OOS rows after _trainUntilUtc, skip oos PFI.");
+				Console.WriteLine ("[pfi:daily] no OOS rows after train boundary (baseline-exit), skip oos PFI.");
+				}
+
+			if (split.Excluded.Count > 0)
+				{
+				Console.WriteLine (
+					$"[pfi:daily] WARNING: excluded={split.Excluded.Count} rows have undefined baseline-exit and were ignored.");
 				}
 			}
 		}

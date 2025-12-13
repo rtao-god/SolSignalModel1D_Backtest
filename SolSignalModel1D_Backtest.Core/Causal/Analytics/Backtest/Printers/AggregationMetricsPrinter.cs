@@ -14,12 +14,15 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 	///   - Day          (PredLabel_Day, Prob*_Day),
 	///   - Day+Micro    (PredLabel_DayMicro, Prob*_DayMicro),
 	///   - Total        (PredLabel, Prob*_Total).
+	///
+	/// Важно: сегментация строго по TrainBoundary (через baseline-exit).
+	/// Excluded (дни без baseline-exit) не смешиваются в метрики.
 	/// </summary>
 	public static class AggregationMetricsPrinter
 		{
 		public static void Print (
 			IReadOnlyList<CausalPredictionRecord> records,
-			DateTime trainUntilUtc,
+			TrainBoundary boundary,
 			int recentDays = 240 )
 			{
 			if (records == null) throw new ArgumentNullException (nameof (records));
@@ -39,25 +42,35 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
-			var minDateUtc = ordered.First ().DateUtc;
-			var maxDateUtc = ordered.Last ().DateUtc;
+			var split = boundary.Split (ordered, r => r.DateUtc);
 
-			Console.WriteLine (
-				$"[agg-metrics] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, totalRecords = {ordered.Count}");
+			var train = split.Train;
+			var oos = split.Oos;
 
-			// Сегменты такие же, как в AggregationProbsPrinter.
-			var train = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
+			// Eligible = train+oos, excluded не смешиваем в метрики.
+			var full = new List<CausalPredictionRecord> (train.Count + oos.Count);
+			full.AddRange (train);
+			full.AddRange (oos);
 
-			var oos = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+			if (split.Excluded.Count > 0)
+				{
+				Console.WriteLine (
+					$"[agg-metrics][WARN] excluded (no baseline-exit) = {split.Excluded.Count}. " +
+					"Они исключены из метрик, проверь контракт entryUtc/окна.");
+				}
 
-			var full = ordered;
+			if (full.Count == 0)
+				{
+				Console.WriteLine (
+					$"[agg-metrics][FAIL] eligible=0 (train+oos), excluded={split.Excluded.Count}. " +
+					$"trainUntil(exit<=)={boundary.TrainUntilIsoDate}");
+				return;
+				}
+
+			var maxDateUtc = full.Last ().DateUtc;
 
 			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
-			var recent = ordered
+			var recent = full
 				.Where (r => r.DateUtc >= fromRecentUtc)
 				.ToList ();
 
@@ -68,10 +81,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 
 			var meta = new TextTable ();
 			meta.AddHeader ("segment", "from", "to", "days");
-			AddSegmentMetaRow (meta, "Train", train);
-			AddSegmentMetaRow (meta, "OOS", oos);
+
+			AddSegmentMetaRow (meta, $"Train (exit<= {boundary.TrainUntilIsoDate})", train);
+			AddSegmentMetaRow (meta, $"OOS (exit>  {boundary.TrainUntilIsoDate})", oos);
 			AddSegmentMetaRow (meta, $"Recent({recentDays}d)", recent);
 			AddSegmentMetaRow (meta, "Full", full);
+
 			meta.WriteToConsole ();
 			Console.WriteLine ();
 
@@ -108,25 +123,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			public string LayerName { get; init; } = string.Empty;
 			public int[,] Confusion { get; init; } = new int[3, 3];
 
-			/// <summary>Всего объектов в сегменте.</summary>
 			public int N { get; init; }
-
-			/// <summary>Сколько предсказаний совпало с TrueLabel.</summary>
 			public int Correct { get; init; }
-
-			/// <summary>Точность (accuracy) по всем объектам.</summary>
 			public double Accuracy { get; init; }
-
-			/// <summary>Микро-F1. Для single-label multi-class равен accuracy.</summary>
 			public double MicroF1 { get; init; }
-
-			/// <summary>Средний logloss по тем объектам, где p_true &gt; 0. Иначе NaN.</summary>
 			public double LogLoss { get; init; }
-
-			/// <summary>Сколько объектов вообще нельзя использовать для logloss (p_true == 0).</summary>
 			public int InvalidForLogLoss { get; init; }
-
-			/// <summary>Сколько объектов реально участвуют в logloss.</summary>
 			public int ValidForLogLoss { get; init; }
 			}
 
@@ -242,15 +244,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			double accuracy = n > 0 ? (double) correct / n : double.NaN;
 			double microF1 = accuracy;
 
-			double logLoss;
-			if (validForLogLoss == 0)
-				{
-				logLoss = double.NaN;
-				}
-			else
-				{
-				logLoss = -sumLog / validForLogLoss;
-				}
+			double logLoss = validForLogLoss == 0
+				? double.NaN
+				: -sumLog / validForLogLoss;
 
 			return new LayerMetrics
 				{
@@ -277,37 +273,15 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			int row1 = m.Confusion[1, 0] + m.Confusion[1, 1] + m.Confusion[1, 2];
 			int row2 = m.Confusion[2, 0] + m.Confusion[2, 1] + m.Confusion[2, 2];
 
-			cm.AddRow (
-				"0",
-				m.Confusion[0, 0].ToString (),
-				m.Confusion[0, 1].ToString (),
-				m.Confusion[0, 2].ToString (),
-				row0.ToString ());
-
-			cm.AddRow (
-				"1",
-				m.Confusion[1, 0].ToString (),
-				m.Confusion[1, 1].ToString (),
-				m.Confusion[1, 2].ToString (),
-				row1.ToString ());
-
-			cm.AddRow (
-				"2",
-				m.Confusion[2, 0].ToString (),
-				m.Confusion[2, 1].ToString (),
-				m.Confusion[2, 2].ToString (),
-				row2.ToString ());
+			cm.AddRow ("0", m.Confusion[0, 0].ToString (), m.Confusion[0, 1].ToString (), m.Confusion[0, 2].ToString (), row0.ToString ());
+			cm.AddRow ("1", m.Confusion[1, 0].ToString (), m.Confusion[1, 1].ToString (), m.Confusion[1, 2].ToString (), row1.ToString ());
+			cm.AddRow ("2", m.Confusion[2, 0].ToString (), m.Confusion[2, 1].ToString (), m.Confusion[2, 2].ToString (), row2.ToString ());
 
 			int col0 = m.Confusion[0, 0] + m.Confusion[1, 0] + m.Confusion[2, 0];
 			int col1 = m.Confusion[0, 1] + m.Confusion[1, 1] + m.Confusion[2, 1];
 			int col2 = m.Confusion[0, 2] + m.Confusion[1, 2] + m.Confusion[2, 2];
 
-			cm.AddRow (
-				"colSum",
-				col0.ToString (),
-				col1.ToString (),
-				col2.ToString (),
-				m.N.ToString ());
+			cm.AddRow ("colSum", col0.ToString (), col1.ToString (), col2.ToString (), m.N.ToString ());
 
 			cm.WriteToConsole ();
 			Console.WriteLine ();
@@ -327,9 +301,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			if (m.InvalidForLogLoss > 0)
 				{
 				Console.WriteLine (
-					$"[agg-metrics] WARNING: layer '{m.LayerName}' has {m.InvalidForLogLoss} records " +
-					"with p_true=0; они не учитываются в logloss, этот показатель отражает только " +
-					$"{m.ValidForLogLoss} дней с p_true>0.");
+					$"[agg-metrics] WARNING: layer '{m.LayerName}' has {m.InvalidForLogLoss} records with p_true=0; " +
+					"они не учитываются в logloss.");
 				Console.WriteLine ();
 				}
 			}

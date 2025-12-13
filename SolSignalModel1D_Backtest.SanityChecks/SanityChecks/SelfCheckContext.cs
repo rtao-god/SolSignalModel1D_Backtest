@@ -30,7 +30,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 		/// <summary>Вся история SOL 1m (для path-based sanity-проверок).</summary>
 		public IReadOnlyList<Candle1m> Sol1m { get; init; } = Array.Empty<Candle1m> ();
 
-		/// <summary>Граница train-периода дневной модели (_trainUntilUtc).</summary>
+		/// <summary>Граница train-периода в терминах baseline-exit (для TrainBoundary).</summary>
 		public DateTime TrainUntilUtc { get; init; }
 
 		/// <summary>Таймзона Нью-Йорка для тестов окон.</summary>

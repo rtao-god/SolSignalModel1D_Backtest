@@ -19,4 +19,8 @@
 		<ProjectReference Include="..\SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
 		<ProjectReference Include="..\SolSignalModel1D_Backtest.csproj" />
 	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Leakage\Dir\" />
+	</ItemGroup>
 </Project>

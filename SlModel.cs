@@ -1,17 +1,11 @@
 ﻿using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML;
-using SolSignalModel1D_Backtest.Core.ML.Delayed.Builders;
-using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
@@ -27,8 +21,8 @@ namespace SolSignalModel1D_Backtest
 		/// как выбор порога "сильного" дня влияет на качество.
 		/// </summary>
 		private static void TrainAndApplySlModelOffline (
-			List<DataRow> allRows,
-			IList<BacktestRecord> records,
+			IReadOnlyList<DataRow> allRows,
+			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<Candle6h> solAll6h )
@@ -66,10 +60,34 @@ namespace SolSignalModel1D_Backtest
 			// ===== 1. Каузальный train-сабсет для SL-модели =====
 			// Берём только те DataRow, которые лежат в train-периоде дневной модели.
 			// Это убирает утечку: OOS-даты не попадают в обучающий датасет SL.
-			var slTrainRows = allRows
-				.Where (r => r.Date <= _trainUntilUtc)
+			// _trainUntilUtc по контракту задан в терминах baseline-exit, поэтому сравнение entry-даты (r.Date <= _trainUntilUtc)
+			// некорректно и может вернуть boundary leakage. Здесь режем строго через TrainBoundary.
+			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
+
+			// Стабилизируем порядок до сплита: одинаковый вход => одинаковый результат.
+			var orderedAllRows = allRows
 				.OrderBy (r => r.Date)
 				.ToList ();
+
+			var split = boundary.Split (orderedAllRows, r => r.Date);
+
+			// По требованию: ничего не игнорировать.
+			if (split.Excluded.Count > 0)
+				{
+				throw new InvalidOperationException (
+					$"[sl-offline] Found excluded rows (baseline-exit undefined). count={split.Excluded.Count}.");
+				}
+
+			// В эту функцию ожидается приход train-only rows (caller уже режет через TrainBoundary).
+			// Если сюда попал OOS-хвост — это нарушение пайплайна, лучше падать, чем обучить SL на OOS.
+			if (split.Oos.Count > 0)
+				{
+				throw new InvalidOperationException (
+					$"[sl-offline] OOS rows passed into SL training. oos={split.Oos.Count}. " +
+					"SL training must be strictly train-only by baseline-exit contract.");
+				}
+
+			var slTrainRows = split.Train;
 
 			if (slTrainRows.Count < 50)
 				{

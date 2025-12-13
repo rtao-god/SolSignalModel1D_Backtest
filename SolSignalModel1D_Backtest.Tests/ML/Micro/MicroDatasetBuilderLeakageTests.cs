@@ -8,18 +8,12 @@ using Xunit;
 namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 	{
 	/// <summary>
-	/// Тесты для MicroDatasetBuilder:
-	/// - проверка, что train/micro-датасеты режутся по trainUntil;
-	/// - проверка, что MicroRows — подмножество TrainRows.
+	/// Инварианты микро-датасета:
+	/// 1) train/micro-выборки не должны включать даты позже trainUntil;
+	/// 2) MicroRows должна быть подмножеством TrainRows (иначе микро-слой может получить "будущее" относительно трейна).
 	/// </summary>
 	public sealed class MicroDatasetBuilderLeakageTests
 		{
-		/// <summary>
-		/// Сценарий:
-		/// - строим последовательность дней до и после trainUntil;
-		/// - размечаем FactMicroUp / FactMicroDown как угодно;
-		/// - убеждаемся, что в MicroRows/TrainRows нет дат > trainUntil.
-		/// </summary>
 		[Fact]
 		public void Build_UsesOnlyRowsUpToTrainUntil ()
 			{
@@ -34,7 +28,6 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 					{
 					Date = date,
 					Features = new double[2],
-					// Простая разметка: через один up/down.
 					FactMicroUp = i % 2 == 0,
 					FactMicroDown = i % 2 == 1
 					});
@@ -42,9 +35,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 
 			var trainUntil = start.AddDays (30);
 
-			var ds = MicroDatasetBuilder.Build (
-				allRows: rows,
-				trainUntil: trainUntil);
+			// Позиционный вызов: переименование trainUntil* в Core не ломает тест.
+			var ds = MicroDatasetBuilder.Build (rows, trainUntil);
 
 			Assert.NotEmpty (ds.TrainRows);
 			Assert.NotEmpty (ds.MicroRows);
@@ -53,10 +45,6 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			Assert.All (ds.MicroRows, r => Assert.True (r.Date <= trainUntil));
 			}
 
-		/// <summary>
-		/// MicroRows должен быть подмножеством TrainRows:
-		/// если это когда-нибудь перестанет быть так, микро-слой будет иметь шанс "увидеть будущее".
-		/// </summary>
 		[Fact]
 		public void Build_MicroRowsAreSubsetOfTrainRows ()
 			{
@@ -78,18 +66,13 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 
 			var trainUntil = start.AddDays (40);
 
-			var ds = MicroDatasetBuilder.Build (
-				allRows: rows,
-				trainUntil: trainUntil);
+			// Позиционный вызов: переименование trainUntil* в Core не ломает тест.
+			var ds = MicroDatasetBuilder.Build (rows, trainUntil);
 
-			var trainDates = ds.TrainRows
-				.Select (r => r.Date)
-				.ToHashSet ();
+			var trainDates = ds.TrainRows.Select (r => r.Date).ToHashSet ();
 
 			foreach (var microRow in ds.MicroRows)
-				{
 				Assert.Contains (microRow.Date, trainDates);
-				}
 			}
 		}
 	}

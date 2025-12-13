@@ -1,9 +1,12 @@
-﻿using Xunit;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
-
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Infra;
+using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
 	{
@@ -191,9 +194,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				}
 
 			// --- 5. Делим на train / OOS, как в боевом коде, но с более коротким hold-out ---
-			DateTime minDate = ordered.First ().Date;
 			DateTime maxDate = ordered.Last ().Date;
-
 			DateTime trainUntil = maxDate.AddDays (-holdoutDays);
 
 			var trainRows = ordered
@@ -218,7 +219,6 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				.Where (r => r.Date > trainUntil)
 				.ToList ();
 
-			// На всякий случай, если OOS короткий, расширяем до середины истории.
 			if (evalRows.Count < 100)
 				{
 				evalRows = ordered

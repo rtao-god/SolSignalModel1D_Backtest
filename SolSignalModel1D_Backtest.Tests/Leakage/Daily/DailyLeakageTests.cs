@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using Xunit;
 
@@ -15,6 +17,66 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	/// </summary>
 	public sealed class DailyLeakageChecksTests
 		{
+		private static BacktestRecord MakeRecord ( DateTime dateUtc, int trueLabel, int predLabel )
+			{
+			static (double Up, double Flat, double Down) MakeTriProbs ( int cls )
+				{
+				const double Hi = 0.90;
+				const double Lo = 0.05;
+
+				return cls switch
+					{
+						2 => (Hi, Lo, Lo),
+						1 => (Lo, Hi, Lo),
+						0 => (Lo, Lo, Hi),
+						_ => throw new ArgumentOutOfRangeException (nameof (cls), cls, "PredLabel must be in [0..2].")
+						};
+				}
+
+			var (pUp, pFlat, pDown) = MakeTriProbs (predLabel);
+
+			return new BacktestRecord
+				{
+				Causal = new CausalPredictionRecord
+					{
+					DateUtc = dateUtc,
+					TrueLabel = trueLabel,
+					PredLabel = predLabel,
+					PredLabel_Day = predLabel,
+					PredLabel_DayMicro = predLabel,
+
+					ProbUp_Day = pUp,
+					ProbFlat_Day = pFlat,
+					ProbDown_Day = pDown,
+
+					ProbUp_DayMicro = pUp,
+					ProbFlat_DayMicro = pFlat,
+					ProbDown_DayMicro = pDown,
+
+					ProbUp_Total = pUp,
+					ProbFlat_Total = pFlat,
+					ProbDown_Total = pDown,
+
+					Conf_Day = Math.Max (pUp, Math.Max (pFlat, pDown))
+					},
+
+				Forward = new ForwardOutcomes
+					{
+					DateUtc = dateUtc,
+					WindowEndUtc = dateUtc.AddHours (24),
+
+					// Эти поля в данном наборе тестов не участвуют в проверках,
+					// но forward-часть должна быть валидной структурно.
+					Entry = 100.0,
+					MaxHigh24 = 110.0,
+					MinLow24 = 90.0,
+					Close24 = 100.0,
+					MinMove = 0.01,
+					DayMinutes = Array.Empty<Candle1m> ()
+					}
+				};
+			}
+
 		[Fact]
 		public void CheckDailyTrainVsOosAndShuffle_ReturnsSuccess_OnReasonableMetrics ()
 			{
@@ -35,20 +97,19 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					? trueLabel
 					: (trueLabel + 1) % 3;
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = start.AddDays (i),
-					TrueLabel = trueLabel,
-					PredLabel = predLabel
-					});
+				records.Add (MakeRecord (start.AddDays (i), trueLabel, predLabel));
 				}
 
 			// Первые 150 дней считаем train, остальные 50 — OOS.
 			var trainUntilUtc = start.AddDays (149);
 
+			// Важно: boundary требует NY TZ, потому что сегментация основана на baseline-exit.
+			// Для теста достаточно использовать тот же TZ, что используется в контракте Windowing.
+			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+
 			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
 				records,
-				trainUntilUtc);
+				boundary);
 
 			Assert.NotNull (result);
 			Assert.True (result.Success);
@@ -89,19 +150,15 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					predLabel = trueLabel;
 					}
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = start.AddDays (i),
-					TrueLabel = trueLabel,
-					PredLabel = predLabel
-					});
+				records.Add (MakeRecord (start.AddDays (i), trueLabel, predLabel));
 				}
 
 			var trainUntilUtc = start.AddDays (99);
+			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
 
 			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
 				records,
-				trainUntilUtc);
+				boundary);
 
 			Assert.NotNull (result);
 
@@ -126,21 +183,16 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			for (int i = 0; i < 50; i++)
 				{
 				int label = i % 3;
-
-				records.Add (new PredictionRecord
-					{
-					DateUtc = start.AddDays (i),
-					TrueLabel = label,
-					PredLabel = label
-					});
+				records.Add (MakeRecord (start.AddDays (i), label, label));
 				}
 
 			// trainUntil ставим после последнего дня — OOS не будет.
 			var trainUntilUtc = start.AddDays (1000);
+			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
 
 			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
 				records,
-				trainUntilUtc);
+				boundary);
 
 			Assert.NotNull (result);
 			Assert.True (result.Success);

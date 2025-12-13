@@ -1,13 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using Microsoft.ML;
+﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Aggregation;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 	{
@@ -15,14 +12,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 		{
 		private readonly ModelBundle _bundle;
 		private readonly ProbabilityAggregationConfig _aggConfig;
+		private readonly MLContext _ml;
 
-		public static bool DebugAllowDisabledModels { get; set; } = false;
-		public static bool DebugTreatMissingMoveAsFlat { get; set; } = false;
-		public static bool DebugTreatMissingDirAsFlat { get; set; } = false;
+		// ML.NET PredictionEngine не потокобезопасен.
+		// Этот класс рассчитан на последовательный backtest/analytics-пайплайн.
+		private readonly PredictionEngine<MlSampleBinary, MlBinaryOutput>? _moveEng;
+		private readonly PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirNormalEng;
+		private readonly PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirDownEng;
+		private readonly PredictionEngine<MlSampleBinary, MlBinaryOutput>? _microEng;
 
+		// Порог принятия микро-сигнала на flat-днях.
+		// Лучше бы вынести в конфиг, но это уже отдельная миграция по всему пайплайну.
 		private const float FlatMicroProbThresh = 0.60f;
-		private const int MicroDebugMaxRows = 10;
-		private static int _microDebugPrinted;
 
 		/// <summary>
 		/// Внутренний результат предсказания дневного стека:
@@ -30,7 +31,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 		/// - Day / DayWithMicro — P_day и P_dayMicro;
 		/// - Micro — детальная информация микро-слоя.
 		/// </summary>
-		public readonly struct PredResult
+		private readonly struct PredResult
 			{
 			public PredResult (
 				int cls,
@@ -49,11 +50,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			public int Class { get; }
 			public string Reason { get; }
 			public MicroInfo Micro { get; }
-
-			/// <summary>P_day: дневные вероятности из move+dir+BTC.</summary>
 			public DailyProbabilities Day { get; }
-
-			/// <summary>P_dayMicro: дневные вероятности после микро-оверлея.</summary>
 			public DailyProbabilities DayWithMicro { get; }
 			}
 
@@ -61,6 +58,28 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			{
 			_bundle = bundle ?? throw new ArgumentNullException (nameof (bundle));
 			_aggConfig = aggregationConfig ?? new ProbabilityAggregationConfig ();
+
+			_ml = _bundle.MlCtx ?? throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MlCtx == null");
+
+			// Жёстко фиксируем зависимость от моделей:
+			// - move и dir обязательны для дневного стека (иначе это не «дневной стек», а отладочная заглушка);
+			// - micro опционален.
+			if (_bundle.MoveModel == null)
+				throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MoveModel == null (нет move-модели)");
+
+			if (_bundle.DirModelNormal == null && _bundle.DirModelDown == null)
+				throw new InvalidOperationException ("[PredictionEngine] DirModelNormal/DirModelDown == null (нет dir-модели)");
+
+			_moveEng = _ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MoveModel);
+
+			if (_bundle.DirModelNormal != null)
+				_dirNormalEng = _ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.DirModelNormal);
+
+			if (_bundle.DirModelDown != null)
+				_dirDownEng = _ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.DirModelDown);
+
+			if (_bundle.MicroFlatModel != null)
+				_microEng = _ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
 			}
 
 		// =====================================================================
@@ -69,19 +88,19 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
 		/// <summary>
 		/// Каузальный API: строит CausalPredictionRecord для одного дня.
-		/// ВАЖНО: в записи нет true-label'а, forward-цен и delayed/SL-слоя.
+		/// ВАЖНО: вход строго causal (CausalDataRow). Здесь запрещены label/forward-ценности/факты.
 		/// </summary>
-		public CausalPredictionRecord PredictCausal ( DataRow r )
+		public CausalPredictionRecord PredictCausal ( CausalDataRow r )
 			{
-			var res = Predict (r);
+			if (r == null) throw new ArgumentNullException (nameof (r));
+			var res = PredictInternal (r);
 			return ToCausalRecord (r, res);
 			}
 
 		/// <summary>
 		/// Batch-API для построения каузальных записей по списку дней.
-		/// Удобно для утренних точек (mornings) и бэктеста.
 		/// </summary>
-		public List<CausalPredictionRecord> PredictManyCausal ( IReadOnlyList<DataRow> rows )
+		public List<CausalPredictionRecord> PredictManyCausal ( IReadOnlyList<CausalDataRow> rows )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 
@@ -89,14 +108,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-				var r = rows[i];
-				if (r == null)
-					{
-					throw new InvalidOperationException (
-						"[PredictionEngine] rows contains null DataRow item.");
-					}
-
-				var res = Predict (r);
+				var r = rows[i] ?? throw new InvalidOperationException ("[PredictionEngine] rows contains null CausalDataRow item.");
+				var res = PredictInternal (r);
 				result.Add (ToCausalRecord (r, res));
 				}
 
@@ -104,9 +117,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			}
 
 		/// <summary>
-		/// Маппинг внутреннего PredResult + DataRow в каузальный DTO без forward-полей.
+		/// Маппинг внутреннего PredResult + CausalDataRow в каузальный DTO без forward-полей.
 		/// </summary>
-		private static CausalPredictionRecord ToCausalRecord ( DataRow r, PredResult res )
+		private static CausalPredictionRecord ToCausalRecord ( CausalDataRow r, PredResult res )
 			{
 			var day = res.Day;
 			var dayMicro = res.DayWithMicro;
@@ -117,8 +130,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
 			return new CausalPredictionRecord
 				{
-				// as-of момент = дата входа из DataRow (UTC).
-				DateUtc = r.Date,
+				// as-of момент = дата входа (UTC).
+				DateUtc = r.DateUtc,
 
 				// контекст
 				RegimeDown = r.RegimeDown,
@@ -140,11 +153,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				ProbFlat_DayMicro = dayMicro.PFlat,
 				ProbDown_DayMicro = dayMicro.PDown,
 
-				// confidence считаем локально, чтобы не зависеть от реализации DailyProbabilities
+				// confidence локально (не завязываемся на реализацию DailyProbabilities)
 				Conf_Day = Math.Max (day.PUp, Math.Max (day.PFlat, day.PDown)),
 				Conf_Micro = micro.Predicted ? micro.Prob : 0.0,
 
-				// микро-прогноз, без факта
+				// микро-прогноз (без фактов)
 				MicroPredicted = micro.Predicted,
 				PredMicroUp = micro.Predicted && micro.Up,
 				PredMicroDown = micro.Predicted && !micro.Up
@@ -175,89 +188,23 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			}
 
 		// =====================================================================
-		// СТАРЫЙ API: Predict(DataRow) → PredResult
+		// INTERNAL CORE: causal-only inference
 		// =====================================================================
 
-		public PredResult Predict ( DataRow r )
+		private PredResult PredictInternal ( CausalDataRow r )
 			{
 			try
 				{
-				if (r == null)
-					throw new ArgumentNullException (nameof (r));
+				// Конвертация в float[] — без промежуточного double[].
+				var fixedFeatures = ToFloatFixed (r.FeaturesVector.Span);
 
-				if (r.Features == null)
-					{
-					throw new InvalidOperationException (
-						"[PredictionEngine] DataRow.Features == null. " +
-						"Нет фич для дня " + r.Date.ToString ("O"));
-					}
+				var sample = new MlSampleBinary { Features = fixedFeatures };
 
-				var fixedFeatures = MlTrainingUtils.ToFloatFixed (r.Features);
+				// ===== 1) move =====
+				var moveEng = _moveEng ?? throw new InvalidOperationException ("[PredictionEngine] move engine is not initialized.");
+				var moveOut = moveEng.Predict (sample);
 
-				if (_bundle.MlCtx == null)
-					throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MlCtx == null");
-
-				var ml = _bundle.MlCtx;
-
-				var sample = new MlSampleBinary
-					{
-					Features = fixedFeatures
-					};
-
-				// ===== 1. Бинарная модель "есть ли ход" (move) =====
-
-				MlBinaryOutput moveOut;
-
-				if (_bundle.MoveModel == null)
-					{
-					if (!DebugAllowDisabledModels)
-						{
-						throw new InvalidOperationException (
-							"[PredictionEngine] ModelBundle.MoveModel == null (нет move-модели)");
-						}
-
-					if (DebugTreatMissingMoveAsFlat)
-						{
-						// Debug: считаем, что всегда flat.
-						var rawFlat = new DailyRawOutput
-							{
-							PMove = 0.0,
-							PUpGivenMove = 0.5,
-							BtcFilterBlocksUp = false,
-							BtcFilterBlocksFlat = false,
-							BtcFilterBlocksDown = false
-							};
-
-						var dayFlat = DayProbabilityBuilder.BuildDayProbabilities (rawFlat);
-						var microInfo = RunMicroIfAvailable (r, fixedFeatures, ml);
-						var microProbs = ConvertMicro (microInfo);
-						var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbs, _aggConfig);
-
-						string reason = microInfo.Predicted
-							? microInfo.Up ? "day:flat+microUp(move-disabled)" : "day:flat+microDown(move-disabled)"
-							: "day:flat(move-disabled)";
-
-						// Для совместимости возвращаем PredResult; каузальный слой делает маппинг отдельно.
-						return new PredResult (1, reason, microInfo, dayFlat, dayFlatMicro);
-						}
-					else
-						{
-						// Debug: считаем, что ход есть.
-						moveOut = new MlBinaryOutput
-							{
-							PredictedLabel = true,
-							Probability = 1.0f,
-							Score = 0.0f
-							};
-						}
-					}
-				else
-					{
-					var moveEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MoveModel);
-					moveOut = moveEng.Predict (sample);
-					}
-
-				// ===== 2. Нет хода → дневной flat + микро-слой =====
+				// ===== 2) нет хода -> flat + micro =====
 				if (!moveOut.PredictedLabel)
 					{
 					var rawFlat = new DailyRawOutput
@@ -270,7 +217,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 						};
 
 					var dayFlat = DayProbabilityBuilder.BuildDayProbabilities (rawFlat);
-					var microInfo = RunMicroIfAvailable (r, fixedFeatures, ml);
+					var microInfo = RunMicroIfAvailable (fixedFeatures);
 					var microProbs = ConvertMicro (microInfo);
 					var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbs, _aggConfig);
 
@@ -281,60 +228,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 					return new PredResult (1, reason, microInfo, dayFlat, dayFlatMicro);
 					}
 
-				// ===== 3. Ход есть → dir-модель =====
-
-				var dirModel = r.RegimeDown && _bundle.DirModelDown != null
-					? _bundle.DirModelDown
-					: _bundle.DirModelNormal;
-
-				if (dirModel == null)
-					{
-					if (!DebugAllowDisabledModels)
-						{
-						throw new InvalidOperationException (
-							"[PredictionEngine] DirModelNormal/DirModelDown == null (нет dir-модели)");
-						}
-
-					// Debug-фоллбеки без микро: микро здесь не считается.
-					if (DebugTreatMissingDirAsFlat)
-						{
-						var rawFlat = new DailyRawOutput
-							{
-							PMove = 0.0,
-							PUpGivenMove = 0.5,
-							BtcFilterBlocksUp = false,
-							BtcFilterBlocksFlat = false,
-							BtcFilterBlocksDown = false
-							};
-
-						var dayFlat = DayProbabilityBuilder.BuildDayProbabilities (rawFlat);
-						var microEmpty = new MicroInfo ();
-						var microProbs = ConvertMicro (microEmpty);
-						var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbs, _aggConfig);
-
-						return new PredResult (1, "day:move-true-dir-missing(flat-fallback)", microEmpty, dayFlat, dayFlatMicro);
-						}
-					else
-						{
-						var rawDown = new DailyRawOutput
-							{
-							PMove = 1.0,
-							PUpGivenMove = 0.0,
-							BtcFilterBlocksUp = false,
-							BtcFilterBlocksFlat = false,
-							BtcFilterBlocksDown = false
-							};
-
-						var dayDown = DayProbabilityBuilder.BuildDayProbabilities (rawDown);
-						var microEmpty = new MicroInfo ();
-						var microProbs = ConvertMicro (microEmpty);
-						var dayDownMicro = ProbabilityAggregator.ApplyMicroOverlay (dayDown, microProbs, _aggConfig);
-
-						return new PredResult (0, "day:move-true-dir-missing(down-fallback)", microEmpty, dayDown, dayDownMicro);
-						}
-					}
-
-				var dirEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (dirModel);
+				// ===== 3) ход есть -> dir =====
+				var dirEng = SelectDirEngine (r);
 				var dirOut = dirEng.Predict (sample);
 
 				bool wantsUp = dirOut.PredictedLabel;
@@ -342,13 +237,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				bool btcBlocksUp = false;
 				if (wantsUp)
 					{
+					// BTC-фильтр — это часть каузального стека (использует только causal-поля).
 					bool btcEmaDown = r.BtcEma50vs200 < -0.002;
 					bool btcShortRed = r.BtcRet1 < 0 && r.BtcRet30 < 0;
 
 					if (btcEmaDown && btcShortRed)
-						{
 						btcBlocksUp = true;
-						}
 					}
 
 				var rawDir = new DailyRawOutput
@@ -362,22 +256,20 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
 				var dayProbs = DayProbabilityBuilder.BuildDayProbabilities (rawDir);
 
-				// На направленных днях микро-модель не вызывается → эффект микро 0.
-				var microEmptyDir = new MicroInfo ();
-				var microProbsDir = ConvertMicro (microEmptyDir);
+				// На направленных днях микро не вызывается (архитектурный выбор).
+				var microEmpty = new MicroInfo ();
+				var microProbsDir = ConvertMicro (microEmpty);
 				var dayWithMicro = ProbabilityAggregator.ApplyMicroOverlay (dayProbs, microProbsDir, _aggConfig);
 
 				if (wantsUp)
 					{
 					if (btcBlocksUp)
-						{
-						return new PredResult (1, "day:move-up-blocked-by-btc", microEmptyDir, dayProbs, dayWithMicro);
-						}
+						return new PredResult (1, "day:move-up-blocked-by-btc", microEmpty, dayProbs, dayWithMicro);
 
-					return new PredResult (2, "day:move-up", microEmptyDir, dayProbs, dayWithMicro);
+					return new PredResult (2, "day:move-up", microEmpty, dayProbs, dayWithMicro);
 					}
 
-				return new PredResult (0, "day:move-down", microEmptyDir, dayProbs, dayWithMicro);
+				return new PredResult (0, "day:move-down", microEmpty, dayProbs, dayWithMicro);
 				}
 			catch (Exception ex)
 				{
@@ -387,40 +279,36 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				}
 			}
 
-		private MicroInfo RunMicroIfAvailable ( DataRow r, float[] fixedFeatures, MLContext ml )
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput> SelectDirEngine ( CausalDataRow r )
+			{
+			// Если есть специализированная down-модель и режим down — используем её.
+			// Иначе — normal. Если normal отсутствует, но есть down — используем down как единственную доступную.
+			if (r.RegimeDown && _dirDownEng != null)
+				return _dirDownEng;
+
+			if (_dirNormalEng != null)
+				return _dirNormalEng;
+
+			if (_dirDownEng != null)
+				return _dirDownEng;
+
+			throw new InvalidOperationException ("[PredictionEngine] dir engine is not initialized.");
+			}
+
+		private MicroInfo RunMicroIfAvailable ( float[] fixedFeatures )
 			{
 			var microInfo = new MicroInfo ();
 
-			if (_bundle.MicroFlatModel == null)
+			// Микро — опционально.
+			if (_microEng == null)
 				return microInfo;
 
-			var microEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
+			var microSample = new MlSampleBinary { Features = fixedFeatures };
+			var microOut = _microEng.Predict (microSample);
 
-			var microSample = new MlSampleBinary
-				{
-				Features = fixedFeatures
-				};
-
-			var microOut = microEng.Predict (microSample);
 			float p = microOut.Probability;
 
-			if (_microDebugPrinted < MicroDebugMaxRows && (r.FactMicroUp || r.FactMicroDown))
-				{
-				bool accepted = p >= FlatMicroProbThresh;
-
-				Console.WriteLine (
-					"[debug-micro] {0:yyyy-MM-dd} factUp={1}, factDown={2}, predUp={3}, prob={4:0.000}, accepted={5}",
-					r.Date,
-					r.FactMicroUp,
-					r.FactMicroDown,
-					microOut.PredictedLabel,
-					p,
-					accepted
-				);
-
-				_microDebugPrinted++;
-				}
-
+			// Если ниже порога — считаем «нет предсказания»
 			if (p < FlatMicroProbThresh)
 				{
 				microInfo.Predicted = false;
@@ -434,18 +322,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			microInfo.ConsiderDown = !microOut.PredictedLabel;
 			microInfo.Prob = p;
 
-			if (r.FactMicroUp || r.FactMicroDown)
-				{
-				microInfo.Correct = microOut.PredictedLabel
-					? r.FactMicroUp
-					: r.FactMicroDown;
-				}
-
 			return microInfo;
 			}
 
 		private static MicroProbabilities ConvertMicro ( MicroInfo micro )
 			{
+			// Контракт: если HasPrediction=false, аггрегатор обязан игнорировать распределение.
+			// Значения 0.5/0.5 оставлены как нейтральные «плейсхолдеры», но они не должны участвовать в расчёте.
 			if (!micro.Predicted)
 				{
 				return new MicroProbabilities
@@ -459,9 +342,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				}
 
 			double pUp = micro.Prob;
-			if (pUp < 0.0) pUp = 0.0;
-			if (pUp > 1.0) pUp = 1.0;
-
 			double pDown = 1.0 - pUp;
 
 			return new MicroProbabilities
@@ -474,64 +354,30 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				};
 			}
 
-		// EvalMicroAware / EvalWeighted без изменений
-		public bool EvalMicroAware ( DataRow r, int predClass, MicroInfo micro )
+		private static float[] ToFloatFixed ( ReadOnlySpan<double> features )
 			{
-			bool baseCorrect = predClass == r.Label;
-			if (baseCorrect) return true;
+			if (features.Length == 0)
+				{
+				throw new InvalidOperationException (
+					"[PredictionEngine] FeaturesVector is empty. " +
+					"Это означает, что upstream не собрал фичи для дня.");
+				}
 
-			if (r.Label == 2 && predClass == 1 && micro.ConsiderUp) return true;
-			if (r.Label == 0 && predClass == 1 && micro.ConsiderDown) return true;
-			if (r.Label == 1 && r.FactMicroUp && predClass == 2) return true;
-			if (r.Label == 1 && r.FactMicroDown && predClass == 0) return true;
-			if (r.Label == 1 && r.FactMicroUp && predClass == 1 && micro.ConsiderUp) return true;
-			if (r.Label == 1 && r.FactMicroDown && predClass == 1 && micro.ConsiderDown) return true;
+			var res = new float[features.Length];
 
-			return false;
-			}
+			for (int i = 0; i < features.Length; i++)
+				{
+				var x = features[i];
+				if (double.IsNaN (x) || double.IsInfinity (x))
+					{
+					throw new InvalidOperationException (
+						$"[PredictionEngine] Non-finite feature value at i={i}: {x}.");
+					}
 
-		public double EvalWeighted ( DataRow r, int predClass, MicroInfo micro )
-			{
-			int fact = r.Label;
-			bool predMicroUp = micro.ConsiderUp;
-			bool predMicroDown = micro.ConsiderDown;
-			bool factMicroUp = r.FactMicroUp;
-			bool factMicroDown = r.FactMicroDown;
+				res[i] = (float) x;
+				}
 
-			if (fact == 2)
-				{
-				if (predClass == 2) return 1.0;
-				if (predClass == 1 && predMicroUp) return 1.0;
-				if (predClass == 1) return 0.25;
-				return 0.0;
-				}
-			if (fact == 0)
-				{
-				if (predClass == 0) return 1.0;
-				if (predClass == 1 && predMicroDown) return 1.0;
-				if (predClass == 1) return 0.25;
-				return 0.0;
-				}
-			if (fact == 1 && factMicroUp)
-				{
-				if (predClass == 1 && predMicroUp) return 1.0;
-				if (predClass == 2) return 0.8;
-				if (predClass == 1) return 0.2;
-				return 0.0;
-				}
-			if (fact == 1 && factMicroDown)
-				{
-				if (predClass == 1 && predMicroDown) return 1.0;
-				if (predClass == 0) return 0.8;
-				if (predClass == 1) return 0.2;
-				return 0.0;
-				}
-			if (fact == 1)
-				{
-				if (predClass == 1) return 1.0;
-				return 0.3;
-				}
-			return 0.0;
+			return res;
 			}
 		}
 	}

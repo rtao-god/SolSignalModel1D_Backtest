@@ -3,47 +3,41 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Micro
 	{
-	/// <summary>
-	/// Тренер микро-модели для боковика.
-	/// ВАЖНО:
-	/// - микро-слой опционален: если размеченных микро-дней мало, он просто не строится (возвращается null);
-	/// - любые реальные проблемы с датасетом при нормальном объёме истории приводят к InvalidOperationException.
-	/// </summary>
 	public static class MicroFlatTrainer
 		{
 		private const int MinMicroRowsForTraining = 40;
 
-		/// <summary>
-		/// Строит микро-модель для flat-дней.
-		/// Возвращает null, если микро-датасета недостаточно для осмысленного обучения.
-		/// При нормальном объёме (flats >= MinMicroRowsForTraining) любые проблемы с данными (NaN/Inf,
-		/// одноклассовость, скачущая размерность, падение LightGBM) приводят к InvalidOperationException.
-		/// </summary>
-		public static ITransformer? BuildMicroFlatModel ( MLContext ml, List<DataRow> rows )
+		public static ITransformer? BuildMicroFlatModel ( MLContext ml, IReadOnlyList<DataRow> rows )
 			{
 			if (ml == null) throw new ArgumentNullException (nameof (ml));
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (rows.Count == 0)
+				throw new ArgumentException ("rows must be non-empty.", nameof (rows));
 
-			// === Новый слой: MicroDatasetBuilder ===
-			// В проде сюда уже прилетает train-only список дней; для него берём trainUntil = max(Date),
-			// чтобы не менять поведение. В тестах можно строить датасет от allRows + явного trainUntil.
-			var trainUntil = rows.Count > 0
-				? rows.Max (r => r.Date)
-				: DateTime.MinValue;
+			for (int i = 0; i < rows.Count; i++)
+				{
+				if (rows[i].Date.Kind != DateTimeKind.Utc)
+					{
+					throw new InvalidOperationException (
+						$"[2stage-micro] rows[{i}].Date must be UTC, got Kind={rows[i].Date.Kind}, Date={rows[i].Date:O}.");
+					}
+				}
+
+			var trainUntilUtc = DeriveMaxBaselineExitUtc (rows, Windowing.NyTz);
 
 			var dataset = MicroDatasetBuilder.Build (
 				allRows: rows,
-				trainUntil: trainUntil);
+				trainUntilUtc: trainUntilUtc);
 
 			var flatsRaw = dataset.MicroRows;
 
-			// 1. Сырой датасет микро-дней (есть FactMicroUp/FactMicroDown).
 			if (flatsRaw.Count == 0)
 				{
 				Console.WriteLine ("[2stage-micro] нет ни одного размеченного микро-дня, микро-слой отключён.");
@@ -54,41 +48,73 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				{
 				Console.WriteLine (
 					$"[2stage-micro] датасет микро-дней слишком мал (flats={flatsRaw.Count}, " +
-					$"min={MinMicroRowsForTraining}), микро-слой отключён для этого прогона."
-				);
+					$"min={MinMicroRowsForTraining}), микро-слой отключён для этого прогона.");
 				return null;
 				}
 
-			// 2. Балансируем up/down.
-			var up = flatsRaw.Where (r => r.FactMicroUp).ToList ();
-			var dn = flatsRaw.Where (r => r.FactMicroDown).ToList ();
-
-			if (up.Count == 0 || dn.Count == 0)
+			int upCount = 0, dnCount = 0;
+			for (int i = 0; i < flatsRaw.Count; i++)
 				{
-				throw new InvalidOperationException (
-					$"[2stage-micro] датасет микро-дней одноклассовый (up={up.Count}, down={dn.Count}) " +
-					$"при flats={flatsRaw.Count}. Проверь path-based разметку FactMicroUp/FactMicroDown."
-				);
+				if (flatsRaw[i].FactMicroUp) upCount++;
+				if (flatsRaw[i].FactMicroDown) dnCount++;
 				}
 
-			int take = Math.Min (up.Count, dn.Count);
+			if (upCount == 0 || dnCount == 0)
+				{
+				throw new InvalidOperationException (
+					$"[2stage-micro] датасет микро-дней одноклассовый (up={upCount}, down={dnCount}) " +
+					$"при flats={flatsRaw.Count}. Проверь path-based разметку FactMicroUp/FactMicroDown.");
+				}
 
-			var upBalanced = up
-				.OrderBy (r => r.Date)
-				.Take (take)
-				.ToList ();
+			int take = Math.Min (upCount, dnCount);
 
-			var dnBalanced = dn
-				.OrderBy (r => r.Date)
-				.Take (take)
-				.ToList ();
+			// Берём первые take элементов каждого класса, сохраняя хронологию без сортировок.
+			var upBalanced = new List<DataRow> (take);
+			var dnBalanced = new List<DataRow> (take);
 
-			var flats = upBalanced
-				.Concat (dnBalanced)
-				.OrderBy (r => r.Date)
-				.ToList ();
+			int upNeed = take;
+			int dnNeed = take;
 
-			// 3. Жёсткая валидация признаков перед LightGBM.
+			for (int i = 0; i < flatsRaw.Count && (upNeed > 0 || dnNeed > 0); i++)
+				{
+				var r = flatsRaw[i];
+
+				if (upNeed > 0 && r.FactMicroUp)
+					{
+					upBalanced.Add (r);
+					upNeed--;
+					continue;
+					}
+
+				if (dnNeed > 0 && r.FactMicroDown)
+					{
+					dnBalanced.Add (r);
+					dnNeed--;
+					continue;
+					}
+				}
+
+			if (upBalanced.Count != take || dnBalanced.Count != take)
+				{
+				throw new InvalidOperationException (
+					$"[2stage-micro] failed to build balanced micro set: take={take}, up={upBalanced.Count}, down={dnBalanced.Count}.");
+				}
+
+			// Слияние двух отсортированных (по времени) списков без OrderBy.
+			var flats = new List<DataRow> (take * 2);
+			int iu = 0, id = 0;
+
+			while (iu < upBalanced.Count && id < dnBalanced.Count)
+				{
+				if (upBalanced[iu].Date <= dnBalanced[id].Date)
+					flats.Add (upBalanced[iu++]);
+				else
+					flats.Add (dnBalanced[id++]);
+				}
+
+			while (iu < upBalanced.Count) flats.Add (upBalanced[iu++]);
+			while (id < dnBalanced.Count) flats.Add (dnBalanced[id++]);
+
 			var samples = new List<MlSampleBinary> (flats.Count);
 			int? featureDim = null;
 			bool hasNaN = false;
@@ -101,26 +127,19 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				if (feats == null)
 					{
 					throw new InvalidOperationException (
-						"[2stage-micro] ToFloatFixed вернул null для вектора признаков микро-слоя."
-					);
+						"[2stage-micro] ToFloatFixed вернул null для вектора признаков микро-слоя.");
 					}
 
 				if (featureDim == null)
 					{
 					featureDim = feats.Length;
 					if (featureDim <= 0)
-						{
-						throw new InvalidOperationException (
-							"[2stage-micro] длина вектора признаков для микро-слоя равна 0."
-						);
-						}
+						throw new InvalidOperationException ("[2stage-micro] длина вектора признаков равна 0.");
 					}
 				else if (feats.Length != featureDim.Value)
 					{
 					throw new InvalidOperationException (
-						$"[2stage-micro] неконсистентная длина признаков: ожидалось {featureDim.Value}, " +
-						$"получено {feats.Length}."
-					);
+						$"[2stage-micro] неконсистентная длина признаков: ожидалось {featureDim.Value}, получено {feats.Length}.");
 					}
 
 				for (int i = 0; i < feats.Length; i++)
@@ -139,9 +158,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 			if (hasNaN || hasInf)
 				{
 				throw new InvalidOperationException (
-					$"[2stage-micro] датасет микро-слоя содержит некорректные значения признаков " +
-					$"(NaN={hasNaN}, Inf={hasInf})."
-				);
+					$"[2stage-micro] датасет микро-слоя содержит некорректные значения признаков (NaN={hasNaN}, Inf={hasInf}).");
 				}
 
 			var data = ml.Data.LoadFromEnumerable (samples);
@@ -163,8 +180,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 				Console.WriteLine (
 					$"[2stage-micro] обучено на {flats.Count} REAL микро-днях " +
-					$"(up={upBalanced.Count}, down={dnBalanced.Count}, featDim={featureDim})"
-				);
+					$"(up={upBalanced.Count}, down={dnBalanced.Count}, featDim={featureDim})");
 
 				return model;
 				}
@@ -172,11 +188,51 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				{
 				throw new InvalidOperationException (
 					"[2stage-micro] LightGBM не смог обучить микро-модель при корректном датасете. " +
-					$"flats={flats.Count}, up={upBalanced.Count}, down={dnBalanced.Count}, " +
-					$"featDim={featureDim ?? -1}. См. InnerException.",
-					ex
-				);
+					$"flats={flats.Count}, up={upBalanced.Count}, down={dnBalanced.Count}, featDim={featureDim ?? -1}.",
+					ex);
 				}
+			}
+
+		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<DataRow> rows, TimeZoneInfo nyTz )
+			{
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+
+			bool hasAny = false;
+			DateTime maxExit = default;
+
+			for (int i = 0; i < rows.Count; i++)
+				{
+				var entryUtc = rows[i].Date;
+
+				if (entryUtc.Kind != DateTimeKind.Utc)
+					{
+					throw new InvalidOperationException (
+						$"[2stage-micro] entryUtc must be UTC. idx={i}, date={entryUtc:O}, kind={entryUtc.Kind}.");
+					}
+
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
+
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					{
+					throw new InvalidOperationException (
+						$"[2stage-micro] weekend entry in train rows (baseline-exit undefined): {entryUtc:O}.");
+					}
+
+				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+
+				if (!hasAny || exitUtc > maxExit)
+					{
+					maxExit = exitUtc;
+					hasAny = true;
+					}
+				}
+
+			if (!hasAny)
+				throw new InvalidOperationException ("[2stage-micro] failed to derive max baseline-exit: no working-day entries.");
+
+			return maxExit;
 			}
 		}
 	}

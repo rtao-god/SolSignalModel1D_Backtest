@@ -1,8 +1,14 @@
-﻿using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 	{
@@ -14,11 +20,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 		{
 		/// <summary>
 		/// Запускает набор sanity-проверок на уже собранных артефактах пайплайна.
-		/// В прод-запуске (Program.Main) обычно выполняются:
-		/// - дневная утечка (daily);
-		/// - микро-слой;
-		/// - SL-слой,
-		/// если для них есть достаточно данных в контексте.
 		/// </summary>
 		public static Task<SelfCheckResult> RunAsync (
 			SelfCheckContext ctx,
@@ -28,25 +29,35 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 
 			var results = new List<SelfCheckResult> ();
 
-			// === 1. Дневная модель + OOS / shuffle ===
-			results.Add (
-				DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
-					ctx.Records,
-					ctx.TrainUntilUtc));
-
-			// Дополнительная диагностика: bare-PnL по PredictionRecord + shuffle.
-			// Не влияет на SelfCheckResult, только пишет подробный лог в консоль.
+			// =====================================================================
+			// 1) Daily: train/OOS + shuffle.
+			// Важно: не передавать null в методы, которые ожидают non-null records.
+			// =====================================================================
 			if (ctx.Records != null && ctx.Records.Count > 0)
 				{
+				var boundary = new TrainBoundary (ctx.TrainUntilUtc, ctx.NyTz);
+
+				results.Add (
+					DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
+						ctx.Records,
+						boundary));
+
+				// Доп. диагностика (лог в консоль): bare-PnL + shuffle.
 				DailyBarePnlChecks.LogDailyBarePnlWithBaselinesAndShuffle (
 					ctx.Records,
 					ctx.TrainUntilUtc,
+					ctx.NyTz,
 					shuffleRuns: 20);
 				}
+			else
+				{
+				// Стабильное поведение: агрегатору есть что объединять, но проверки явно пропущены.
+				results.Add (SelfCheckResult.Ok ("[daily] records отсутствуют — дневные проверки пропущены."));
+				}
 
-			// === 2. Микро-слой (flat-модель) ===
-			// Запускаем только если в контексте реально есть данные,
-			// чтобы не ломать SelfCheckRunnerTests, где заполнены только Records/TrainUntilUtc.
+			// =====================================================================
+			// 2) Micro-layer
+			// =====================================================================
 			if (ctx.Mornings != null
 				&& ctx.Mornings.Count > 0
 				&& ctx.Sol1m != null
@@ -55,7 +66,9 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 				results.Add (MicroLeakageChecks.CheckMicroLayer (ctx));
 				}
 
-			// === 3. SL-слой (риск "SL-first" по path-based исходам) ===
+			// =====================================================================
+			// 3) SL-layer
+			// =====================================================================
 			if (ctx.Records != null
 				&& ctx.Records.Count > 0
 				&& ctx.SolAll6h != null
@@ -66,19 +79,14 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 				results.Add (SlLeakageChecks.CheckSlLayer (ctx));
 				}
 
-			// === 1. Дневная модель + OOS / shuffle ===
-			results.Add (
-				DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
-					ctx.Records,
-					ctx.TrainUntilUtc));
+			// =====================================================================
+			// 4) Row features vs future-fields
+			// =====================================================================
+			results.Add (RowFeatureLeakageChecks.CheckRowFeaturesAgainstFuture (ctx));
 
-			// === 1a. Фичи RowBuilder против future-полей (SolFwd1, MaxHigh24 и т.п.) ===
-			results.Add (
-				RowFeatureLeakageChecks.CheckRowFeaturesAgainstFuture (ctx));
-
-
-			// === 4. Агрегация ===
-			// SelfCheckResult.Aggregate уже знает, как объединять Success/Errors/Warnings/Metrics.
+			// =====================================================================
+			// 5) Aggregation
+			// =====================================================================
 			var aggregate = SelfCheckResult.Aggregate (results);
 			return Task.FromResult (aggregate);
 			}

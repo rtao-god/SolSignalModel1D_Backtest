@@ -4,38 +4,19 @@ using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
-	/// <summary>
-	/// Низкоуровневый builder SL-сэмплов для оффлайн-обучения.
-	/// Лейбл: кто был первым по 1m (TP / SL) в baseline-окне
-	/// entryUtc → следующее рабочее NY-утро (минус 2 минуты).
-	/// Фичи: по 1h (см. SlFeatureBuilder).
-	/// Не знает про trainUntil и не занимается future-blind фильтрацией.
-	/// </summary>
 	public static class SlOfflineBuilder
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		/// <param name="rows">Дневные строки (RowBuilder).</param>
-		/// <param name="sol1h">Вся 1h-история SOL (для фичей).</param>
-		/// <param name="sol1m">Вся 1m-история SOL (для path-based факта).</param>
-		/// <param name="sol6hDict">6h-словарь SOL (для entry).</param>
-		/// <param name="tpPct">TP в долях (0.03 = 3%).</param>
-		/// <param name="slPct">SL в долях (0.05 = 5%).</param>
-		/// <param name="strongSelector">
-		/// Кастомная логика strong/weak для SL-фич:
-		/// если null — считаются сильными все дни.
-		/// </param>
 		public static List<SlHitSample> Build (
-			List<DataRow> rows,
+			IReadOnlyList<DataRow> rows,
 			IReadOnlyList<Candle1h>? sol1h,
 			IReadOnlyList<Candle1m>? sol1m,
-			Dictionary<DateTime, Candle6h> sol6hDict,
+			IReadOnlyDictionary<DateTime, Candle6h> sol6hDict,
 			double tpPct = 0.03,
 			double slPct = 0.05,
 			Func<DataRow, bool>? strongSelector = null )
@@ -43,73 +24,88 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (sol6hDict == null) throw new ArgumentNullException (nameof (sol6hDict));
 
-			// Оценка верхней границы: максимум два сэмпла (long/short) на утренний день.
+			if (sol1m == null || sol1m.Count == 0)
+				throw new InvalidOperationException ("[sl-offline] sol1m is null/empty: cannot build path-based SL labels.");
+			if (sol1h == null || sol1h.Count == 0)
+				throw new InvalidOperationException ("[sl-offline] sol1h is null/empty: cannot build SL features.");
+
+			// Контракт: всё уже отсортировано на бутстрапе.
+			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.Date, "sl-offline.rows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "sl-offline.sol1m");
+			SeriesGuards.EnsureStrictlyAscendingUtc (sol1h, c => c.OpenTimeUtc, "sl-offline.sol1h");
+
 			var result = new List<SlHitSample> (rows.Count * 2);
 
-			// Здесь нет trainUntil: он обрабатывается выше, в SlDatasetBuilder через rowsTrain.
-			// SlOfflineBuilder работает только по утренним дням.
+			// Filter сохраняет порядок (rows уже отсортирован).
 			var mornings = rows
 				.Where (r => r.IsMorning)
-				.OrderBy (r => r.Date)
 				.ToList ();
 
 			if (mornings.Count == 0)
 				return result;
 
-			// Минутные свечи сортируются один раз; path-логика дальше считает только по подокну.
-			var all1m = sol1m != null
-				? sol1m.OrderBy (m => m.OpenTimeUtc).ToList ()
-				: new List<Candle1m> ();
-
 			foreach (var r in mornings)
 				{
-				// Entry берётся как close утренней 6h-свечи SOL.
 				if (!sol6hDict.TryGetValue (r.Date, out var c6))
-					continue;
+					{
+					throw new InvalidOperationException (
+						$"[sl-offline] 6h candle not found for morning entry {r.Date:O}. " +
+						"Проверь согласование OpenTimeUtc 6h и DataRow.Date.");
+					}
 
 				double entry = c6.Close;
 				if (entry <= 0)
-					continue;
+					{
+					throw new InvalidOperationException (
+						$"[sl-offline] Non-positive entry price from 6h close for {r.Date:O}: entry={entry}.");
+					}
 
-				// MinMove идёт в фичи; добавляем мягкий пол, чтобы нули не ломали масштаб.
 				double dayMinMove = r.MinMove;
 				if (dayMinMove <= 0)
 					dayMinMove = 0.02;
 
-				// Селектор strong/weak позволяет ограничивать выборку;
-				// по умолчанию все дни считаются сильными.
 				bool strongSignal = strongSelector?.Invoke (r) ?? true;
 
 				DateTime entryUtc = r.Date;
 
-				// Базовый горизонт выхода совпадает с RowBuilder и PnL-движком.
+				using var _ = Infra.Causality.CausalityGuard.Begin (
+					"SlOfflineBuilder.Build(morning)",
+					entryUtc
+				);
+
 				DateTime exitUtc;
 				try
 					{
 					exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: NyTz);
 					}
-				catch
+				catch (Exception ex)
 					{
-					// Если корректно посчитать exit не получается (проблема с датой/календарём),
-					// день просто исключается из выборки.
-					continue;
+					throw new InvalidOperationException (
+						$"[sl-offline] Failed to compute baseline-exit for entry {entryUtc:O}.",
+						ex);
 					}
 
 				if (exitUtc <= entryUtc)
-					continue;
+					{
+					throw new InvalidOperationException (
+						$"[sl-offline] Invalid baseline window: exitUtc <= entryUtc for entry {entryUtc:O}, exit={exitUtc:O}.");
+					}
 
-				// 1m-окно на baseline-горизонт [entryUtc; exitUtc).
-				var day1m = all1m
-					.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
-					.ToList ();
+				int startIdx = LowerBoundOpenTimeUtc (sol1m, entryUtc);
+				int endIdxExclusive = LowerBoundOpenTimeUtc (sol1m, exitUtc);
 
-				if (day1m.Count == 0)
-					continue;
+				if (endIdxExclusive <= startIdx)
+					{
+					throw new InvalidOperationException (
+						$"[sl-offline] No 1m candles in baseline window for entry {entryUtc:O}, exit={exitUtc:O}. " +
+						$"Computed range=[{startIdx}; {endIdxExclusive}).");
+					}
 
-				// ---- гипотетический long ----
 					{
 					var labelRes = EvalPath1m (
-						day1m: day1m,
+						all1m: sol1m,
+						startIdx: startIdx,
+						endIdxExclusive: endIdxExclusive,
 						goLong: true,
 						entry: entry,
 						tpPct: tpPct,
@@ -128,8 +124,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 
 						result.Add (new SlHitSample
 							{
-							// true  = сначала был SL
-							// false = сначала был TP
 							Label = labelRes == HourlyTradeResult.SlFirst,
 							Features = Pad (feats),
 							EntryUtc = entryUtc
@@ -137,10 +131,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 						}
 					}
 
-				// ---- гипотетический short ----
 					{
 					var labelRes = EvalPath1m (
-						day1m: day1m,
+						all1m: sol1m,
+						startIdx: startIdx,
+						endIdxExclusive: endIdxExclusive,
 						goLong: false,
 						entry: entry,
 						tpPct: tpPct,
@@ -173,21 +168,20 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			return result;
 			}
 
-		/// <summary>
-		/// Path-based факт по 1m: кто был первым — TP или SL.
-		/// Логика симметрична PnL:
-		/// - long:  TP = High ≥ entry*(1+TP%), SL = Low ≤ entry*(1−SL%);
-		/// - short: TP = Low ≤ entry*(1−TP%), SL = High ≥ entry*(1+SL%).
-		/// При одновременном срабатывании TP и SL приоритет у SL (консервативный вариант).
-		/// </summary>
 		private static HourlyTradeResult EvalPath1m (
-			List<Candle1m> day1m,
+			IReadOnlyList<Candle1m> all1m,
+			int startIdx,
+			int endIdxExclusive,
 			bool goLong,
 			double entry,
 			double tpPct,
 			double slPct )
 			{
-			if (day1m == null || day1m.Count == 0) return HourlyTradeResult.None;
+			if (all1m == null) throw new ArgumentNullException (nameof (all1m));
+			if (startIdx < 0 || endIdxExclusive > all1m.Count || endIdxExclusive <= startIdx)
+				throw new ArgumentOutOfRangeException (
+					$"Invalid 1m range: [{startIdx}; {endIdxExclusive}) for all1m.Count={all1m.Count}.");
+
 			if (entry <= 0) return HourlyTradeResult.None;
 			if (tpPct <= 0 && slPct <= 0) return HourlyTradeResult.None;
 
@@ -196,8 +190,10 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				double tp = entry * (1.0 + Math.Max (tpPct, 0.0));
 				double sl = slPct > 0 ? entry * (1.0 - slPct) : double.NaN;
 
-				foreach (var m in day1m)
+				for (int i = startIdx; i < endIdxExclusive; i++)
 					{
+					var m = all1m[i];
+
 					bool hitTp = tpPct > 0 && m.High >= tp;
 					bool hitSl = slPct > 0 && m.Low <= sl;
 
@@ -215,8 +211,10 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				double tp = entry * (1.0 - Math.Max (tpPct, 0.0));
 				double sl = slPct > 0 ? entry * (1.0 + slPct) : double.NaN;
 
-				foreach (var m in day1m)
+				for (int i = startIdx; i < endIdxExclusive; i++)
 					{
+					var m = all1m[i];
+
 					bool hitTp = tpPct > 0 && m.Low <= tp;
 					bool hitSl = slPct > 0 && m.High >= sl;
 
@@ -231,6 +229,23 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				}
 
 			return HourlyTradeResult.None;
+			}
+
+		private static int LowerBoundOpenTimeUtc ( IReadOnlyList<Candle1m> all1m, DateTime t )
+			{
+			int lo = 0;
+			int hi = all1m.Count;
+
+			while (lo < hi)
+				{
+				int mid = lo + ((hi - lo) >> 1);
+				if (all1m[mid].OpenTimeUtc < t)
+					lo = mid + 1;
+				else
+					hi = mid;
+				}
+
+			return lo;
 			}
 
 		private static float[] Pad ( float[] src )

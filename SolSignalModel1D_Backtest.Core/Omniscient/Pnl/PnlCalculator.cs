@@ -53,6 +53,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			if (records == null) throw new ArgumentNullException (nameof (records));
 			if (policy == null) throw new ArgumentNullException (nameof (policy));
 
+			// Пустой набор сигналов: валидный вырожденный кейс — просто нет сделок.
 			if (records.Count == 0)
 				{
 				trades = new List<PnLTrade> ();
@@ -163,10 +164,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 					if (marginMode == MarginMode.Cross)
 						{
+						// В cross-сценарии смерть бакета трактуется как смерть всего аккаунта.
 						globalDead = true;
 						}
 					else
 						{
+						// В isolated-сценарии считаем аккаунт мёртвым, когда умерли все бакеты.
 						if (buckets.Values.All (b => b.IsDead))
 							{
 							globalDead = true;
@@ -227,6 +230,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 				bool goLong;
 				bool goShort;
 
+				// Выбор направления в зависимости от режима агрегации вероятностей.
 				switch (predictionMode)
 					{
 					case PnlPredictionMode.DayOnly:
@@ -256,6 +260,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						throw new ArgumentOutOfRangeException (nameof (predictionMode), predictionMode, "Unknown prediction mode");
 					}
 
+				// Если ни одно направление не выбрано — сделка не открывается.
 				if (!goLong && !goShort)
 					continue;
 
@@ -269,6 +274,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						$"[pnl] политика плеча '{policy.Name}' вернула некорректное значение leverage={lev} на {rec.DateUtc:yyyy-MM-dd}.");
 					}
 
+				// Anti-direction overlay: инвертирует направление при неблагоприятной конфигурации.
 				if (useAntiDirectionOverlay)
 					{
 					antiDChecked++;
@@ -308,6 +314,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 				var dayStart = rec.DateUtc;
 				var dayEnd = rec.Forward.WindowEndUtc;
 
+				// Гарантируем валидный конец baseline-окна.
 				if (dayEnd <= dayStart)
 					{
 					dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
@@ -356,7 +363,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 					DateTime delayedEntryTime = rec.DelayedEntryExecutedAtUtc ?? rec.DateUtc;
 
-					// Находим индекс первой 1m-свечи не раньше времени delayedEntryTime.
+					// Ищем индекс первой 1m-свечи не раньше времени delayedEntryTime.
 					int delayedStartIndex = -1;
 					for (int i = 0; i < dayMinutes.Count; i++)
 						{
@@ -378,6 +385,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					double dExit;
 					DateTime delayedExitTime;
 
+					// Используем уже посчитанный результат delayed-интрадей слоя.
 					if (rec.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst)
 						{
 						double tpPctD = rec.DelayedIntradayTpPct;
@@ -487,7 +495,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 		/// <summary>
 		/// Лёгкий срез 1m-свечей без копирования данных.
-		/// Используется для delayed-сделок, чтобы не аллоцировать List на каждый день.
+		/// Используется для delayed-сделок и любых подокон без аллокации новых списков.
 		/// </summary>
 		private readonly struct TradeMinutesSlice : IReadOnlyList<Candle1m>
 			{
@@ -529,9 +537,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			}
 
 		/// <summary>
-		/// Расчёт MAE/MFE в долях от entry по 1m-пути сделки.
-		/// Работает поверх IReadOnlyList, чтобы одинаково обрабатывать и полный день,
-		/// и срезы (TradeMinutesSlice) без лишних ToList().
+		/// MAE/MFE в долях от entry по 1m-пути сделки.
+		/// Работает поверх IReadOnlyList, одинаково для полного дня и срезов.
 		/// </summary>
 		private static (double mae, double mfe) ComputeMaeMfe (
 			double entryPrice,
@@ -586,12 +593,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			return (maxAdverse, maxFavorable);
 			}
 
-		// ============================================================
-		// Обёртки над старыми реализациями под List<Candle1m>,
-		// чтобы новые вызовы с IReadOnlyList<Candle1m> компилились
-		// и логика оставалась прежней.
-		// ============================================================
-
+		/// <summary>
+		/// Поиск дневного TP/SL по 1m-окну с резервным закрытием в dayEndUtc.
+		/// </summary>
 		private static (double exitPrice, DateTime exitTimeUtc) TryHitDailyExit (
 			double entryPrice,
 			bool isLong,
@@ -600,42 +604,99 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			IReadOnlyList<Candle1m> minutes,
 			DateTime dayEndUtc )
 			{
-			if (minutes is List<Candle1m> list)
+			if (minutes == null || minutes.Count == 0)
+				throw new ArgumentException (
+					"minutes must not be empty for TryHitDailyExit.",
+					nameof (minutes));
+
+			if (entryPrice <= 0.0)
+				throw new ArgumentException (
+					"entryPrice must be positive for TryHitDailyExit.",
+					nameof (entryPrice));
+
+			if (isLong)
 				{
-				// Используем существующую реализацию без копий.
-				return TryHitDailyExit (entryPrice, isLong, tpPct, slPct, list, dayEndUtc);
+				double tp = entryPrice * (1.0 + tpPct);
+				double sl = slPct > 1e-9 ? entryPrice * (1.0 - slPct) : double.NaN;
+
+				for (int i = 0; i < minutes.Count; i++)
+					{
+					var m = minutes[i];
+
+					bool hitTp = m.High >= tp;
+					bool hitSl = !double.IsNaN (sl) && m.Low <= sl;
+
+					if (hitTp || hitSl)
+						{
+						return (hitSl ? sl : tp, m.OpenTimeUtc);
+						}
+					}
+				}
+			else
+				{
+				double tp = entryPrice * (1.0 - tpPct);
+				double sl = slPct > 1e-9 ? entryPrice * (1.0 + slPct) : double.NaN;
+
+				for (int i = 0; i < minutes.Count; i++)
+					{
+					var m = minutes[i];
+
+					bool hitTp = m.Low <= tp;
+					bool hitSl = !double.IsNaN (sl) && m.High >= sl;
+
+					if (hitTp || hitSl)
+						{
+						return (hitSl ? sl : tp, m.OpenTimeUtc);
+						}
+					}
 				}
 
-			// Фоллбек для произвольных IReadOnlyList (например, если где-то появится другой тип).
-			var listCopy = new List<Candle1m> (minutes.Count);
-			for (int i = 0; i < minutes.Count; i++)
-				{
-				listCopy.Add (minutes[i]);
-				}
-
-			return TryHitDailyExit (entryPrice, isLong, tpPct, slPct, listCopy, dayEndUtc);
+			// Ни TP, ни SL — закрытие по close последней минутки,
+			// но временем выхода считаем строго dayEndUtc (baseline-выход).
+			var last = minutes[minutes.Count - 1];
+			return (last.Close, dayEndUtc);
 			}
 
+		/// <summary>
+		/// Проверка достижения backtest-уровня ликвидации по 1m-пути.
+		/// Возвращает флаг ликвидации и цену выхода по ликвидации.
+		/// </summary>
 		private static (bool liqHit, double liqExitPrice) CheckLiquidation (
 			double entryPrice,
 			bool isLong,
 			double leverage,
 			IReadOnlyList<Candle1m> minutes )
 			{
-			if (minutes is List<Candle1m> list)
-				{
-				// Используем существующую реализацию без копий.
-				return CheckLiquidation (entryPrice, isLong, leverage, list);
-				}
+			if (minutes == null || minutes.Count == 0)
+				throw new InvalidOperationException ("[pnl] minutes must not be empty in CheckLiquidation().");
 
-			// Фоллбек для TradeMinutesSlice и др.
-			var listCopy = new List<Candle1m> (minutes.Count);
-			for (int i = 0; i < minutes.Count; i++)
-				{
-				listCopy.Add (minutes[i]);
-				}
+			if (entryPrice <= 0.0)
+				throw new InvalidOperationException ("[pnl] entryPrice must be positive in CheckLiquidation().");
 
-			return CheckLiquidation (entryPrice, isLong, leverage, listCopy);
+			double liqPrice = ComputeBacktestLiqPrice (entryPrice, isLong, leverage);
+			if (liqPrice <= 0.0)
+				throw new InvalidOperationException ("[pnl] backtest liquidation price must be positive in CheckLiquidation().");
+
+			if (isLong)
+				{
+				for (int i = 0; i < minutes.Count; i++)
+					{
+					var m = minutes[i];
+					if (m.Low <= liqPrice)
+						return (true, liqPrice);
+					}
+				return (false, 0.0);
+				}
+			else
+				{
+				for (int i = 0; i < minutes.Count; i++)
+					{
+					var m = minutes[i];
+					if (m.High >= liqPrice)
+						return (true, liqPrice);
+					}
+				return (false, 0.0);
+				}
 			}
 		}
 	}

@@ -6,22 +6,11 @@ using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 	{
-	/// <summary>
-	/// Принтер агрегированных вероятностей:
-	/// - дневные (Day),
-	/// - с микро-оверлеем (Day+Micro),
-	/// - с микро+SL (Total).
-	/// Никакой новой математики не считает, только усредняет уже посчитанные поля CausalPredictionRecord.
-	/// </summary>
 	public static class AggregationProbsPrinter
 		{
-		/// <summary>
-		/// Печатает агрегированные вероятности по сегментам (Train/OOS/Recent/Full)
-		/// и подробную отладочную таблицу по последним дням.
-		/// </summary>
 		public static void Print (
 			IReadOnlyList<CausalPredictionRecord> records,
-			DateTime trainUntilUtc,
+			TrainBoundary boundary,
 			int recentDays = 240,
 			int debugLastDays = 20 )
 			{
@@ -38,7 +27,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 
 			ConsoleStyler.WriteHeader ("==== AGGREGATION PROBS ====");
 
-			// --- 0) Стабильная сортировка и общий диапазон ---
 			var ordered = records
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
@@ -49,14 +37,17 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			Console.WriteLine (
 				$"[agg-probs] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, totalRecords = {ordered.Count}");
 
-			// --- 1) Сегменты по trainUntilUtc / recentDays ---
-			var train = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
+			// ЕДИНСТВЕННОЕ правило сегментации — в boundary.
+			var split = boundary.Split (ordered, r => r.DateUtc);
+			var train = split.Train;
+			var oos = split.Oos;
 
-			var oos = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+			if (split.Excluded.Count > 0)
+				{
+				// Если это сработало — у тебя в records реально есть "дни без baseline-exit".
+				// Это сильный сигнал про кривой контракт данных (выходные/дыры/не-NY утро).
+				Console.WriteLine ($"[agg-probs][WARN] excluded days (no baseline-exit) = {split.Excluded.Count}");
+				}
 
 			var full = ordered;
 
@@ -66,33 +57,30 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 				.ToList ();
 
 			if (recent.Count == 0)
-				{
 				recent = full;
-				}
 
-			// --- 2) Краткая сводка по сегментам ---
 			var metaTable = new TextTable ();
 			metaTable.AddHeader ("segment", "from", "to", "days");
 
-			AddSegmentMetaRow (metaTable, "Train", train);
-			AddSegmentMetaRow (metaTable, "OOS", oos);
+			AddSegmentMetaRow (metaTable, $"Train (exit<= {boundary.TrainUntilIsoDate})", train);
+			AddSegmentMetaRow (metaTable, $"OOS (exit>  {boundary.TrainUntilIsoDate})", oos);
 			AddSegmentMetaRow (metaTable, $"Recent({recentDays}d)", recent);
 			AddSegmentMetaRow (metaTable, "Full", full);
 
 			metaTable.WriteToConsole ();
 			Console.WriteLine ();
 
-			// --- 3) Усреднённые вероятности и confidence по сегментам ---
 			PrintSegmentAverages ("Train", train);
 			PrintSegmentAverages ("OOS", oos);
 			PrintSegmentAverages ($"Recent (last {recentDays} days)", recent);
 			PrintSegmentAverages ("Full history", full);
 
-			// --- 4) Подробная таблица по последним N дням ---
 			var debugRecords = ordered.Skip (Math.Max (0, ordered.Count - debugLastDays)).ToList ();
 			PrintLastDaysDebug (debugRecords);
 			}
 
+		// остальной код файла без изменений (AddSegmentMetaRow/PrintSegmentAverages/PrintLastDaysDebug/HasOverlayChange)
+		// просто оставь как есть
 		private static void AddSegmentMetaRow ( TextTable t, string name, IReadOnlyList<CausalPredictionRecord> seg )
 			{
 			if (seg == null || seg.Count == 0)
@@ -104,11 +92,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			var from = seg.First ().DateUtc;
 			var to = seg.Last ().DateUtc;
 
-			t.AddRow (
-				name,
-				from.ToString ("yyyy-MM-dd"),
-				to.ToString ("yyyy-MM-dd"),
-				seg.Count.ToString ());
+			t.AddRow (name, from.ToString ("yyyy-MM-dd"), to.ToString ("yyyy-MM-dd"), seg.Count.ToString ());
 			}
 
 		private static void PrintSegmentAverages ( string title, IReadOnlyList<CausalPredictionRecord> seg )
@@ -198,74 +182,23 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			bool degenerateTot = avgSumTot <= 1e-6;
 
 			if (degenerateDay || degenerateDm || degenerateTot)
-				{
-				var first = seg[0];
-
-				Console.WriteLine (
-					"[agg-probs][FATAL] segment '{0}' has near-zero average probabilities. " +
-					"avgSumDay={1:0.000000}, avgSumDm={2:0.000000}, avgSumTot={3:0.000000}",
-					title,
-					avgSumDay,
-					avgSumDm,
-					avgSumTot);
-
-				Console.WriteLine (
-					"[agg-probs][FATAL] example record: date={0:O}, " +
-					"P_day=({1}, {2}, {3}), P_dm=({4}, {5}, {6}), P_tot=({7}, {8}, {9}), " +
-					"Conf_Day={10}, Conf_Micro={11}, SlProb={12}",
-					first.DateUtc,
-					first.ProbUp_Day,
-					first.ProbFlat_Day,
-					first.ProbDown_Day,
-					first.ProbUp_DayMicro,
-					first.ProbFlat_DayMicro,
-					first.ProbDown_DayMicro,
-					first.ProbUp_Total,
-					first.ProbFlat_Total,
-					first.ProbDown_Total,
-					first.Conf_Day,
-					first.Conf_Micro,
-					first.SlProb);
-
-				throw new InvalidOperationException (
-					"[AggregationProbsPrinter] Degenerate probabilities: at least one layer has avg sum ≈ 0. " +
-					"Вероятности Prob*_Day / Prob*_DayMicro / Prob*_Total, скорее всего, не были заполнены в пайплайне.");
-				}
+				throw new InvalidOperationException ("[AggregationProbsPrinter] Degenerate probabilities: avg sum ≈ 0.");
 
 			var probsTable = new TextTable ();
 			probsTable.AddHeader ("layer", "P_up", "P_flat", "P_down", "sum");
 
-			probsTable.AddRow (
-				"Day",
-				FormatProb (avgUpDay),
-				FormatProb (avgFlatDay),
-				FormatProb (avgDownDay),
-				FormatProb (avgSumDay));
-
-			probsTable.AddRow (
-				"Day+Micro",
-				FormatProb (avgUpDm),
-				FormatProb (avgFlatDm),
-				FormatProb (avgDownDm),
-				FormatProb (avgSumDm));
-
-			probsTable.AddRow (
-				"Total (Day+Micro+SL)",
-				FormatProb (avgUpTot),
-				FormatProb (avgFlatTot),
-				FormatProb (avgDownTot),
-				FormatProb (avgSumTot));
+			probsTable.AddRow ("Day", FormatProb (avgUpDay), FormatProb (avgFlatDay), FormatProb (avgDownDay), FormatProb (avgSumDay));
+			probsTable.AddRow ("Day+Micro", FormatProb (avgUpDm), FormatProb (avgFlatDm), FormatProb (avgDownDm), FormatProb (avgSumDm));
+			probsTable.AddRow ("Total (Day+Micro+SL)", FormatProb (avgUpTot), FormatProb (avgFlatTot), FormatProb (avgDownTot), FormatProb (avgSumTot));
 
 			probsTable.WriteToConsole ();
 			Console.WriteLine ();
 
 			var confTable = new TextTable ();
 			confTable.AddHeader ("metric", "value");
-
 			confTable.AddRow ("Conf_Day (avg)", FormatProb (avgConfDay));
 			confTable.AddRow ("Conf_Micro (avg)", FormatProb (avgConfMicro));
 			confTable.AddRow ("records with SL-score", $"{slNonZero}/{seg.Count}");
-
 			confTable.WriteToConsole ();
 			Console.WriteLine ();
 			}
@@ -274,8 +207,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 
 		private static void PrintLastDaysDebug ( IReadOnlyList<CausalPredictionRecord> last )
 			{
-			if (last == null || last.Count == 0)
-				return;
+			// оставь как было у тебя
+			if (last == null || last.Count == 0) return;
 
 			ConsoleStyler.WriteHeader ($"[agg-probs] last {last.Count} days (debug)");
 
@@ -343,12 +276,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			}
 
 		private static bool HasOverlayChange (
-			double up1,
-			double flat1,
-			double down1,
-			double up2,
-			double flat2,
-			double down2,
+			double up1, double flat1, double down1,
+			double up2, double flat2, double down2,
 			double eps )
 			{
 			return Math.Abs (up1 - up2) > eps

@@ -1,20 +1,16 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 	{
-	/// <summary>
-	/// Sanity-проверки для SL-модели:
-	/// - проверка диапазона SlProb;
-	/// - оценка TPR/FPR по path-based исходу сделки (через HourlyTradeEvaluator);
-	/// - сравнение train vs OOS.
-	/// </summary>
 	public static class SlLeakageChecks
 		{
-		/// <summary>
-		/// Основная проверка SL-слоя по текущему контексту.
-		/// </summary>
 		public static SelfCheckResult CheckSlLayer ( SelfCheckContext ctx )
 			{
 			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
@@ -27,42 +23,44 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 				return SelfCheckResult.Ok ("[sl] нет данных для SL-слоя (records или 1h-профиль пустой).");
 				}
 
+			var boundary = new TrainBoundary (ctx.TrainUntilUtc, ctx.NyTz);
+
 			var samples = new List<SlSample> ();
 
 			foreach (var rec in records)
 				{
-				// SL-модель применяется только если есть торговый сигнал.
-				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
-				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+				var c = rec.Causal;
+				var f = rec.Forward;
+
+				bool goLong = c.PredLabel == 2 || (c.PredLabel == 1 && c.PredMicroUp);
+				bool goShort = c.PredLabel == 0 || (c.PredLabel == 1 && c.PredMicroDown);
 
 				if (!goLong && !goShort)
 					continue;
 
-				// SlProb/SlHighDecision должны быть в адекватном диапазоне.
-				double slProb = rec.SlProb;
-				bool slHigh = rec.SlHighDecision;
+				double slProb = c.SlProb;
+				bool slHigh = c.SlHighDecision;
 
 				if (slProb < 0.0 || slProb > 1.0)
 					{
 					var badRange = new SelfCheckResult
 						{
 						Success = false,
-						Summary = $"[sl] обнаружена SlProb вне диапазона [0,1]: {slProb:0.000} на дате {rec.DateUtc:O}."
+						Summary = $"[sl] обнаружена SlProb вне диапазона [0,1]: {slProb:0.000} на дате {c.DateUtc:O}."
 						};
 					badRange.Errors.Add ("[sl] SlProb должен лежать в [0,1].");
 					return badRange;
 					}
 
-				double dayMinMove = rec.MinMove > 0 ? rec.MinMove : 0.02;
-				bool strongSignal = rec.PredLabel == 0 || rec.PredLabel == 2;
+				double dayMinMove = c.MinMove > 0 ? c.MinMove : 0.02;
+				bool strongSignal = c.PredLabel == 0 || c.PredLabel == 2;
 
-				// Path-based исход сделки по текущей торговой схеме.
 				var outcome = HourlyTradeEvaluator.EvaluateOne (
 					candles1h,
-					entryUtc: rec.DateUtc,
+					entryUtc: c.DateUtc,
 					goLong: goLong,
 					goShort: goShort,
-					entryPrice: rec.Entry,
+					entryPrice: f.Entry,
 					dayMinMove: dayMinMove,
 					strongSignal: strongSignal,
 					nyTz: ctx.NyTz);
@@ -70,7 +68,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 				if (outcome.Result != HourlyTradeResult.SlFirst &&
 					outcome.Result != HourlyTradeResult.TpFirst)
 					{
-					// Неоднозначный или пустой исход — для оценки SL не используем.
 					continue;
 					}
 
@@ -78,7 +75,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 
 				samples.Add (new SlSample
 					{
-					DateUtc = rec.DateUtc,
+					DateUtc = c.DateUtc,
 					SlProb = slProb,
 					SlHighDecision = slHigh,
 					TrueHighRisk = trueHighRisk
@@ -90,7 +87,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 				return SelfCheckResult.Ok ("[sl] нет сделок с однозначным исходом TP/SL для оценки SL-слоя.");
 				}
 
-			// Если все SlProb≈0 и ни одного SlHighDecision, скорее всего SL-модель не запускалась.
 			bool allDefault = samples.All (s => s.SlProb == 0.0 && !s.SlHighDecision);
 			if (allDefault)
 				{
@@ -104,11 +100,18 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 					$"[sl] недостаточно сделок с однозначным исходом для оценки SL ({samples.Count}), sanity-проверка пропущена.");
 				}
 
-			var train = samples.Where (p => p.DateUtc <= ctx.TrainUntilUtc).ToList ();
-			var oos = samples.Where (p => p.DateUtc > ctx.TrainUntilUtc).ToList ();
+			// Разбиение строго по baseline-exit контракту.
+			var sSplit = boundary.Split (samples, s => s.DateUtc);
+			var train = sSplit.Train;
+			var oos = sSplit.Oos;
 
 			var warnings = new List<string> ();
 			var errors = new List<string> ();
+
+			if (sSplit.Excluded.Count > 0)
+				{
+				warnings.Add ($"[sl] excluded={sSplit.Excluded.Count} сделок: baseline-exit не определён (weekend по контракту).");
+				}
 
 			if (train.Count < 50)
 				{
@@ -117,28 +120,25 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 
 			if (oos.Count == 0)
 				{
-				warnings.Add ("[sl] OOS-часть для SL пуста (нет сделок после _trainUntilUtc).");
+				warnings.Add ("[sl] OOS-часть для SL пуста (нет сделок после границы по baseline-exit контракту).");
 				}
 
 			var trainMetrics = ComputeMetrics (train);
 			var oosMetrics = ComputeMetrics (oos);
 			var allMetrics = ComputeMetrics (samples);
 
-			// Подозрительно хороший OOS — возможная утечка.
 			if (oos.Count >= 100 && oosMetrics.Tpr > 0.90 && oosMetrics.Fpr < 0.10)
 				{
 				errors.Add (
 					$"[sl] OOS TPR={oosMetrics.Tpr:P1}, FPR={oosMetrics.Fpr:P1} при {oos.Count} сделок — подозрение на утечку в SL-слое.");
 				}
 
-			// SL вообще не информативна: FPR ~ TPR.
 			if (allMetrics.Samples >= 50 && Math.Abs (allMetrics.Tpr - allMetrics.Fpr) < 0.05)
 				{
 				warnings.Add (
 					$"[sl] SL-модель почти не отличает high-risk от low-risk: TPR={allMetrics.Tpr:P1}, FPR={allMetrics.Fpr:P1}.");
 				}
 
-			// Количество high-decisions.
 			int totalPredHigh = samples.Count (p => p.SlHighDecision);
 			if (totalPredHigh == 0)
 				{
@@ -146,7 +146,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 				}
 
 			string summary =
-				$"[sl] samples={samples.Count}, train={train.Count}, oos={oos.Count}, " +
+				$"[sl] samples={samples.Count}, train={train.Count}, oos={oos.Count}, excluded={sSplit.Excluded.Count}, " +
 				$"TPR_all={allMetrics.Tpr:P1}, FPR_all={allMetrics.Fpr:P1}, " +
 				$"TPR_oos={oosMetrics.Tpr:P1}, FPR_oos={oosMetrics.Fpr:P1}";
 
@@ -160,7 +160,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 			return res;
 			}
 
-		/// <summary>Внутренний сэмпл для SL-проверок.</summary>
 		private sealed class SlSample
 			{
 			public DateTime DateUtc { get; set; }

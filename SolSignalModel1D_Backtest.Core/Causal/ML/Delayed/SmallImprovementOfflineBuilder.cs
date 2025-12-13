@@ -32,7 +32,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 
 				double entry = day6.Close;
 				double dayMinMove = r.MinMove;
-				if (dayMinMove <= 0) dayMinMove = 0.02;
+				if (dayMinMove <= 0 || double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove))
+					throw new InvalidOperationException (
+						$"[sl-offline] invalid MinMove for {r.Date:O}: {dayMinMove}. " +
+						"MinMove должен быть > 0, стоит проверить MinMoveEngine/RowBuilder.");
 
 				DateTime entryUtc = r.Date;
 				DateTime endUtc;

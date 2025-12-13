@@ -1,4 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Core.Infra;
 
@@ -22,41 +27,24 @@ namespace SolSignalModel1D_Backtest
 
 		/// <summary>
 		/// Флаги включённых TF для каждого символа.
-		/// Важно: сюда завязаны и NeedsFullBackfill, и CandleDailyUpdater.
+		/// Важно: сюда завязаны и EnsureSymbolHistoryOrDeleteBad, и CandleDailyUpdater.
 		/// </summary>
 		private static readonly CandleUpdateTf SolCandleTfs =
 			CandleUpdateTf.M1 | CandleUpdateTf.H1 | CandleUpdateTf.H6;
 
-		/// <summary>
-		/// BTC:
-		/// - M1: для ликвидаций/точных фитилей (если/когда понадобятся);
-		/// - H6: дневной слой.
-		/// 1h можем не тянуть, пока не нужен.
-		/// </summary>
 		private static readonly CandleUpdateTf BtcCandleTfs =
 			CandleUpdateTf.M1 | CandleUpdateTf.H6;
 
-		/// <summary>
-		/// PAXG:
-		/// сейчас используется только 6h в дневной модели.
-		/// Минутки и часы отключены, чтобы не плодить лишние файлы.
-		/// </summary>
 		private static readonly CandleUpdateTf PaxgCandleTfs =
 			CandleUpdateTf.H6;
 
-		/// <summary>
-		/// Переключатели по символам:
-		/// позволяют полностью отключить обновление свечей конкретного символа.
-		/// Если отключить символ, но оставить его в CandleRequirementRegistry,
-		/// пайплайн упадёт на этапе чтения — это ожидаемое поведение.
-		/// </summary>
 		private static readonly bool EnableSolCandleUpdates = true;
 		private static readonly bool EnableBtcCandleUpdates = true;
 		private static readonly bool EnablePaxgCandleUpdates = true;
 
 		/// <summary>
 		/// Проверяет один TF-файл по символу:
-		/// - если файла нет — ничего не делает;
+		/// - если файла нет — молча выходим (причину "missing" покажет preflight);
 		/// - если файл есть, но первая свеча позже FullBackfillFromUtc — файл удаляется как битый/неполный.
 		/// Любые ошибки чтения/парсинга пробрасываются наверх.
 		/// </summary>
@@ -65,7 +53,6 @@ namespace SolSignalModel1D_Backtest
 			var path = CandlePaths.File (symbol, tfSuffix);
 			if (!File.Exists (path))
 				{
-				Console.WriteLine ($"[update] {symbol}-{tfSuffix}: file not found at {path}");
 				return;
 				}
 
@@ -74,15 +61,13 @@ namespace SolSignalModel1D_Backtest
 
 			if (!first.HasValue || first.Value > FullBackfillFromUtc)
 				{
-				Console.WriteLine ($"[update] {symbol}-{tfSuffix}: deleting file as bad/incomplete");
-				File.Delete (path);
+				var firstStr = first.HasValue ? first.Value.ToString ("O") : "null";
+				CandleFsAudit.Delete (
+					path,
+					reason: $"{symbol}-{tfSuffix} bad/incomplete first={firstStr} required<= {FullBackfillFromUtc:O}");
 				}
 			}
 
-		/// <summary>
-		/// Обёртка над EnsureTfHistoryOrDelete с учётом включённых TF.
-		/// Старый вариант без TF-флагов оставлен для обратной совместимости.
-		/// </summary>
 		private static void EnsureSymbolHistoryOrDeleteBad ( string symbol )
 			{
 			EnsureSymbolHistoryOrDeleteBad (symbol, CandleUpdateTf.All);
@@ -100,72 +85,33 @@ namespace SolSignalModel1D_Backtest
 				EnsureTfHistoryOrDelete (symbol, "6h");
 			}
 
-		/// <summary>
-		/// Определяет, нужен ли полный бэкофилл по символу с учётом включённых TF.
-		/// Логика:
-		/// - если по включённому TF нет файла => полный бэкофилл;
-		/// - для 1m дополнительно:
-		///   - нужен weekend-файл SYMBOL-1m-weekends.ndjson;
-		///   - первая свеча в weekend-файле должна быть ≤ FullBackfillFromUtc,
-		///     иначе считаем историю выходных неполной и делаем полный бэкофилл.
-		/// </summary>
-		private static bool NeedsFullBackfill ( string symbol )
+		private static string BuildSymbolFilesStat ( string symbol, CandleUpdateTf tfs )
 			{
-			return NeedsFullBackfill (symbol, CandleUpdateTf.All);
-			}
+			static string Stat ( string path )
+				{
+				if (!File.Exists (path))
+					return $"{Path.GetFileName (path)}=missing";
 
-		private static bool NeedsFullBackfill ( string symbol, CandleUpdateTf tfs )
-			{
-			bool needsFull = false;
+				var fi = new FileInfo (path);
+				double mb = fi.Length / 1024.0 / 1024.0;
+				return $"{Path.GetFileName (path)}={mb:F1}MB";
+				}
 
-			// 1m + weekend-файл
+			var parts = new List<string> (capacity: 6);
+
 			if ((tfs & CandleUpdateTf.M1) != 0)
 				{
-				var path1m = CandlePaths.File (symbol, "1m");
-				if (!File.Exists (path1m))
-					{
-					needsFull = true;
-					}
-				var weekendPath = CandlePaths.WeekendFile (symbol, "1m");
-				if (!File.Exists (weekendPath))
-					{
-					// weekend-файла нет — историю выходных нужно добрать с нуля
-					needsFull = true;
-					}
-				else
-					{
-					var weekendStore = new CandleNdjsonStore (weekendPath);
-					var firstWeekend = weekendStore.TryGetFirstTimestampUtc ();
-					if (!firstWeekend.HasValue || firstWeekend.Value > FullBackfillFromUtc)
-						{
-						// weekend-файл есть, но начинается позже нужной даты —
-						// считаем историю неполной.
-						needsFull = true;
-						}
-					}
+				parts.Add (Stat (CandlePaths.File (symbol, "1m")));
+				parts.Add (Stat (CandlePaths.WeekendFile (symbol, "1m")));
 				}
 
-			// 1h
 			if ((tfs & CandleUpdateTf.H1) != 0)
-				{
-				var path1h = CandlePaths.File (symbol, "1h");
-				if (!File.Exists (path1h))
-					{
-					needsFull = true;
-					}
-				}
+				parts.Add (Stat (CandlePaths.File (symbol, "1h")));
 
-			// 6h
 			if ((tfs & CandleUpdateTf.H6) != 0)
-				{
-				var path6h = CandlePaths.File (symbol, "6h");
-				if (!File.Exists (path6h))
-					{
-					needsFull = true;
-					}
-				}
+				parts.Add (Stat (CandlePaths.File (symbol, "6h")));
 
-			return needsFull;
+			return string.Join (", ", parts);
 			}
 
 		/// <summary>
@@ -174,29 +120,29 @@ namespace SolSignalModel1D_Backtest
 		/// - если по символу нет полной истории (любой из включённых TF) → полный бэкофилл с FullBackfillFromUtc;
 		/// - иначе догоняются только хвосты по включённым TF.
 		/// Любые ошибки из CandleDailyUpdater пробрасываются наверх.
-		/// 
-		/// Если DebugSkipCandleUpdatesForTests == true, метод просто логирует и выходит,
-		/// чтобы тесты не ходили в сеть и не трогали диапазоны дат.
 		/// </summary>
 		private static async Task UpdateCandlesAsync ( HttpClient http )
 			{
 			if (DebugSkipCandleUpdatesForTests)
 				{
 				Console.WriteLine (
-					$"[update] DebugSkipCandleUpdatesForTests = true, skipping candle updates (tests). " +
-					$"FullBackfillFromUtc={FullBackfillFromUtc:O}");
+					$"[update] DebugSkipCandleUpdatesForTests=true, skipping. fullFrom={FullBackfillFromUtc:O}");
 				return;
 				}
+
+			// Один короткий tag на запуск: помогает склеивать строки логов одного старта.
+			CandleFsAudit.RunTag = Guid.NewGuid ().ToString ("N").Substring (0, 8);
 
 			var solSymbol = TradingSymbols.SolUsdtInternal;
 			var btcSymbol = TradingSymbols.BtcUsdtInternal;
 			var paxgSymbol = TradingSymbols.PaxgUsdtInternal;
 
-			Console.WriteLine (
-				$"[update] solSymbol = {solSymbol}, btcSymbol = {btcSymbol}, paxgSymbol = {paxgSymbol}");
-			Console.WriteLine ($"[update] FullBackfillFromUtc = {FullBackfillFromUtc:O}");
+			var pfAsm = typeof (CandleUpdatePreflight).Assembly.Location;
 
-			// 1. Чистим некорректные/укороченные файлы по каждому символу
+			Console.WriteLine (
+				$"[update] symbols SOL={solSymbol}, BTC={btcSymbol}, PAXG={paxgSymbol}, fullFrom={FullBackfillFromUtc:O}");
+
+			// 1) Чистим некорректные/укороченные файлы по каждому символу
 			// только по тем TF, которые реально включены.
 			if (EnableSolCandleUpdates)
 				EnsureSymbolHistoryOrDeleteBad (solSymbol, SolCandleTfs);
@@ -205,18 +151,47 @@ namespace SolSignalModel1D_Backtest
 			if (EnablePaxgCandleUpdates)
 				EnsureSymbolHistoryOrDeleteBad (paxgSymbol, PaxgCandleTfs);
 
-			// 2. Определяем, нужен ли полный бэкофилл для символа.
-			bool solNeedsFull = EnableSolCandleUpdates && NeedsFullBackfill (solSymbol, SolCandleTfs);
-			bool btcNeedsFull = EnableBtcCandleUpdates && NeedsFullBackfill (btcSymbol, BtcCandleTfs);
-			bool paxgNeedsFull = EnablePaxgCandleUpdates && NeedsFullBackfill (paxgSymbol, PaxgCandleTfs);
+			// 2) Preflight: компактно объясняем, почему будет FULL (или почему tail).
+			CandleUpdatePreflight.Result? solPre = null;
+			CandleUpdatePreflight.Result? btcPre = null;
+			CandleUpdatePreflight.Result? paxgPre = null;
 
-			Console.WriteLine (
-				$"[update] NeedsFullBackfill: " +
-				$"SOL={(EnableSolCandleUpdates ? solNeedsFull : null)}, " +
-				$"BTC={(EnableBtcCandleUpdates ? btcNeedsFull : null)}, " +
-				$"PAXG={(EnablePaxgCandleUpdates ? paxgNeedsFull : null)}");
+			if (EnableSolCandleUpdates)
+				{
+				solPre = CandleUpdatePreflight.Evaluate (solSymbol, SolCandleTfs, FullBackfillFromUtc, PathConfig.CandlesDir);
+				Console.WriteLine (solPre.ToCompactLogLine (FullBackfillFromUtc));
+				}
+			else
+				{
+				Console.WriteLine ($"[update-check] {solSymbol}: updates disabled");
+				}
 
-			// 3. Создаём апдейтеры с нужным профилем TF.
+			if (EnableBtcCandleUpdates)
+				{
+				btcPre = CandleUpdatePreflight.Evaluate (btcSymbol, BtcCandleTfs, FullBackfillFromUtc, PathConfig.CandlesDir);
+				Console.WriteLine (btcPre.ToCompactLogLine (FullBackfillFromUtc));
+				}
+			else
+				{
+				Console.WriteLine ($"[update-check] {btcSymbol}: updates disabled");
+				}
+
+			if (EnablePaxgCandleUpdates)
+				{
+				paxgPre = CandleUpdatePreflight.Evaluate (paxgSymbol, PaxgCandleTfs, FullBackfillFromUtc, PathConfig.CandlesDir);
+				Console.WriteLine (paxgPre.ToCompactLogLine (FullBackfillFromUtc));
+				}
+			else
+				{
+				Console.WriteLine ($"[update-check] {paxgSymbol}: updates disabled");
+				}
+
+			// 3) Режимы апдейта (full/tail) берём из preflight.
+			bool solNeedsFull = EnableSolCandleUpdates && solPre != null && solPre.NeedsFullBackfill;
+			bool btcNeedsFull = EnableBtcCandleUpdates && btcPre != null && btcPre.NeedsFullBackfill;
+			bool paxgNeedsFull = EnablePaxgCandleUpdates && paxgPre != null && paxgPre.NeedsFullBackfill;
+
+			// 4) Создаём апдейтеры с нужным профилем TF.
 			var tasks = new List<Task> ();
 
 			if (EnableSolCandleUpdates)
@@ -284,6 +259,14 @@ namespace SolSignalModel1D_Backtest
 
 			if (tasks.Count > 0)
 				await Task.WhenAll (tasks);
+
+			// 5) Итоговый “факт” по файлам: по 1 строке на символ.
+			if (EnableSolCandleUpdates)
+				Console.WriteLine ($"[update-files] {solSymbol}: {BuildSymbolFilesStat (solSymbol, SolCandleTfs)}");
+			if (EnableBtcCandleUpdates)
+				Console.WriteLine ($"[update-files] {btcSymbol}: {BuildSymbolFilesStat (btcSymbol, BtcCandleTfs)}");
+			if (EnablePaxgCandleUpdates)
+				Console.WriteLine ($"[update-files] {paxgSymbol}: {BuildSymbolFilesStat (paxgSymbol, PaxgCandleTfs)}");
 			}
 		}
 	}

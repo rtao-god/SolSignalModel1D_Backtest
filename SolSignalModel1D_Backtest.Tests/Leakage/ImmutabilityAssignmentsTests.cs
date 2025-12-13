@@ -129,7 +129,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				{
 				var message = "Найдены пересвоения иммутабельных полей:\n" +
 							  string.Join (Environment.NewLine, violations);
-				Assert.False (true, message);
+				Assert.Fail (message);
 				}
 			}
 

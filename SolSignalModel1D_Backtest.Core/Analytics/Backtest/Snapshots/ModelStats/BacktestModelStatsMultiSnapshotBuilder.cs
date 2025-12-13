@@ -5,15 +5,10 @@ using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	{
-	/// <summary>
-	/// Центральный билдёр мульти-снимка модельных статистик.
-	/// Здесь единообразно режутся PredictionRecord на сегменты:
-	/// Train / OOS / Full / Recent.
-	/// Вся математика остаётся в BacktestModelStatsSnapshotBuilder.
-	/// </summary>
 	public static class BacktestModelStatsMultiSnapshotBuilder
 		{
 		public static BacktestModelStatsMultiSnapshot Build (
@@ -43,7 +38,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 
 			if (allRecords.Count == 0)
 				{
-				// Пустой запуск: только мета, без сегментов.
 				multi.Meta.HasOos = false;
 				multi.Meta.TrainRecordsCount = 0;
 				multi.Meta.OosRecordsCount = 0;
@@ -52,57 +46,56 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 				return multi;
 				}
 
-			// 1) Стабильно упорядочиваем все записи по дате.
 			var ordered = allRecords
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
-			var minDateUtc = ordered.First ().DateUtc;
-			var maxDateUtc = ordered.Last ().DateUtc;
+			// ЕДИНЫЙ контракт сплита train/OOS — baseline-exit.
+			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
 
-			// 2) Сегменты по границе trainUntilUtc.
-			var trainRecords = new List<BacktestRecord> ();
-			var oosRecords = new List<BacktestRecord> ();
+			var trainRecords = split.Train;
+			var oosRecords = split.Oos;
 
-			foreach (var r in ordered)
+			if (split.Excluded.Count > 0)
 				{
-				// та же логика, что и при обучении (DailyDatasetBuilder.FilterByBaselineExit)
-				var exitUtc = Windowing.ComputeBaselineExitUtc (r.DateUtc, nyTz);
-
-				if (exitUtc <= trainUntilUtc)
-					trainRecords.Add (r);  // это "train" и для метрик
-				else
-					oosRecords.Add (r);    // это "OOS" для метрик
+				// Инвариант: на вход метрик должны приходить только eligible дни.
+				// Excluded (обычно weekend) означает, что выше по пайплайну неправильно сформирован список allRecords.
+				throw new InvalidOperationException (
+					$"[model-stats] Found excluded records (baseline-exit undefined). " +
+					$"ExcludedCount={split.Excluded.Count}. " +
+					$"This is a pipeline bug: filter out excluded days before analytics.");
 				}
 
-			var fullRecords = ordered;
+			// Full — только “eligible” записи (train+oos), excluded не смешиваем.
+			var fullRecords = new List<BacktestRecord> (trainRecords.Count + oosRecords.Count);
+			fullRecords.AddRange (trainRecords);
+			fullRecords.AddRange (oosRecords);
 
-			// 3) Recent-окно относительно максимальной даты.
+			var maxDateUtc = fullRecords[^1].Causal.DateUtc;
+
+			// Recent — также только eligible.
 			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
-			var recentRecords = ordered
-				.Where (r => r.DateUtc >= fromRecentUtc)
+			var recentRecords = fullRecords
+				.Where (r => r.Causal.DateUtc >= fromRecentUtc)
 				.ToList ();
 
 			if (recentRecords.Count == 0)
 				{
-				// На всякий случай не оставляем recent-пустым:
-				// если данных за последние N дней нет, используем всю историю.
-				recentRecords = ordered;
+				recentRecords = fullRecords;
 				}
 
-			// 4) Заполняем метаданные.
 			var meta = multi.Meta;
 			meta.HasOos = oosRecords.Count > 0;
 			meta.TrainRecordsCount = trainRecords.Count;
 			meta.OosRecordsCount = oosRecords.Count;
-			meta.TotalRecordsCount = ordered.Count;
+			meta.TotalRecordsCount = fullRecords.Count;
 			meta.RecentRecordsCount = recentRecords.Count;
 
-			// 5) Собираем сегменты.
 			AddSegmentIfNotEmpty (
 				multi,
 				ModelStatsSegmentKind.OosOnly,
-				label: "OOS-only (DateUtc > trainUntil)",
+				label: "OOS-only (baseline-exit > trainUntil)",
 				oosRecords,
 				sol1m,
 				nyTz,
@@ -112,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			AddSegmentIfNotEmpty (
 				multi,
 				ModelStatsSegmentKind.TrainOnly,
-				label: "Train-only (DateUtc <= trainUntil)",
+				label: "Train-only (baseline-exit <= trainUntil)",
 				trainRecords,
 				sol1m,
 				nyTz,
@@ -132,7 +125,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			AddSegmentIfNotEmpty (
 				multi,
 				ModelStatsSegmentKind.FullHistory,
-				label: "Full history",
+				label: "Full history (eligible days)",
 				fullRecords,
 				sol1m,
 				nyTz,
@@ -142,10 +135,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			return multi;
 			}
 
-		/// <summary>
-		/// Внутренний хелпер: если список записей непустой, строит BacktestModelStatsSnapshot
-		/// и добавляет его как сегмент в мульти-снимок.
-		/// </summary>
 		private static void AddSegmentIfNotEmpty (
 			BacktestModelStatsMultiSnapshot multi,
 			ModelStatsSegmentKind kind,

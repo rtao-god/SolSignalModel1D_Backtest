@@ -1,75 +1,48 @@
 ﻿using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 	{
-	/// <summary>
-	/// Тренер дневного двухшагового пайплайна:
-	/// 1) бинарная модель "есть ли ход" (move);
-	/// 2) бинарные модели направления (dir-normal / dir-down);
-	/// 3) микро-модель для боковика (через MicroFlatTrainer).
-	/// Подготовка данных вынесена в DailyDatasetBuilder / DailyTrainingDataBuilder.
-	/// </summary>
 	public sealed class ModelTrainer
 		{
-		// === DEBUG-флаги для точечного отключения моделей ===
-		// По умолчанию все false → поведение полностью совпадает с прежним.
-
-		/// <summary>
-		/// Если true, move-модель ("есть ли ход") не обучается и в бандле будет null.
-		/// Удобно для абляционных тестов/поиска утечек.
-		/// </summary>
 		public bool DisableMoveModel { get; set; }
-
-		/// <summary>
-		/// Если true, модель направления для NORMAL-режима не обучается (DirModelNormal = null).
-		/// </summary>
 		public bool DisableDirNormalModel { get; set; }
-
-		/// <summary>
-		/// Если true, модель направления для DOWN-режима не обучается (DirModelDown = null).
-		/// </summary>
 		public bool DisableDirDownModel { get; set; }
-
-		/// <summary>
-		/// Если true, микро-модель боковика не обучается (MicroFlatModel = null).
-		/// </summary>
 		public bool DisableMicroFlatModel { get; set; }
 
-		// Число потоков для LightGBM.
 		private readonly int _gbmThreads = Math.Max (1, Environment.ProcessorCount - 1);
-
-		// Общий MLContext для всех дневных/микро-моделей.
 		private readonly MLContext _ml = new MLContext (seed: 42);
 
-		// Граница "актуального" рынка для логов/метрик внутри тренера.
-		private static readonly DateTime RecentCutoff = new DateTime (2025, 1, 1);
+		// Важно: делаем UTC, т.к. DataRow.Date у тебя по контракту UTC.
+		private static readonly DateTime RecentCutoff = new DateTime (2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-		// Балансировка классов (оставляем как было).
 		private static readonly bool BalanceMove = false;
 		private static readonly bool BalanceDir = true;
 		private const double BalanceTargetFrac = 0.70;
 
 		public ModelBundle TrainAll (
-			List<DataRow> trainRows,
+			IReadOnlyList<DataRow> trainRows,
 			HashSet<DateTime>? datesToExclude = null )
 			{
 			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
-
 			if (trainRows.Count == 0)
 				throw new InvalidOperationException ("TrainAll: empty trainRows — нечего обучать.");
 
-			// === 1. Единый dataset-builder для дневной модели ===
-			var trainUntil = trainRows.Max (r => r.Date);
+			// ВАЖНО: trainUntil — в терминах baseline-exit.
+			var trainUntilUtc = DeriveMaxBaselineExitUtc (trainRows, Windowing.NyTz);
 
 			var dataset = DailyDatasetBuilder.Build (
 				allRows: trainRows,
-				trainUntil: trainUntil,
+				trainUntilUtc: trainUntilUtc,
 				balanceMove: BalanceMove,
 				balanceDir: BalanceDir,
 				balanceTargetFrac: BalanceTargetFrac,
@@ -79,8 +52,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 			var dirNormalRows = dataset.DirNormalRows;
 			var dirDownRows = dataset.DirDownRows;
 
-			// ===== 1. Модель "есть ли ход" (move) =====
-			// Цель: Label != 1 (non-flat по path-based label).
 			ITransformer? moveModel = null;
 
 			if (DisableMoveModel)
@@ -118,8 +89,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 					}
 				}
 
-			// ===== 2. Направление (dir-normal / dir-down) =====
-
 			ITransformer? dirNormalModel = null;
 			ITransformer? dirDownModel = null;
 
@@ -141,7 +110,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				dirDownModel = BuildDirModel (dirDownRows, "dir-down");
 				}
 
-			// ===== 3. Микро-модель для боковика =====
 			ITransformer? microModel = null;
 
 			if (DisableMicroFlatModel)
@@ -150,10 +118,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				}
 			else
 				{
+				// ВАЖНО: MicroFlatTrainer должен принимать IReadOnlyList<DataRow>.
+				// Если сейчас он ожидает List<DataRow>, это и даёт твою CS1503 на ModelTrainer.cs(118).
 				microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, dataset.TrainRows);
 				}
 
-			// Бандл остаётся тем же — чтобы не ломать внешний код.
 			return new ModelBundle
 				{
 				MoveModel = moveModel,
@@ -164,15 +133,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				};
 			}
 
-		/// <summary>
-		/// Тренировка бинарной модели направления для заданного режима.
-		/// Цель: up? по path-based Label (2 = up, 0 = down).
-		/// </summary>
-		private ITransformer? BuildDirModel ( List<DataRow> rows, string tag )
+		private ITransformer? BuildDirModel ( IReadOnlyList<DataRow> rows, string tag )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 
-			// rows сюда уже приходят только с Label ∈ {0,2} (см. DailyTrainingDataBuilder).
 			if (rows.Count < 40)
 				{
 				Console.WriteLine ($"[2stage] {tag}: мало строк ({rows.Count}), скипаем");
@@ -184,7 +148,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 			var data = _ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					// true = up (Label=2), false = down (Label=0)
 					Label = r.Label == 2,
 					Features = MlTrainingUtils.ToFloatFixed (r.Features)
 					}));
@@ -203,6 +166,43 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 			var model = pipe.Fit (data);
 			Console.WriteLine ($"[2stage] {tag}: trained on {rows.Count} rows (recent {recent})");
 			return model;
+			}
+
+		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<DataRow> rows, TimeZoneInfo nyTz )
+			{
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+
+			bool hasAny = false;
+			DateTime maxExit = default;
+
+			for (int i = 0; i < rows.Count; i++)
+				{
+				var entryUtc = rows[i].Date;
+
+				if (entryUtc == default)
+					throw new InvalidOperationException ("[2stage] DataRow.Date is default(DateTime).");
+				if (entryUtc.Kind != DateTimeKind.Utc)
+					throw new InvalidOperationException ($"[2stage] DataRow.Date must be UTC, got Kind={entryUtc.Kind} for {entryUtc:O}.");
+
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					continue;
+
+				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+
+				if (!hasAny || exitUtc > maxExit)
+					{
+					maxExit = exitUtc;
+					hasAny = true;
+					}
+				}
+
+			if (!hasAny)
+				throw new InvalidOperationException ("[2stage] failed to derive max baseline-exit: no working-day entries.");
+
+			return maxExit;
 			}
 		}
 	}
