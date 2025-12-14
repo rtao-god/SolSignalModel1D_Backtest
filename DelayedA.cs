@@ -5,7 +5,7 @@ using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -27,7 +27,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void PopulateDelayedA (
 			IList<BacktestRecord> records,
-			List<DataRow> allRows,
+			List<BacktestRecord> allRows,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle6h> solAll6h,
 			IReadOnlyList<Candle1m> sol1m,
@@ -71,7 +71,7 @@ namespace SolSignalModel1D_Backtest
 
 			// Обучаем модель A на всей выборке (каузально: asOf = последняя дата + 1 день)
 			var pullbackTrainer = new PullbackContinuationTrainer ();
-			DateTime asOfDate = allRows.Max (r => r.Date).AddDays (1);
+			DateTime asOfDate = allRows.Max (r => r.Causal.DateUtc).AddDays (1);
 			var pullbackModel = pullbackTrainer.Train (pullbackSamples, asOfDate);
 			var pullbackEngine = pullbackTrainer.CreateEngine (pullbackModel);
 

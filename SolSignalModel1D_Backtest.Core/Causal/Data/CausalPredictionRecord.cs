@@ -3,130 +3,87 @@
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	{
 	/// <summary>
-	/// Каузальный дневной прогноз по одной утренней точке.
-	/// Здесь только то, что доступно в момент принятия решения
-	/// (плюс train-time лейблы/диагностика, не используемые в рантайме).
+	/// Результат каузального inference для одного дня:
+	/// вероятности слоёв (Day / Day+Micro) и итоговые вероятности после runtime-оверлеев (SL/Delayed и т.п.).
+	///
+	/// Ключевой контракт:
+	/// - Day/Day+Micro/Total вероятности всегда заданы (это рабочий продукт пайплайна).
+	/// - SL/Delayed могут отсутствовать: в таком случае поля = null (а не "0/false"), чтобы нельзя было
+	///   незаметно интерпретировать "нет данных" как валидное значение.
 	/// </summary>
 	public sealed class CausalPredictionRecord
 		{
-		/// <summary>
-		/// Дата торгового дня / baseline-окна (UTC).
-		/// Совпадает с Date у DataRow.
-		/// </summary>
-		public DateTime DateUtc { get; set; }
+		public DateTime DateUtc { get; init; }
 
-		/// <summary>
-		/// Фактический дневной класс (0/1/2), рассчитанный path-based разметкой.
-		/// Нужен только для оффлайн-метрик, в рантайме не используется.
-		/// </summary>
-		public int TrueLabel { get; set; }
+		// ===== Выбранные классы по слоям =====
+		public int PredLabel { get; init; }
+		public int PredLabel_Day { get; init; }
+		public int PredLabel_DayMicro { get; init; }
 
-		/// <summary>
-		/// Финальный класс дневного слоя (то, что возвращает PredictionEngine.Class).
-		/// Используется в PnL режимах DayOnly.
-		/// </summary>
-		public int PredLabel { get; set; }
+		// Total - runtime слой: может пересчитываться оверлеями.
+		public int PredLabel_Total { get; set; }
 
-		/// <summary>Класс чисто дневной модели (без микро, без SL).</summary>
-		public int PredLabel_Day { get; set; }
+		// ===== Вероятности Day =====
+		public double ProbUp_Day { get; init; }
+		public double ProbFlat_Day { get; init; }
+		public double ProbDown_Day { get; init; }
 
-		/// <summary>Класс после применения микро-оверлея (Day+Micro).</summary>
-		public int PredLabel_DayMicro { get; set; }
+		// ===== Вероятности Day+Micro =====
+		public double ProbUp_DayMicro { get; init; }
+		public double ProbFlat_DayMicro { get; init; }
+		public double ProbDown_DayMicro { get; init; }
 
-		/// <summary>
-		/// Класс после полного стека Day+Micro+SL.
-		/// Технически это тот же argmax, что и PredLabel; свойство оставлено для совместимости.
-		/// </summary>
-		public int PredLabel_Total
-			{
-			get => PredLabel;
-			set => PredLabel = value;
-			}
-
-		// ===== Вероятности по слоям =====
-
-		public double ProbUp_Day { get; set; }
-		public double ProbFlat_Day { get; set; }
-		public double ProbDown_Day { get; set; }
-
-		public double ProbUp_DayMicro { get; set; }
-		public double ProbFlat_DayMicro { get; set; }
-		public double ProbDown_DayMicro { get; set; }
-
+		// ===== Итоговые вероятности (после всех runtime-оверлеев) =====
 		public double ProbUp_Total { get; set; }
 		public double ProbFlat_Total { get; set; }
 		public double ProbDown_Total { get; set; }
 
-		/// <summary>Уверенность дневной модели (например, max(P_up, P_flat, P_down)).</summary>
-		public double Conf_Day { get; set; }
+		// ===== Конфиденсы/сигналы =====
+		public double Conf_Day { get; init; }
+		public double Conf_Micro { get; init; }
 
-		/// <summary>Условная уверенность микро-слоя.</summary>
-		public double Conf_Micro { get; set; }
+		// ===== Микро-слой: только то, что модель решила использовать =====
+		public bool MicroPredicted { get; init; }
+		public bool PredMicroUp { get; init; }
+		public bool PredMicroDown { get; init; }
 
-		// ===== Микро-слой =====
+		// ===== Контекст/диагностика принятого решения =====
+		public bool RegimeDown { get; init; }
+		public string Reason { get; init; } = string.Empty;
+		public double MinMove { get; init; }
 
-		/// <summary>Был ли вообще валидный микро-прогноз.</summary>
-		public bool MicroPredicted { get; set; }
+		// ===== SL-слой (runtime overlay) =====
+		// null = SL overlay не считался/не применялся (важно: это не "0%").
+		public double? SlProb { get; set; }
+		public bool? SlHighDecision { get; set; }
+		public double? Conf_SlLong { get; set; }
+		public double? Conf_SlShort { get; set; }
 
-		/// <summary>Микро-сигнал "за up" внутри flat-дня.</summary>
-		public bool PredMicroUp { get; set; }
-
-		/// <summary>Микро-сигнал "за down" внутри flat-дня.</summary>
-		public bool PredMicroDown { get; set; }
-
-		/// <summary>Фактический признак микро-up (из DataRow), только для диагностики.</summary>
-		public bool FactMicroUp { get; set; }
-
-		/// <summary>Фактический признак микро-down (из DataRow), только для диагностики.</summary>
-		public bool FactMicroDown { get; set; }
-
-		// ===== Контекст =====
-
-		/// <summary>Флаг даун-режима по Regime-модели, использованный при выборе dir-ветки.</summary>
-		public bool RegimeDown { get; set; }
-
-		/// <summary>Человеко-читаемое объяснение (ветка move/dir, BTC-фильтр и т.п.).</summary>
-		public string Reason { get; set; } = string.Empty;
-
-		/// <summary>
-		/// MinMove из DataRow, использованный в разметке таргета и SL-оффлайне.
-		/// Это train-time оценка, forward-MinMove живёт в omniscient-части.
-		/// </summary>
-		public double MinMove { get; set; }
-
-		// ===== SL-модель =====
-
-		/// <summary>Вероятность "SL будет первым" (positive-class SL-модели).</summary>
-		public double SlProb { get; set; }
-
-		/// <summary>
-		/// Флаг high-risk дня по SL-модели (p &gt;= threshold и PredictedLabel == SL).
-		/// Используется как гейт для delayed A/B и Anti-D.
-		/// </summary>
-		public bool SlHighDecision { get; set; }
-
-		/// <summary>Опциональные confidence-метрики для поясняющих логов.</summary>
-		public double Conf_SlLong { get; set; }
-		public double Conf_SlShort { get; set; }
-
-		// ===== Delayed-слой (intraday A/B, каузальная часть) =====
-
-		/// <summary>Источник delayed-входа ("A", "B" или null).</summary>
+		// ===== Delayed-слой (runtime параметры/результат) =====
+		// null = Delayed overlay не считался/не применялся.
 		public string? DelayedSource { get; set; }
+		public bool? DelayedEntryAsked { get; set; }
+		public bool? DelayedEntryUsed { get; set; }
+		public double? DelayedIntradayTpPct { get; set; }
+		public double? DelayedIntradaySlPct { get; set; }
 
-		/// <summary>Флаг, что delayed-вход запрашивался стратегией.</summary>
-		public bool DelayedEntryAsked { get; set; }
+		// Если это относится к delayed/уровням таргета — тоже не должен быть "0 по умолчанию".
+		public int? TargetLevelClass { get; set; }
 
-		/// <summary>Флаг, что delayed-вход был принят к использованию (после всех гейтов).</summary>
-		public bool DelayedEntryUsed { get; set; }
+		// ===== Явные "OrThrow" аксессоры =====
+		// Нужны, чтобы код падал в неправильном состоянии.
+		public double GetSlProbOrThrow ()
+			{
+			if (SlProb is null)
+				throw new InvalidOperationException ($"[causal] SL not evaluated for {DateUtc:O}, but SlProb requested.");
+			return SlProb.Value;
+			}
 
-		/// <summary>TP-порог для delayed-сделки (в долях, 0.01 == 1%).</summary>
-		public double DelayedIntradayTpPct { get; set; }
-
-		/// <summary>SL-порог для delayed-сделки (в долях).</summary>
-		public double DelayedIntradaySlPct { get; set; }
-
-		/// <summary>Класс уровня таргета (если delayed-модель его использует).</summary>
-		public int TargetLevelClass { get; set; }
+		public (double TpPct, double SlPct) GetDelayedTpSlOrThrow ()
+			{
+			if (DelayedIntradayTpPct is null || DelayedIntradaySlPct is null)
+				throw new InvalidOperationException ($"[causal] Delayed not evaluated for {DateUtc:O}, but TP/SL requested.");
+			return (DelayedIntradayTpPct.Value, DelayedIntradaySlPct.Value);
+			}
 		}
 	}

@@ -232,12 +232,12 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 			if (fngByDate == null || fngByDate.Count == 0)
 				return 50.0;
 
-			if (fngByDate.TryGetValue (asOfUtcDate.Date, out double v))
+			if (fngByDate.TryGetValue (asOfUtcDate.Causal.DateUtc, out double v))
 				return v;
 
 			for (int i = 1; i <= 14; i++)
 				{
-				var d = asOfUtcDate.Date.AddDays (-i);
+				var d = asOfUtcDate.Causal.DateUtc.AddDays (-i);
 				if (fngByDate.TryGetValue (d, out v))
 					return v;
 				}
@@ -253,10 +253,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 			{
 			if (dxySeries == null || dxySeries.Count == 0) return 0.0;
 
-			double now = FindNearest (dxySeries, asOfUtcDate.Date, double.NaN, maxBackSteps: 40, step: TimeSpan.FromDays (1));
+			double now = FindNearest (dxySeries, asOfUtcDate.Causal.DateUtc, double.NaN, maxBackSteps: 40, step: TimeSpan.FromDays (1));
 			if (double.IsNaN (now)) return 0.0;
 
-			double past = FindNearest (dxySeries, asOfUtcDate.Date.AddDays (-30), double.NaN, maxBackSteps: 45, step: TimeSpan.FromDays (1));
+			double past = FindNearest (dxySeries, asOfUtcDate.Causal.DateUtc.AddDays (-30), double.NaN, maxBackSteps: 45, step: TimeSpan.FromDays (1));
 			if (double.IsNaN (past) || past <= 0) return 0.0;
 
 			return now / past - 1.0;

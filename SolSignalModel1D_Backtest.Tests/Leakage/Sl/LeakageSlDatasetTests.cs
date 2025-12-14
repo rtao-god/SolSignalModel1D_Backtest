@@ -10,7 +10,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 	{
 	/// <summary>
 	/// Тест: SlDatasetBuilder не использует дни с Date > trainUntil
-	/// и future-blind к мутациям хвоста по DataRow.
+	/// и future-blind к мутациям хвоста по BacktestRecord.
 	/// 1m/6h-свечи для простоты одинаковые в A/B (факт пути не трогаем).
 	/// </summary>
 	public class LeakageSlDatasetTests
@@ -50,8 +50,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				strongSelector: null
 			);
 
-			Assert.All (dsA.MorningRows, r => Assert.True (r.Date <= trainUntil));
-			Assert.All (dsB.MorningRows, r => Assert.True (r.Date <= trainUntil));
+			Assert.All (dsA.MorningRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
+			Assert.All (dsB.MorningRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
 
 			Assert.Equal (dsA.Samples.Count, dsB.Samples.Count);
 
@@ -61,22 +61,22 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				var b = dsB.Samples[i];
 
 				Assert.Equal (a.EntryUtc, b.EntryUtc);
-				Assert.Equal (a.Label, b.Label);
+				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 
-				var fa = a.Features ?? Array.Empty<float> ();
-				var fb = b.Features ?? Array.Empty<float> ();
+				var fa = a.Causal.Features ?? Array.Empty<float> ();
+				var fb = b.Causal.Features ?? Array.Empty<float> ();
 				Assert.Equal (fa.Length, fb.Length);
 				for (int j = 0; j < fa.Length; j++)
 					Assert.Equal (fa[j], fb[j]);
 				}
 			}
 
-		private static List<DataRow> BuildSyntheticRows (
+		private static List<BacktestRecord> BuildSyntheticRows (
 			int count,
 			out Dictionary<DateTime, Candle6h> sol6hDict,
 			out List<Candle1m> sol1m )
 			{
-			var rows = new List<DataRow> (count);
+			var rows = new List<BacktestRecord> (count);
 			var dict6h = new Dictionary<DateTime, Candle6h> (count);
 			var all1m = new List<Candle1m> (count * 30);
 
@@ -87,7 +87,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				var date = start.AddDays (i);
 				double price = 100 + i;
 
-				var row = new DataRow
+				var row = new BacktestRecord
 					{
 					Date = date,
 					IsMorning = true,
@@ -120,30 +120,30 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 			sol6hDict = dict6h;
 			sol1m = all1m;
 			return rows
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 			}
 
-		private static List<DataRow> CloneRows ( List<DataRow> src )
+		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
 			{
-			var res = new List<DataRow> (src.Count);
+			var res = new List<BacktestRecord> (src.Count);
 			foreach (var r in src)
 				{
-				res.Add (new DataRow
+				res.Add (new BacktestRecord
 					{
-					Date = r.Date,
-					IsMorning = r.IsMorning,
+					Date = r.Causal.DateUtc,
+					IsMorning = r.Causal.IsMorning,
 					MinMove = r.MinMove
 					});
 				}
 			return res;
 			}
 
-		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntil )
+		private static void MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntil )
 			{
-			foreach (var r in rows.Where (r => r.Date > trainUntil))
+			foreach (var r in rows.Where (r => r.Causal.DateUtc > trainUntil))
 				{
-				r.IsMorning = !r.IsMorning;
+				r.Causal.IsMorning = !r.Causal.IsMorning;
 				r.MinMove = r.MinMove * 2.0;
 				}
 			}

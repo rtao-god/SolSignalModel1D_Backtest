@@ -1,18 +1,20 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 	{
 	public sealed class WindowingTests
 		{
 		[Fact]
-		public void ComputeBaselineExitUtc_Weekday_GoesToNextMorningMinusTwoMinutes ()
+		public void ComputeBaselineExitUtc_Weekday_GoesToNextNyMorningMinusTwoMinutes ()
 			{
 			var nyTz = CoreWindowing.NyTz;
 
-			var entryLocal = new DateTime (2024, 1, 8, 7, 0, 0, DateTimeKind.Unspecified); // понедельник (зима, без DST)
+			var entryLocal = new DateTime (2024, 1, 8, 7, 0, 0, DateTimeKind.Unspecified); // понедельник, зима
 			Assert.False (nyTz.IsDaylightSavingTime (entryLocal));
 
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocal, nyTz);
@@ -21,16 +23,18 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			var exitLocal = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, nyTz);
 
 			Assert.Equal (entryLocal.Date.AddDays (1), exitLocal.Date);
-			Assert.Equal (7, exitLocal.Hour);
+
+			// Зимой NY-morning = 07:00 → минус 2 минуты = 06:58
+			Assert.Equal (6, exitLocal.Hour);
 			Assert.Equal (58, exitLocal.Minute);
 			}
 
 		[Fact]
-		public void ComputeBaselineExitUtc_Friday_GoesToMondayMorning ()
+		public void ComputeBaselineExitUtc_Friday_GoesToMondayNyMorningMinusTwoMinutes ()
 			{
 			var nyTz = CoreWindowing.NyTz;
 
-			var entryLocal = new DateTime (2024, 1, 5, 7, 0, 0, DateTimeKind.Unspecified); // пятница
+			var entryLocal = new DateTime (2024, 1, 5, 7, 0, 0, DateTimeKind.Unspecified); // пятница, зима
 			Assert.Equal (DayOfWeek.Friday, entryLocal.DayOfWeek);
 			Assert.False (nyTz.IsDaylightSavingTime (entryLocal));
 
@@ -40,7 +44,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			var exitLocal = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, nyTz);
 
 			Assert.Equal (DayOfWeek.Monday, exitLocal.DayOfWeek);
-			Assert.Equal (7, exitLocal.Hour);
+
+			// Зимой NY-morning = 07:00 → минус 2 минуты = 06:58
+			Assert.Equal (6, exitLocal.Hour);
 			Assert.Equal (58, exitLocal.Minute);
 			}
 
@@ -98,7 +104,6 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			{
 			var nyTz = CoreWindowing.NyTz;
 
-			// Зима: утро 07:00, день 13:00
 			var winterMorningLocal = new DateTime (2024, 1, 10, 7, 0, 0, DateTimeKind.Unspecified);
 			var winterDayLocal = new DateTime (2024, 1, 10, 13, 0, 0, DateTimeKind.Unspecified);
 
@@ -108,7 +113,6 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			Assert.True (CoreWindowing.IsNyMorning (winterMorningUtc, nyTz));
 			Assert.False (CoreWindowing.IsNyMorning (winterDayUtc, nyTz));
 
-			// Лето (DST): утро 08:00
 			var summerMorningLocal = new DateTime (2024, 6, 11, 8, 0, 0, DateTimeKind.Unspecified);
 			Assert.True (nyTz.IsDaylightSavingTime (summerMorningLocal));
 			var summerMorningUtc = TimeZoneInfo.ConvertTimeToUtc (summerMorningLocal, nyTz);
@@ -119,19 +123,22 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 		[Fact]
 		public void BuildSpacedTest_TakesBlocksFromEnd_WithSkips_AndKeepsOrder ()
 			{
-			var rows = new List<DataRow> ();
+			var rows = new List<DummyRow> ();
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < 10; i++)
-				{
-				rows.Add (new DataRow { Date = start.AddDays (i), Label = i });
-				}
+				rows.Add (new DummyRow { DateUtc = start.AddDays (i), Label = i });
 
-			var spaced = CoreWindowing.BuildSpacedTest (rows, take: 3, skip: 2, blocks: 2);
+			var spaced = CoreWindowing.BuildSpacedTest (
+				rows,
+				take: 3,
+				skip: 2,
+				blocks: 2,
+				dateSelector: r => r.DateUtc);
 
 			Assert.Equal (6, spaced.Count);
 
-			var dates = spaced.Select (r => r.Date).ToList ();
+			var dates = spaced.Select (r => r.DateUtc).ToList ();
 			Assert.True (dates.SequenceEqual (dates.OrderBy (d => d)));
 
 			var labels = spaced.Select (r => r.Label).ToArray ();
@@ -141,13 +148,11 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 		[Fact]
 		public void GroupByBlocks_SplitsIntoConsecutiveBlocks ()
 			{
-			var rows = new List<DataRow> ();
+			var rows = new List<DummyRow> ();
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < 10; i++)
-				{
-				rows.Add (new DataRow { Date = start.AddDays (i), Label = i });
-				}
+				rows.Add (new DummyRow { DateUtc = start.AddDays (i), Label = i });
 
 			var blocks = CoreWindowing.GroupByBlocks (rows, blockSize: 4).ToList ();
 
@@ -155,6 +160,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			Assert.Equal (new[] { 0, 1, 2, 3 }, blocks[0].Select (r => r.Label));
 			Assert.Equal (new[] { 4, 5, 6, 7 }, blocks[1].Select (r => r.Label));
 			Assert.Equal (new[] { 8, 9 }, blocks[2].Select (r => r.Label));
+			}
+
+		private sealed class DummyRow
+			{
+			public DateTime DateUtc { get; init; }
+			public int Label { get; init; }
 			}
 		}
 	}

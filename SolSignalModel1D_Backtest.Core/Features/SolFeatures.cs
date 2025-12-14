@@ -1,8 +1,8 @@
 ﻿using SolSignalModel1D_Backtest.Core;
 
-namespace SolSignalModel1D_Backtest.Core.Features
+namespace SolSignalModel1D_Backtest.Core.Causal.Features
 	{
-	// фичи именно по SOL — только то, что реально есть в DataRow
+	// фичи именно по SOL — только то, что реально есть в BacktestRecord
 	public sealed class SolFeatures : IFeatureBuilder
 		{
 		public void Build ( FeatureContext ctx )
@@ -10,13 +10,13 @@ namespace SolSignalModel1D_Backtest.Core.Features
 			var r = ctx.Row;
 
 			// длинный контекст
-			ctx.Add (r.SolRet30);    // 30 окон назад
+			ctx.Add (r.Causal.SolRet30);    // 30 окон назад
 									 // средний и короткий
-			ctx.Add (r.SolRet3);
-			ctx.Add (r.SolRet1);
+			ctx.Add (r.Causal.SolRet3);
+			ctx.Add (r.Causal.SolRet1);
 
 			// флаг "это утро NY" — полезно
-			ctx.Add (r.IsMorning ? 1.0 : 0.0);
+			ctx.Add (r.Causal.IsMorning ? 1.0 : 0.0);
 			}
 		}
 	}

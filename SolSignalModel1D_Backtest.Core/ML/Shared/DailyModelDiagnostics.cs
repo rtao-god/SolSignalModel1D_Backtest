@@ -8,18 +8,18 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
 	/// <summary>
 	/// Диагностика дневных моделей (move / dir-normal / dir-down / micro-flat):
-	/// считает PFI + direction на произвольном срезе DataRow (train / OOS / holdout)
+	/// считает PFI + direction на произвольном срезе BacktestRecord (train / OOS / holdout)
 	/// и печатает таблички в консоль.
 	/// </summary>
 	public static class DailyModelDiagnostics
 		{
 		/// <summary>
-		/// PFI + direction по всем дневным моделям на заданном наборе DataRow.
+		/// PFI + direction по всем дневным моделям на заданном наборе BacktestRecord.
 		/// Ничего не обучает, кроме использования уже готового ModelBundle.
 		/// </summary>
 		public static void LogFeatureImportanceOnDailyModels (
 			ModelBundle bundle,
-			IEnumerable<DataRow> evalRows,
+			IEnumerable<BacktestRecord> evalRows,
 			string datasetTag = "oos" )
 			{
 			if (bundle == null) throw new ArgumentNullException (nameof (bundle));
@@ -32,8 +32,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 				return;
 				}
 
-			var minDate = rows.Min (r => r.Date);
-			var maxDate = rows.Max (r => r.Date);
+			var minDate = rows.Min (r => r.Causal.DateUtc);
+			var maxDate = rows.Max (r => r.Causal.DateUtc);
 			Console.WriteLine ($"[pfi:daily: {datasetTag}] rows={rows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
 
 			// Для PFI на eval-сете балансировку отключаем,
@@ -57,8 +57,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 					moveRows.Select (r => new MlSampleBinary
 						{
 						// Позитив: день НЕ flat (Label != 1)
-						Label = r.Label != 1,
-						Features = MlTrainingUtils.ToFloatFixed (r.Features)
+						Label = r.Forward.TrueLabel != 1,
+						Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 						})
 				);
 
@@ -81,8 +81,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 					dirNormalRows.Select (r => new MlSampleBinary
 						{
 						// Позитив: up (Label=2), негатив: down (Label=0)
-						Label = r.Label == 2,
-						Features = MlTrainingUtils.ToFloatFixed (r.Features)
+						Label = r.Forward.TrueLabel == 2,
+						Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 						})
 				);
 
@@ -104,8 +104,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 				var dirDownData = ml.Data.LoadFromEnumerable (
 					dirDownRows.Select (r => new MlSampleBinary
 						{
-						Label = r.Label == 2,
-						Features = MlTrainingUtils.ToFloatFixed (r.Features)
+						Label = r.Forward.TrueLabel == 2,
+						Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 						})
 				);
 
@@ -126,7 +126,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 				{
 				var microRows = rows
 					.Where (r => r.FactMicroUp || r.FactMicroDown)
-					.OrderBy (r => r.Date)
+					.OrderBy (r => r.Causal.DateUtc)
 					.ToList ();
 
 				if (microRows.Count >= 10)
@@ -136,7 +136,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 							{
 							// Позитив: microUp, негатив: microDown
 							Label = r.FactMicroUp,
-							Features = MlTrainingUtils.ToFloatFixed (r.Features)
+							Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 							})
 					);
 

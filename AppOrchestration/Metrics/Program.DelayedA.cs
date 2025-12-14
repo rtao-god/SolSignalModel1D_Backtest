@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using System.Collections.Generic;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -12,7 +12,7 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private static void PopulateDelayedAForRecords (
 			List<BacktestRecord> records,
-			List<DataRow> allRows,
+			List<BacktestRecord> allRows,
 			List<Candle1h> sol1h,
 			List<Candle6h> solAll6h,
 			List<Candle1m> sol1m

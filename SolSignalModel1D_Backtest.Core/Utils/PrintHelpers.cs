@@ -27,16 +27,16 @@ namespace SolSignalModel1D_Backtest.Core.Utils
 			return "нет";
 			}
 
-		public static string FactToRu ( DataRow r )
+		public static string FactToRu ( BacktestRecord r )
 			{
-			if (r.Label == 1)
+			if (r.Forward.TrueLabel == 1)
 				{
 				if (r.FactMicroUp) return "БоковикРост";
 				if (r.FactMicroDown) return "БоковикОбвал";
 				return "Боковик";
 				}
-			if (r.Label == 0) return "Обвал";
-			if (r.Label == 2) return "Рост";
+			if (r.Forward.TrueLabel == 0) return "Обвал";
+			if (r.Forward.TrueLabel == 2) return "Рост";
 			return "UNKNOWN";
 			}
 
@@ -44,17 +44,17 @@ namespace SolSignalModel1D_Backtest.Core.Utils
 		/// Красиво показать один день дебага.
 		/// </summary>
 		public static void PrintDebugDay (
-			DataRow row,
+			BacktestRecord row,
 			(double entry, double maxHigh, double minLow, double fwdClose) fwd,
 			int predClass,
 			MicroInfo micro,
 			string reason )
 			{
-			double rsi = row.SolRsiCentered + 50.0;
-			double atrPct = row.AtrPct * 100.0;
+			double rsi = row.Causal.SolRsiCentered + 50.0;
+			double atrPct = row.Causal.AtrPct * 100.0;
 			double minMovePct = row.MinMove * 100.0;
 
-			Console.WriteLine ($"[dbg-day] {row.Date:yyyy-MM-dd HH:mm}");
+			Console.WriteLine ($"[dbg-day] {row.Causal.DateUtc:yyyy-MM-dd HH:mm}");
 			Console.WriteLine ($"  entry={fwd.entry:0.####}  maxHigh24={fwd.maxHigh:0.####}  minLow24={fwd.minLow:0.####}  fwdClose24={fwd.fwdClose:0.####}");
 			Console.WriteLine ($"  rsi:{rsi:0.0}  atr:{atrPct:0.00}%  minMove:{minMovePct:0.00}%");
 			Console.WriteLine ($"  Прогноз:{ClassToRu (predClass)}  Микро:{MicroToRu (micro)}  Факт:{FactToRu (row)}  (reason:{reason})");

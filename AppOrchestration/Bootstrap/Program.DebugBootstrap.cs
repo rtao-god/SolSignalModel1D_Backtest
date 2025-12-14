@@ -1,5 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -11,8 +11,8 @@ namespace SolSignalModel1D_Backtest
 		/// В прод-логике НЕ используется.
 		/// </summary>
 		public static Task<(
-			List<DataRow> AllRows,
-			List<DataRow> Mornings,
+			List<BacktestRecord> AllRows,
+			List<BacktestRecord> Mornings,
 			List<Candle6h> SolAll6h,
 			List<Candle1h> SolAll1h,
 			List<Candle1m> Sol1m)> DebugBootstrapRowsAndCandlesAsync ()

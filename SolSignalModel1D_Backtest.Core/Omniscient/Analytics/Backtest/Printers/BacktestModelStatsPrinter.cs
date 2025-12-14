@@ -122,16 +122,16 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				return;
 
 			ConsoleStyler.WriteHeader (
-				$"{segmentTitle}: {segment.Label} " +
+				$"{segmentTitle}: {segment.Forward.TrueLabel} " +
 				$"[{segment.FromDateUtc:yyyy-MM-dd}..{segment.ToDateUtc:yyyy-MM-dd}, " +
 				$"records={segment.RecordsCount}]");
 
 			// 1) Обычная 3-классовая путаница
-			PrintDailyConfusion (segment.Stats.Daily, scopeLabel: segment.Label);
+			PrintDailyConfusion (segment.Stats.Daily, scopeLabel: segment.Forward.TrueLabel);
 			Console.WriteLine ();
 
 			// 2) Путаница по тренду (UP vs DOWN)
-			PrintTrendDirectionConfusion (segment.Stats.Trend, scopeLabel: segment.Label);
+			PrintTrendDirectionConfusion (segment.Stats.Trend, scopeLabel: segment.Forward.TrueLabel);
 			Console.WriteLine ();
 
 			// 3) SL-модель (path-based по 1m)

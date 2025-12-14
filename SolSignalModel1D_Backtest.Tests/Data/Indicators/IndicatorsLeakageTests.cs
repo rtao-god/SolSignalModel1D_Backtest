@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
 	/// <summary>
 	/// Структурный тест:
-	/// фичи DataRow и Label для "ранних" дней не должны меняться,
+	/// фичи BacktestRecord и Label для "ранних" дней не должны меняться,
 	/// если мутировать макро-ряды (FNG / DXY / PAXG) СИЛЬНО в будущем.
 	///
 	/// Если какая-то индикаторная функция смотрит в будущее
@@ -95,12 +95,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Date.AddDays (-120);
-			var lastDate = start.Date.AddDays (400);
+			var firstDate = start.Causal.DateUtc.AddDays (-120);
+			var lastDate = start.Causal.DateUtc.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// ВАЖНО: Kind = Utc, чтобы совпадать с openUtc.Date.
+				// ВАЖНО: Kind = Utc, чтобы совпадать с openUtc.Causal.DateUtc.
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fngBase[key] = 50;
 				dxyBase[key] = 100.0;
@@ -131,7 +131,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
 			// Сдвигаем "будущее" после cutoff + 10 дней.
-			var mutateFrom = cutoff.Date.AddDays (10);
+			var mutateFrom = cutoff.Causal.DateUtc.AddDays (10);
 
 			foreach (var key in fngB.Keys.ToList ())
 				{
@@ -163,8 +163,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				nyTz: tz);
 
 			// Сопоставляем строки по дате.
-			var dictA = rowsA.ToDictionary (r => r.Date, r => r);
-			var dictB = rowsB.ToDictionary (r => r.Date, r => r);
+			var dictA = rowsA.ToDictionary (r => r.Causal.DateUtc, r => r);
+			var dictB = rowsB.ToDictionary (r => r.Causal.DateUtc, r => r);
 
 			// Для всех дат <= cutoff:
 			// - Label должен быть одинаковым;
@@ -180,12 +180,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				var a = kv.Value;
 				var b = dictB[date];
 
-				Assert.Equal (a.Label, b.Label);
+				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 
-				Assert.Equal (a.Features.Length, b.Features.Length);
-				for (int i = 0; i < a.Features.Length; i++)
+				Assert.Equal (a.Causal.Features.Length, b.Causal.Features.Length);
+				for (int i = 0; i < a.Causal.Features.Length; i++)
 					{
-					Assert.Equal (a.Features[i], b.Features[i], 10);
+					Assert.Equal (a.Causal.Features[i], b.Causal.Features[i], 10);
 					}
 				}
 			}

@@ -1,86 +1,105 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
-using System;
+﻿using System;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 
-namespace SolSignalModel1D_Backtest.Core.Analytics.Evaluation
+namespace SolSignalModel1D_Backtest.Core.Omniscient.Evaluation
 	{
 	/// <summary>
-	/// Метрики/оценка предсказаний, которым нужны forward-факты (label, micro ground-truth).
-	/// Это не должно находиться в causal PredictionEngine, иначе легко получить утечку через «невинный» доступ к фактам.
+	/// Омнисциентная оценка качества предикта с учётом micro-слоя.
 	/// </summary>
 	public static class MicroAwareEvaluator
 		{
-		public static bool EvalMicroAware ( OmniscientDataRow r, int predClass, MicroInfo micro )
+		public readonly struct Truth
 			{
-			if (r == null) throw new ArgumentNullException (nameof (r));
+			public Truth ( int trueLabel, bool factMicroUp, bool factMicroDown )
+				{
+				TrueLabel = trueLabel;
+				FactMicroUp = factMicroUp;
+				FactMicroDown = factMicroDown;
 
-			int fact = r.Outcomes.Label;
-			bool factMicroUp = r.Outcomes.FactMicroUp;
-			bool factMicroDown = r.Outcomes.FactMicroDown;
+				if (trueLabel < 0 || trueLabel > 2)
+					throw new ArgumentOutOfRangeException (nameof (trueLabel), trueLabel, "TrueLabel must be in [0..2].");
 
-			bool baseCorrect = predClass == fact;
-			if (baseCorrect) return true;
+				if (factMicroUp && factMicroDown)
+					throw new InvalidOperationException ("[MicroAwareEvaluator] Invalid truth: FactMicroUp && FactMicroDown.");
+				}
 
-			if (fact == 2 && predClass == 1 && micro.ConsiderUp) return true;
-			if (fact == 0 && predClass == 1 && micro.ConsiderDown) return true;
+			public int TrueLabel { get; }
+			public bool FactMicroUp { get; }
+			public bool FactMicroDown { get; }
+			}
 
-			if (fact == 1 && factMicroUp && predClass == 2) return true;
-			if (fact == 1 && factMicroDown && predClass == 0) return true;
+		public static bool IsCorrectMicroAware ( CausalPredictionRecord pred, Truth truth )
+			{
+			if (pred == null) throw new ArgumentNullException (nameof (pred));
 
-			if (fact == 1 && factMicroUp && predClass == 1 && micro.ConsiderUp) return true;
-			if (fact == 1 && factMicroDown && predClass == 1 && micro.ConsiderDown) return true;
+			int fact = truth.TrueLabel;
+			int cls = pred.PredLabel;
+
+			bool microUp = pred.PredMicroUp;
+			bool microDown = pred.PredMicroDown;
+
+			// базовая точность по классу
+			if (cls == fact) return true;
+
+			// micro-правила (перенос старого EvalMicroAware, но теперь это omniscient)
+			if (fact == 2 && cls == 1 && microUp) return true;
+			if (fact == 0 && cls == 1 && microDown) return true;
+
+			if (fact == 1 && truth.FactMicroUp && cls == 2) return true;
+			if (fact == 1 && truth.FactMicroDown && cls == 0) return true;
+
+			if (fact == 1 && truth.FactMicroUp && cls == 1 && microUp) return true;
+			if (fact == 1 && truth.FactMicroDown && cls == 1 && microDown) return true;
 
 			return false;
 			}
 
-		public static double EvalWeighted ( OmniscientDataRow r, int predClass, MicroInfo micro )
+		public static double ScoreWeighted ( CausalPredictionRecord pred, Truth truth )
 			{
-			if (r == null) throw new ArgumentNullException (nameof (r));
+			if (pred == null) throw new ArgumentNullException (nameof (pred));
 
-			int fact = r.Outcomes.Label;
+			int fact = truth.TrueLabel;
+			int cls = pred.PredLabel;
 
-			bool predMicroUp = micro.ConsiderUp;
-			bool predMicroDown = micro.ConsiderDown;
-
-			bool factMicroUp = r.Outcomes.FactMicroUp;
-			bool factMicroDown = r.Outcomes.FactMicroDown;
+			bool predMicroUp = pred.PredMicroUp;
+			bool predMicroDown = pred.PredMicroDown;
 
 			if (fact == 2)
 				{
-				if (predClass == 2) return 1.0;
-				if (predClass == 1 && predMicroUp) return 1.0;
-				if (predClass == 1) return 0.25;
+				if (cls == 2) return 1.0;
+				if (cls == 1 && predMicroUp) return 1.0;
+				if (cls == 1) return 0.25;
 				return 0.0;
 				}
 
 			if (fact == 0)
 				{
-				if (predClass == 0) return 1.0;
-				if (predClass == 1 && predMicroDown) return 1.0;
-				if (predClass == 1) return 0.25;
+				if (cls == 0) return 1.0;
+				if (cls == 1 && predMicroDown) return 1.0;
+				if (cls == 1) return 0.25;
 				return 0.0;
 				}
 
-			if (fact == 1 && factMicroUp)
+			if (fact == 1 && truth.FactMicroUp)
 				{
-				if (predClass == 1 && predMicroUp) return 1.0;
-				if (predClass == 2) return 0.8;
-				if (predClass == 1) return 0.2;
+				if (cls == 1 && predMicroUp) return 1.0;
+				if (cls == 2) return 0.8;
+				if (cls == 1) return 0.2;
 				return 0.0;
 				}
 
-			if (fact == 1 && factMicroDown)
+			if (fact == 1 && truth.FactMicroDown)
 				{
-				if (predClass == 1 && predMicroDown) return 1.0;
-				if (predClass == 0) return 0.8;
-				if (predClass == 1) return 0.2;
+				if (cls == 1 && predMicroDown) return 1.0;
+				if (cls == 0) return 0.8;
+				if (cls == 1) return 0.2;
 				return 0.0;
 				}
 
+			// fact == flat, без micro-fact
 			if (fact == 1)
 				{
-				if (predClass == 1) return 1.0;
+				if (cls == 1) return 1.0;
 				return 0.3;
 				}
 

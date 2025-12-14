@@ -35,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest.Services
 		/// </param>
 		/// <returns>BacktestSummary, из которого потом строится ReportDocument/DTO.</returns>
 		public BacktestSummary RunPreview(
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			BacktestConfig config)

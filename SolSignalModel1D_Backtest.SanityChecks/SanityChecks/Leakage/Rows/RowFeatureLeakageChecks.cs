@@ -92,14 +92,14 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 				}
 
 			// Собираем для каждого дня набор future-таргетов:
-			// - SolFwd1 (из DataRow);
+			// - SolFwd1 (из BacktestRecord);
 			// - MaxHigh24 / MinLow24 / Close24 (из PredictionRecord, если есть);
 			// - Future1mAfterExit (первая 1m после baseline-exit, если есть sol1m).
 			var futureTargetsByDate = new Dictionary<DateTime, List<(string Name, double Value)>> ();
 
 			foreach (var row in allRows)
 				{
-				var date = row.Date;
+				var date = row.Causal.DateUtc;
 
 				var targets = new List<(string Name, double Value)>
 				{
@@ -133,13 +133,13 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
 			foreach (var row in allRows)
 				{
-				if (row.Features == null || row.Features.Length == 0)
+				if (row.Causal.Features == null || row.Causal.Features.Length == 0)
 					continue;
 
-				if (!futureTargetsByDate.TryGetValue (row.Date, out var targets) || targets.Count == 0)
+				if (!futureTargetsByDate.TryGetValue (row.Causal.DateUtc, out var targets) || targets.Count == 0)
 					continue;
 
-				var feats = row.Features;
+				var feats = row.Causal.Features;
 
 				for (int fi = 0; fi < feats.Length; fi++)
 					{
@@ -156,16 +156,16 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 							{
 							suspiciousMatches.Add (new MatchInfo
 								{
-								Date = row.Date,
+								Date = row.Causal.DateUtc,
 								FeatureIndex = fi,
 								TargetName = name,
 								FeatureVal = fVal,
 								TargetVal = tVal,
-								Label = row.Label,
+								Label = row.Forward.TrueLabel,
 								MinMove = row.MinMove,
 								RegimeDown = row.RegimeDown,
 								HardRegime = row.HardRegime,
-								IsMorning = row.IsMorning
+								IsMorning = row.Causal.IsMorning
 								});
 							}
 						}
@@ -266,14 +266,14 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
 				result.Warnings.Add (header);
 
-				foreach (var sample in g.AllMatches.OrderBy (x => x.Date).Take (5))
+				foreach (var sample in g.AllMatches.OrderBy (x => x.Causal.DateUtc).Take (5))
 					{
 					var line =
-						$"[rows-leak:noise]   date={sample.Date:O}, " +
+						$"[rows-leak:noise]   date={sample.Causal.DateUtc:O}, " +
 						$"featureVal={sample.FeatureVal:0.########}, " +
 						$"targetVal={sample.TargetVal:0.########}, " +
-						$"label={sample.Label}, minMove={sample.MinMove:0.####}, " +
-						$"regimeDown={sample.RegimeDown}, hardRegime={sample.HardRegime}, isMorning={sample.IsMorning}";
+						$"label={sample.Forward.TrueLabel}, minMove={sample.MinMove:0.####}, " +
+						$"regimeDown={sample.RegimeDown}, hardRegime={sample.HardRegime}, isMorning={sample.Causal.IsMorning}";
 					result.Warnings.Add (line);
 					}
 				}
@@ -313,14 +313,14 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.fracTotal"] = fracTotal;
 				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.fracNonZero"] = fracNonZero;
 
-				foreach (var sample in g.NonZeroMatches.OrderBy (x => x.Date).Take (5))
+				foreach (var sample in g.NonZeroMatches.OrderBy (x => x.Causal.DateUtc).Take (5))
 					{
 					var line =
-						$"[rows-leak]   date={sample.Date:O}, " +
+						$"[rows-leak]   date={sample.Causal.DateUtc:O}, " +
 						$"featureVal={sample.FeatureVal:0.########}, " +
 						$"targetVal={sample.TargetVal:0.########}, " +
-						$"label={sample.Label}, minMove={sample.MinMove:0.####}, " +
-						$"regimeDown={sample.RegimeDown}, hardRegime={sample.HardRegime}, isMorning={sample.IsMorning}";
+						$"label={sample.Forward.TrueLabel}, minMove={sample.MinMove:0.####}, " +
+						$"regimeDown={sample.RegimeDown}, hardRegime={sample.HardRegime}, isMorning={sample.Causal.IsMorning}";
 					result.Errors.Add (line);
 					}
 				}

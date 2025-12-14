@@ -3,7 +3,7 @@ using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -56,9 +56,9 @@ namespace SolSignalModel1D_Backtest
 
 			// Индикаторы по дневному диапазону: покрытие с histFrom до toUtc.
 			// Если FNG/DXY есть с 2021 года, то и строки строятся с 2021.
-			var fngDict = indicatorsUpdater.LoadFngDict (histFrom.Date, toUtc.Date);
-			var dxyDict = indicatorsUpdater.LoadDxyDict (histFrom.Date, toUtc.Date);
-			indicatorsUpdater.EnsureCoverageOrFail (histFrom.Date, toUtc.Date);
+			var fngDict = indicatorsUpdater.LoadFngDict (histFrom.Causal.DateUtc, toUtc.Causal.DateUtc);
+			var dxyDict = indicatorsUpdater.LoadDxyDict (histFrom.Causal.DateUtc, toUtc.Causal.DateUtc);
+			indicatorsUpdater.EnsureCoverageOrFail (histFrom.Causal.DateUtc, toUtc.Causal.DateUtc);
 
 			// Все 6h-строки (для SL-датасета и path-based labels).
 			// Здесь используется общий NyTz, чтобы в одном месте контролировать правила NY-времени.
@@ -81,8 +81,8 @@ namespace SolSignalModel1D_Backtest
 			// Здесь собираем ВСЮ историю утренних NY-окон,
 			// чтобы стратегия и бэктест могли работать "с 2021".
 			var mornings = rows
-				.Where (r => r.IsMorning)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.IsMorning)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			Console.WriteLine ($"[rows] mornings total (all history) = {mornings.Count}");
@@ -97,14 +97,14 @@ namespace SolSignalModel1D_Backtest
 				});
 			}
 
-		private static void DumpNyHourHistogram ( List<DataRow> rows )
+		private static void DumpNyHourHistogram ( List<BacktestRecord> rows )
 			{
 			if (rows.Count == 0) return;
 
 			var hist = new Dictionary<int, int> ();
 			foreach (var r in rows)
 				{
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (r.Date, NyTz);
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (r.Causal.DateUtc, NyTz);
 				if (!hist.TryGetValue (ny.Hour, out var cnt)) cnt = 0;
 				hist[ny.Hour] = cnt + 1;
 				}

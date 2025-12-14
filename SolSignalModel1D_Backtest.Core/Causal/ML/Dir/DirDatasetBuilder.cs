@@ -12,13 +12,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 	/// </summary>
 	public sealed class DirDataset
 		{
-		public IReadOnlyList<DataRow> DirNormalRows { get; }
-		public IReadOnlyList<DataRow> DirDownRows { get; }
+		public IReadOnlyList<BacktestRecord> DirNormalRows { get; }
+		public IReadOnlyList<BacktestRecord> DirDownRows { get; }
 		public DateTime TrainUntilUtc { get; }
 
 		public DirDataset (
-			IReadOnlyList<DataRow> dirNormalRows,
-			IReadOnlyList<DataRow> dirDownRows,
+			IReadOnlyList<BacktestRecord> dirNormalRows,
+			IReadOnlyList<BacktestRecord> dirDownRows,
 			DateTime trainUntilUtc )
 			{
 			if (dirNormalRows == null) throw new ArgumentNullException (nameof (dirNormalRows));
@@ -44,7 +44,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 	public static class DirDatasetBuilder
 		{
 		public static DirDataset Build (
-			IReadOnlyList<DataRow> allRows,
+			IReadOnlyList<BacktestRecord> allRows,
 			DateTime trainUntilUtc,
 			bool balanceDir,
 			double balanceTargetFrac,

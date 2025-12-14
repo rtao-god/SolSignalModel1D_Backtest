@@ -1,17 +1,18 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
 	/// <summary>
 	/// Жёсткий тест на утечки в RowBuilder:
-	/// фичи DataRow за день D НЕ должны зависеть от свечей и минуток
+	/// фичи BacktestRecord за день D НЕ должны зависеть от свечей и минуток
 	/// после baseline-exit (t_exit).
 	/// </summary>
 	public sealed class RowBuilderFutureTailLeakageTests
@@ -108,8 +109,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var dxy = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			var firstDate = start.Date.AddDays (-60);
-			var lastDate = start.Date.AddDays (400);
+			var startDay = start.ToCausalDateUtc ();
+			var firstDate = startDay.AddDays (-60);
+			var lastDate = startDay.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -175,8 +177,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
@@ -185,10 +187,10 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			Assert.Equal (rowA!.Label, rowB!.Label);
 
 			// а фичи — тоже
-			Assert.Equal (rowA.Features.Length, rowB.Features.Length);
-			for (int i = 0; i < rowA.Features.Length; i++)
+			Assert.Equal (rowA.Causal.Features.Length, rowB.Causal.Features.Length);
+			for (int i = 0; i < rowA.Causal.Features.Length; i++)
 				{
-				Assert.Equal (rowA.Features[i], rowB.Features[i], 10);
+				Assert.Equal (rowA.Causal.Features[i], rowB.Causal.Features[i], 10);
 				}
 			}
 		}

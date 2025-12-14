@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
@@ -22,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 		/// Сценарий:
 		///
 		/// 1) Строим один утренний день:
-		///    - есть DataRow с IsMorning = true;
+		///    - есть BacktestRecord с IsMorning = true;
 		///    - есть 6h-свеча для entry (Close > 0);
 		///    - есть 1m-окно после entry, где уже в первой минуте
 		///      одновременно срабатывают и TP, и SL → SlOfflineBuilder
@@ -52,10 +53,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			Assert.True (exitUtc > entryUtc);
 
-			// Один утренний DataRow.
-			var rows = new List<DataRow>
+			// Один утренний BacktestRecord.
+			var rows = new List<BacktestRecord>
 			{
-				new DataRow
+				new BacktestRecord
 				{
 					Date = entryUtc,
 					IsMorning = true,
@@ -131,7 +132,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 
 			// И в MorningRows такой день тоже не должен остаться,
 			// т.к. он релевантен только сэмплам, которые отрезаны.
-			Assert.DoesNotContain (ds.MorningRows, r => r.Date == entryUtc);
+			Assert.DoesNotContain (ds.MorningRows, r => r.Causal.DateUtc == entryUtc);
 			}
 		}
 	}

@@ -30,14 +30,14 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		[Fact]
 		public void DailyMoveAndDir_Training_IsFutureBlind_ToTailMutation ()
 			{
-			// 1. Строим синтетическую историю DataRow.
+			// 1. Строим синтетическую историю BacktestRecord.
 			var allRows = BuildSyntheticRows (count: 400);
 
 			const int HoldoutDays = 120;
 			var maxDate = allRows.Last ().Date;
 			var trainUntilUtc = maxDate.AddDays (-HoldoutDays);
 
-			Assert.Contains (allRows, r => r.Date > trainUntilUtc);
+			Assert.Contains (allRows, r => r.Causal.DateUtc > trainUntilUtc);
 
 			// 2. Две копии: A — оригинал, B — с жёстко замутивированным хвостом.
 			var rowsA = CloneRows (allRows);
@@ -91,9 +91,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 		// === вспомогательные методы ===
 
-		private static List<DataRow> BuildSyntheticRows ( int count )
+		private static List<BacktestRecord> BuildSyntheticRows ( int count )
 			{
-			var rows = new List<DataRow> (count);
+			var rows = new List<BacktestRecord> (count);
 			var start = new DateTime (2021, 10, 1, 8, 0, 0, DateTimeKind.Utc);
 
 			for (var i = 0; i < count; i++)
@@ -111,7 +111,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					label
 				};
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = date,
 					Label = label,
@@ -120,21 +120,21 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					});
 				}
 
-			return rows.OrderBy (r => r.Date).ToList ();
+			return rows.OrderBy (r => r.Causal.DateUtc).ToList ();
 			}
 
-		private static List<DataRow> CloneRows ( List<DataRow> src )
+		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
 			{
-			var res = new List<DataRow> (src.Count);
+			var res = new List<BacktestRecord> (src.Count);
 
 			foreach (var r in src)
 				{
-				res.Add (new DataRow
+				res.Add (new BacktestRecord
 					{
-					Date = r.Date,
-					Label = r.Label,
+					Date = r.Causal.DateUtc,
+					Label = r.Forward.TrueLabel,
 					RegimeDown = r.RegimeDown,
-					Features = r.Features?.ToArray () ?? Array.Empty<double> ()
+					Features = r.Causal.Features?.ToArray () ?? Array.Empty<double> ()
 					});
 				}
 
@@ -144,22 +144,22 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// <summary>
 		/// Мутируем только хвост Date &gt; trainUntilUtc, имитируя "инородное будущее".
 		/// </summary>
-		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntilUtc )
+		private static void MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntilUtc )
 			{
-			foreach (var r in rows.Where (r => r.Date > trainUntilUtc))
+			foreach (var r in rows.Where (r => r.Causal.DateUtc > trainUntilUtc))
 				{
-				r.Label = 2;
+				r.Forward.TrueLabel = 2;
 				r.RegimeDown = !r.RegimeDown;
 
-				if (r.Features is { Length: > 0 })
+				if (r.Causal.Features is { Length: > 0 })
 					{
-					for (var i = 0; i < r.Features.Length; i++)
-						r.Features[i] = 10_000.0 + i;
+					for (var i = 0; i < r.Causal.Features.Length; i++)
+						r.Causal.Features[i] = 10_000.0 + i;
 					}
 				}
 			}
 
-		private static void AssertRowsEqual ( IReadOnlyList<DataRow> xs, IReadOnlyList<DataRow> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<BacktestRecord> xs, IReadOnlyList<BacktestRecord> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
@@ -168,12 +168,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Date, b.Date);
-				Assert.Equal (a.Label, b.Label);
+				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 				Assert.Equal (a.RegimeDown, b.RegimeDown);
 
-				var fa = a.Features ?? Array.Empty<double> ();
-				var fb = b.Features ?? Array.Empty<double> ();
+				var fa = a.Causal.Features ?? Array.Empty<double> ();
+				var fb = b.Causal.Features ?? Array.Empty<double> ();
 
 				Assert.Equal (fa.Length, fb.Length);
 				for (var j = 0; j < fa.Length; j++)
@@ -181,7 +181,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				}
 			}
 
-		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<DataRow> rows )
+		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<BacktestRecord> rows )
 			{
 			if (bundle.MoveModel == null || rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -191,8 +191,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label != 1,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.Forward.TrueLabel != 1,
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 					}));
 
 			var scored = bundle.MoveModel.Transform (data);
@@ -200,7 +200,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
-		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<DataRow> rows )
+		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<BacktestRecord> rows )
 			{
 			if ((bundle.DirModelNormal == null && bundle.DirModelDown == null) || rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -210,8 +210,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label == 2, // up = true, down = false
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.Forward.TrueLabel == 2, // up = true, down = false
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 					}));
 
 			// Выбор модели зависит от поднабора, который подаётся в тест (normal vs down).

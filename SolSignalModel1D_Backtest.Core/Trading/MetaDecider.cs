@@ -6,7 +6,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 	public static class MetaDecider
 		{
 		public static int AdjustByLiquidityAndFibo (
-			DataRow r,
+			BacktestRecord r,
 			int predClass,
 			double liqThresh = 0.004,
 			double fiboThresh = 0.03 // фибо дальше → игнор
@@ -14,40 +14,40 @@ namespace SolSignalModel1D_Backtest.Core.Trading
 			{
 			int result = predClass;
 
-			bool hasLiqUp = r.LiqUpRel > 0;
-			bool hasLiqDown = r.LiqDownRel > 0;
-			bool hasFiboUp = r.FiboUpRel > 0;
-			bool hasFiboDown = r.FiboDownRel > 0;
+			bool hasLiqUp = r.Causal.LiqUpRel > 0;
+			bool hasLiqDown = r.Causal.LiqDownRel > 0;
+			bool hasFiboUp = r.Causal.FiboUpRel > 0;
+			bool hasFiboDown = r.Causal.FiboDownRel > 0;
 
 			if (predClass == 1)
 				{
 				if (hasLiqUp &&
-					(!hasLiqDown || r.LiqUpRel < r.LiqDownRel) &&
-					r.LiqUpRel < liqThresh &&
+					(!hasLiqDown || r.Causal.LiqUpRel < r.Causal.LiqDownRel) &&
+					r.Causal.LiqUpRel < liqThresh &&
 					!r.RegimeDown)
 					{
 					result = 2;
 					}
 				else if (hasLiqDown &&
-						 (!hasLiqUp || r.LiqDownRel < r.LiqUpRel) &&
-						 r.LiqDownRel < liqThresh)
+						 (!hasLiqUp || r.Causal.LiqDownRel < r.Causal.LiqUpRel) &&
+						 r.Causal.LiqDownRel < liqThresh)
 					{
 					result = 0;
 					}
 				else
 					{
 					if (hasFiboUp &&
-						(!hasFiboDown || r.FiboUpRel < r.FiboDownRel) &&
-						r.FiboUpRel > 0 &&
-						r.FiboUpRel < fiboThresh &&
+						(!hasFiboDown || r.Causal.FiboUpRel < r.Causal.FiboDownRel) &&
+						r.Causal.FiboUpRel > 0 &&
+						r.Causal.FiboUpRel < fiboThresh &&
 						!r.RegimeDown)
 						{
 						result = 2;
 						}
 					else if (hasFiboDown &&
-							 (!hasFiboUp || r.FiboDownRel < r.FiboUpRel) &&
-							 r.FiboDownRel > 0 &&
-							 r.FiboDownRel < fiboThresh)
+							 (!hasFiboUp || r.Causal.FiboDownRel < r.Causal.FiboUpRel) &&
+							 r.Causal.FiboDownRel > 0 &&
+							 r.Causal.FiboDownRel < fiboThresh)
 						{
 						result = 0;
 						}

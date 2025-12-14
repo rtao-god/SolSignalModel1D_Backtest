@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -72,7 +73,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 			}
 
 		/// <summary>
-		/// Единая точка разбиения любых сущностей по entryUtc (DataRow.Date, Record.DateUtc и т.п.).
+		/// Единая точка разбиения любых сущностей по entryUtc (BacktestRecord.Causal.DateUtc, Record.DateUtc и т.п.).
 		/// Excluded — это дни, для которых baseline-exit не определён (обычно weekend).
 		/// Их важно не "молча" относить ни к train, ни к OOS.
 		/// </summary>

@@ -141,8 +141,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			var solAll1m = BuildMinuteSeriesFrom6h (solAll6h);
 
 			// --- 2. Макро-ряды FNG/DXY: ровные, без шума, только чтобы RowBuilder не падал ---
-			var firstDate = solAll6h.First ().OpenTimeUtc.Date.AddDays (-120);
-			var lastDate = solAll6h.Last ().OpenTimeUtc.Date.AddDays (120);
+			var firstDate = solAll6h.First ().OpenTimeUtc.Causal.DateUtc.AddDays (-120);
+			var lastDate = solAll6h.Last ().OpenTimeUtc.Causal.DateUtc.AddDays (120);
 
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
@@ -157,7 +157,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			// --- 3. Строим DataRow через боевой RowBuilder ---
+			// --- 3. Строим BacktestRecord через боевой RowBuilder ---
 			var rows = RowBuilder.BuildRowsDaily (
 				solWinTrain: solAll6h,
 				btcWinTrain: btcAll6h,
@@ -172,12 +172,12 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			Assert.True (rows.Count > 200, $"Too few rows built for e2e test: {rows.Count}");
 
 			var ordered = rows
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			// --- 4. Диагностика таргетов на трене: Label не должен быть константой ---
 			var labelHist = ordered
-				.GroupBy (r => r.Label)
+				.GroupBy (r => r.Forward.TrueLabel)
 				.OrderBy (g => g.Key)
 				.ToDictionary (g => g.Key, g => g.Count ());
 
@@ -198,7 +198,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			DateTime trainUntil = maxDate.AddDays (-holdoutDays);
 
 			var trainRows = ordered
-				.Where (r => r.Date <= trainUntil)
+				.Where (r => r.Causal.DateUtc <= trainUntil)
 				.ToList ();
 
 			Assert.True (trainRows.Count >= 100,
@@ -216,7 +216,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			// --- 7. Гоним предсказания по OOS-части и смотрим распределение PredLabel ---
 			var evalRows = ordered
-				.Where (r => r.Date > trainUntil)
+				.Where (r => r.Causal.DateUtc > trainUntil)
 				.ToList ();
 
 			if (evalRows.Count < 100)
@@ -233,8 +233,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			foreach (var r in evalRows)
 				{
-				var p = engine.Predict (r);
-				preds.Add ((r.Label, p.Class));
+				var p = engine.PredictCausal (r.ToCausal ());
+				preds.Add ((r.Forward.TrueLabel, p.PredLabel));
 				}
 
 			Assert.NotEmpty (preds);

@@ -2,7 +2,7 @@
 	{
 	/// <summary>
 	/// Имена признаков для дневной / микро-модели.
-	/// Индекс строго соответствует порядку добавления фич в RowBuilder.Features.
+	/// Индекс строго соответствует порядку добавления фич в RowBuilder.Causal.Features.
 	/// </summary>
 	public static class DailyFeatureSchema
 		{
@@ -22,7 +22,7 @@
 			{
 			var names = new string[MlSchema.FeatureCount];
 
-			// Порядок 1:1 с RowBuilder.Features
+			// Порядок 1:1 с RowBuilder.Causal.Features
 			names[0] = "SolRet30";
 			names[1] = "BtcRet30";
 			names[2] = "SolBtcRet30";

@@ -14,7 +14,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 		{
 		private const int MinMicroRowsForTraining = 40;
 
-		public static ITransformer? BuildMicroFlatModel ( MLContext ml, IReadOnlyList<DataRow> rows )
+		public static ITransformer? BuildMicroFlatModel ( MLContext ml, IReadOnlyList<BacktestRecord> rows )
 			{
 			if (ml == null) throw new ArgumentNullException (nameof (ml));
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
@@ -69,8 +69,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 			int take = Math.Min (upCount, dnCount);
 
 			// Берём первые take элементов каждого класса, сохраняя хронологию без сортировок.
-			var upBalanced = new List<DataRow> (take);
-			var dnBalanced = new List<DataRow> (take);
+			var upBalanced = new List<BacktestRecord> (take);
+			var dnBalanced = new List<BacktestRecord> (take);
 
 			int upNeed = take;
 			int dnNeed = take;
@@ -101,7 +101,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				}
 
 			// Слияние двух отсортированных (по времени) списков без OrderBy.
-			var flats = new List<DataRow> (take * 2);
+			var flats = new List<BacktestRecord> (take * 2);
 			int iu = 0, id = 0;
 
 			while (iu < upBalanced.Count && id < dnBalanced.Count)
@@ -122,7 +122,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 			foreach (var r in flats)
 				{
-				var feats = MlTrainingUtils.ToFloatFixed (r.Features);
+				var feats = MlTrainingUtils.ToFloatFixed (r.Causal.Features);
 
 				if (feats == null)
 					{
@@ -193,7 +193,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				}
 			}
 
-		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<DataRow> rows, TimeZoneInfo nyTz )
+		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<BacktestRecord> rows, TimeZoneInfo nyTz )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));

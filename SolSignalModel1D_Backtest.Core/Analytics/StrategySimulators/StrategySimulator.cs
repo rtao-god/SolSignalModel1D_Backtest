@@ -4,7 +4,7 @@ using System.Linq;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 	{
@@ -31,7 +31,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 		/// - набором параметров StrategyParameters.
 		/// </summary>
 		public static StrategyStats Run (
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			StrategyParameters parameters )
@@ -98,7 +98,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 			for (int i = 0; i < days; i++)
 				{
 				var row = mornings[i];
-				DateTime entryTimeUtc = row.Date;
+				DateTime entryTimeUtc = row.Causal.DateUtc;
 				DateTime exitUtc = ComputeExitWindow (entryTimeUtc, nyTz);
 
 				// Сдвигаем указатель входа до первой свечи с t >= entryTimeUtc.
@@ -154,7 +154,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				bool isLongBase = dirSign > 0;   // +1 = лонг, -1 = шорт
 
 				// Время входа — дата дневной строки (NY-утро вью).
-				DateTime entryTimeUtc = row.Date;
+				DateTime entryTimeUtc = row.Causal.DateUtc;
 
 				// Индексы минуток для текущего дня.
 				var (startIndex, endIndex) = dayRanges[i];
@@ -544,7 +544,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 		private static DateTime ComputeExitWindow ( DateTime entryTimeUtc, TimeZoneInfo nyTz )
 			{
 			var entryLocal = TimeZoneInfo.ConvertTimeFromUtc (entryTimeUtc, nyTz);
-			var exitDateLocal = entryLocal.Date.AddDays (1);
+			var exitDateLocal = entryLocal.Causal.DateUtc.AddDays (1);
 
 			if (exitDateLocal.DayOfWeek == DayOfWeek.Saturday)
 				exitDateLocal = exitDateLocal.AddDays (2);

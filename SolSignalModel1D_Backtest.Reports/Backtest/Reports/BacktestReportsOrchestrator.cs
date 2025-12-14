@@ -76,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// - policy_ratios (Sharpe/Sortino/Calmar по политикам baseline).
 		/// </summary>
 		public static void SaveBacktestReports (
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
@@ -376,8 +376,8 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 					storage.Save (report);
 					}
 
-				var minDateUtc = snapshots.First ().PredictionDateUtc.Date;
-				var maxDateUtc = snapshots.Last ().PredictionDateUtc.Date;
+				var minDateUtc = snapshots.First ().PredictionDateUtc.Causal.DateUtc;
+				var maxDateUtc = snapshots.Last ().PredictionDateUtc.Causal.DateUtc;
 
 				Console.WriteLine (
 					$"[current-report-history] saved {snapshots.Count} current_prediction reports " +
@@ -391,7 +391,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 
 		/// <summary>
 		/// Строит и сохраняет отчёт "текущий прогноз" за конкретную дату (UTC).
-		/// Берётся последняя PredictionRecord с DateUtc.Date == predictionDateUtc.Date.
+		/// Берётся последняя PredictionRecord с DateUtc.Causal.DateUtc == predictionDateUtc.Causal.DateUtc.
 		/// Это заготовка под API/фронт для выбора даты из всей выборки.
 		/// </summary>
 		public static void SaveCurrentPredictionReportForDate (

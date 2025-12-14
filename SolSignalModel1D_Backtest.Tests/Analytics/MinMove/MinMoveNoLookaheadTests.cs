@@ -9,7 +9,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 	/// <summary>
 	/// Тест на отсутствие lookahead в MinMoveEngine:
 	/// результат ComputeAdaptive(asOfUtc, ...) не должен зависеть от historyRows
-	/// с датами строго > asOfUtc.Date.
+	/// с датами строго > asOfUtc.Causal.DateUtc.
 	/// </summary>
 	public sealed class MinMoveNoLookaheadTests
 		{
@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 			{
 			// Строим длинную историю historyRows (400 дней),
 			// так чтобы для asOfUtc была и приличная "прошлая" выборка, и "будущее".
-			var historyBase = new List<DataRow> ();
+			var historyBase = new List<BacktestRecord> ();
 			var firstDate = new DateTime (2020, 1, 1, 8, 0, 0, DateTimeKind.Utc);
 			int totalDays = 400;
 
@@ -30,12 +30,12 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				double up = 0.01 + 0.0001 * i;
 				double down = -0.008 - 0.00005 * i;
 
-				var row = new DataRow
+				var row = new BacktestRecord
 					{
 					Date = dt,
 					PathReachedUpPct = up,
 					PathReachedDownPct = down,
-					// Остальные поля DataRow здесь не важны для MinMoveEngine,
+					// Остальные поля BacktestRecord здесь не важны для MinMoveEngine,
 					// но при необходимости могут быть заполнены дефолтами.
 					};
 
@@ -75,24 +75,24 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				cfg: cfg,
 				state: stateA);
 
-			// Сценарий B: копия истории, но "будущее" после asOfUtc.Date
+			// Сценарий B: копия истории, но "будущее" после asOfUtc.Causal.DateUtc
 			// жёстко мутируется (амплитуды path становятся огромными).
-			var historyMutated = new List<DataRow> (historyBase.Count);
+			var historyMutated = new List<BacktestRecord> (historyBase.Count);
 			foreach (var r in historyBase)
 				{
-				var clone = new DataRow
+				var clone = new BacktestRecord
 					{
-					Date = r.Date,
-					PathReachedUpPct = r.PathReachedUpPct,
-					PathReachedDownPct = r.PathReachedDownPct
+					Date = r.Causal.DateUtc,
+					PathReachedUpPct = r.Forward.PathReachedUpPct,
+					PathReachedDownPct = r.Forward.PathReachedDownPct
 					};
 
-				if (clone.Date.Date > asOfUtc.Date)
+				if (clone.Causal.DateUtc.Date > asOfUtc.Causal.DateUtc)
 					{
 					// Сильно увеличиваем амплитуды, чтобы эффект точно был заметен,
 					// если MinMoveEngine вдруг смотрит в будущее.
-					clone.PathReachedUpPct = 0.5;
-					clone.PathReachedDownPct = -0.5;
+					clone.Forward.PathReachedUpPct = 0.5;
+					clone.Forward.PathReachedDownPct = -0.5;
 					}
 
 				historyMutated.Add (clone);
@@ -108,7 +108,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				state: stateB);
 
 			// Проверяем, что результаты полностью совпадают:
-			// будущее (Date > asOf.Date) не должно влиять на MinMove/Vol/Q.
+			// будущее (Date > asOf.Causal.DateUtc) не должно влиять на MinMove/Vol/Q.
 			Assert.Equal (resultA.MinMove, resultB.MinMove, 10);
 			Assert.Equal (resultA.LocalVol, resultB.LocalVol, 10);
 			Assert.Equal (resultA.EwmaVol, resultB.EwmaVol, 10);
@@ -117,7 +117,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 			// Заодно убеждаемся, что состояние тоже не зависит от future-части.
 			Assert.Equal (stateA.EwmaVol, stateB.EwmaVol, 10);
 			Assert.Equal (stateA.QuantileQ, stateB.QuantileQ, 10);
-			Assert.Equal (stateA.LastQuantileTune.Date, stateB.LastQuantileTune.Date);
+			Assert.Equal (stateA.LastQuantileTune.Causal.DateUtc, stateB.LastQuantileTune.Causal.DateUtc);
 			}
 		}
 	}

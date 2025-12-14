@@ -6,7 +6,6 @@ using SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -194,18 +193,18 @@ namespace SolSignalModel1D_Backtest
 
 			Console.WriteLine ($"[daily] train size = {train.Count}, oos size = {oos.Count}");
 
-			Console.WriteLine ("[daily] train TrueLabel hist: " + Hist (train.Select (r => r.Causal.TrueLabel)));
-			Console.WriteLine ("[daily] train PredLabel hist: " + Hist (train.Select (r => r.Causal.PredLabel)));
+			Console.WriteLine ("[daily] train TrueLabel hist: " + Hist (train.Select (r => r.TrueLabel)));
+			Console.WriteLine ("[daily] train PredLabel hist: " + Hist (train.Select (r => r.PredLabel)));
 
 			if (oos.Count > 0)
 				{
-				Console.WriteLine ("[daily] oos TrueLabel hist: " + Hist (oos.Select (r => r.Causal.TrueLabel)));
-				Console.WriteLine ("[daily] oos PredLabel hist: " + Hist (oos.Select (r => r.Causal.PredLabel)));
+				Console.WriteLine ("[daily] oos TrueLabel hist: " + Hist (oos.Select (r => r.TrueLabel)));
+				Console.WriteLine ("[daily] oos PredLabel hist: " + Hist (oos.Select (r => r.PredLabel)));
 				}
 			}
 
 		private static void DumpDailyAccuracyWithDatasetSplit (
-			List<DataRow> allRows,
+			List<BacktestRecord> allRows,
 			List<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
@@ -220,7 +219,7 @@ namespace SolSignalModel1D_Backtest
 				datesToExclude: null
 			);
 
-			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.Date));
+			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.Causal.DateUtc));
 
 			var trainRecords = new List<BacktestRecord> (trainDates.Count);
 			foreach (var r in records)
@@ -240,7 +239,7 @@ namespace SolSignalModel1D_Backtest
 				for (int i = 0; i < xs.Count; i++)
 					{
 					var r = xs[i];
-					if (r.Causal.PredLabel == r.Causal.TrueLabel)
+					if (r.PredLabel_Total == r.TrueLabel)
 						ok++;
 					}
 

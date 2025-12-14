@@ -3,6 +3,7 @@ using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
@@ -13,7 +14,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
 	{
@@ -67,7 +68,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 					dxySeries: dxyHistory,
 					extraDaily: null,
 					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			Assert.NotEmpty (rowsAAll);
@@ -96,17 +97,17 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 					dxySeries: dxyHistory,
 					extraDaily: null,
 					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
-			var splitA = boundary.Split (rowsAAll, r => r.Date);
-			var splitB = boundary.Split (rowsBAll, r => r.Date);
+			var splitA = boundary.Split (rowsAAll, r => r.Causal.DateUtc);
+			var splitB = boundary.Split (rowsBAll, r => r.Causal.DateUtc);
 
 			Assert.Empty (splitA.Excluded);
 			Assert.Empty (splitB.Excluded);
 
-			var trainRowsA = splitA.Train.OrderBy (r => r.Date).ToList ();
-			var trainRowsB = splitB.Train.OrderBy (r => r.Date).ToList ();
+			var trainRowsA = splitA.Train.OrderBy (r => r.Causal.DateUtc).ToList ();
+			var trainRowsB = splitB.Train.OrderBy (r => r.Causal.DateUtc).ToList ();
 
 			Assert.NotEmpty (trainRowsA);
 			Assert.Equal (trainRowsA.Count, trainRowsB.Count);
@@ -153,7 +154,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			AssertBinaryOutputsEqual (slPredsA, slPredsB);
 			}
 
-		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<DataRow> rows )
+		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<BacktestRecord> rows )
 			{
 			if (bundle.MoveModel == null || rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -163,8 +164,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label != 1,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.Forward.TrueLabel != 1,
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 					}));
 
 			var scored = bundle.MoveModel.Transform (data);
@@ -172,7 +173,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
-		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<DataRow> rows )
+		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<BacktestRecord> rows )
 			{
 			if ((bundle.DirModelNormal == null && bundle.DirModelDown == null) || rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -182,8 +183,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label == 2,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.Forward.TrueLabel == 2,
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 					}));
 
 			ITransformer? model = rows.Any (r => r.RegimeDown) ? bundle.DirModelDown : bundle.DirModelNormal;
@@ -202,8 +203,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			var data = ml.Data.LoadFromEnumerable (
 				samples.Select (s => new SlEvalRow
 					{
-					Label = s.Label,
-					Features = s.Features ?? Array.Empty<float> ()
+					Label = s.Forward.TrueLabel,
+					Features = s.Causal.Features ?? Array.Empty<float> ()
 					}));
 
 			var scored = model.Transform (data);
@@ -223,7 +224,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				}
 			}
 
-		private static void AssertRowsEqual ( IReadOnlyList<DataRow> xs, IReadOnlyList<DataRow> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<BacktestRecord> xs, IReadOnlyList<BacktestRecord> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
@@ -232,14 +233,14 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Date, b.Date);
-				Assert.Equal (a.Label, b.Label);
-				Assert.Equal (a.IsMorning, b.IsMorning);
+				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
+				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.MinMove, b.MinMove);
 				Assert.Equal (a.RegimeDown, b.RegimeDown);
 
-				var fa = a.Features ?? Array.Empty<double> ();
-				var fb = b.Features ?? Array.Empty<double> ();
+				var fa = a.Causal.Features ?? Array.Empty<double> ();
+				var fb = b.Causal.Features ?? Array.Empty<double> ();
 
 				Assert.Equal (fa.Length, fb.Length);
 				for (int j = 0; j < fa.Length; j++)

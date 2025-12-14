@@ -1,54 +1,54 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Utils
 	{
 	/// <summary>
 	/// Общие хелперы для подготовки данных к ML.NET:
-	/// - конвертация double[] → float[] фиксированной длины;
-	/// - простой oversample для бинарных задач по DataRow.
+	/// - строгая конвертация double[]/FeaturesVector -> float[] фиксированной длины;
+	/// - oversample для бинарных задач без привязки к legacy DTO.
 	/// </summary>
 	public static class MlTrainingUtils
 		{
-		/// <summary>
-		/// Конвертирует массив double в float[], обрезая/заполняя до MlSchema.FeatureCount.
-		/// Это гарантирует стабильный размер фичей под ML.NET.
-		/// </summary>
-		public static float[] ToFloatFixed ( double[] src )
+		public static float[] ToFloatFixed ( ReadOnlyMemory<double> featuresVector )
 			{
-			var f = new float[MlSchema.FeatureCount];
+			var src = featuresVector.Span;
+			int expected = CausalDataRow.FeatureCount;
 
-			if (src == null || src.Length == 0)
-				return f;
+			if (src.Length != expected)
+				{
+				throw new InvalidOperationException (
+					$"[MlTrainingUtils] Feature vector length mismatch. got={src.Length}, expected={expected}. " +
+					"Это значит, что код генерации фичей рассинхронизирован с CausalDataRow.FeatureNames.");
+				}
 
-			int len = Math.Min (src.Length, MlSchema.FeatureCount);
-			for (int i = 0; i < len; i++)
+			var f = new float[expected];
+			for (int i = 0; i < expected; i++)
 				f[i] = (float) src[i];
 
 			return f;
 			}
 
 		/// <summary>
-		/// Простое oversample для бинарной задачи на DataRow:
-		/// - major = более частый класс,
-		/// - minor = более редкий класс,
+		/// Oversample бинарной задачи:
 		/// - minor дублируется, пока его размер не достигнет major * targetFrac.
-		/// Порядок по дате сохраняется.
+		/// - сортировка по времени сохраняет каузальный порядок.
 		/// </summary>
-		public static List<DataRow> OversampleBinary (
-			List<DataRow> src,
-			Func<DataRow, bool> isPositive,
+		public static List<T> OversampleBinary<T> (
+			IReadOnlyList<T> src,
+			Func<T, bool> isPositive,
+			Func<T, DateTime> dateSelector,
 			double targetFrac )
 			{
 			if (src == null) throw new ArgumentNullException (nameof (src));
 			if (isPositive == null) throw new ArgumentNullException (nameof (isPositive));
+			if (dateSelector == null) throw new ArgumentNullException (nameof (dateSelector));
+			if (targetFrac <= 0.0) throw new ArgumentOutOfRangeException (nameof (targetFrac));
 
 			var pos = src.Where (isPositive).ToList ();
-			var neg = src.Where (r => !isPositive (r)).ToList ();
+			var neg = src.Where (x => !isPositive (x)).ToList ();
 
-			// если какой-то класс пустой — ничего не делаем, чтобы не плодить мусор
 			if (pos.Count == 0 || neg.Count == 0)
-				return src;
+				return src.ToList ();
 
 			bool posIsMajor = pos.Count >= neg.Count;
 			int major = posIsMajor ? pos.Count : neg.Count;
@@ -56,20 +56,19 @@ namespace SolSignalModel1D_Backtest.Core.ML.Utils
 
 			int target = (int) Math.Round (major * targetFrac, MidpointRounding.AwayFromZero);
 			if (target <= minor)
-				return src;
+				return src.ToList ();
 
 			var minorList = posIsMajor ? neg : pos;
 
-			var res = new List<DataRow> (src.Count + (target - minor));
+			var res = new List<T> (src.Count + (target - minor));
 			res.AddRange (src);
 
 			int need = target - minor;
 			for (int i = 0; i < need; i++)
 				res.Add (minorList[i % minorList.Count]);
 
-			// сортировка по времени, чтобы сохранить каузальный порядок
 			return res
-				.OrderBy (r => r.Date)
+				.OrderBy (dateSelector)
 				.ToList ();
 			}
 		}

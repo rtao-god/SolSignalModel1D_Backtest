@@ -4,14 +4,14 @@ using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Trainers.LightGbm;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	/// <summary>
-	/// SL-классификатор: учим только на прошлых сэмплах, свежим — больший вес,
-	/// и дополнительно усиливаем TP до x3, чтобы модель не выкидывала хорошие дни.
+	/// SL-классификатор: учим на прошлых сэмплах, свежим — больший вес,
+	/// и дополнительно усиливаем TP, чтобы модель не “залипала” в SL.
 	/// </summary>
 	public sealed class SlFirstTrainer
 		{
@@ -19,28 +19,34 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 
 		private sealed class SlHitTrainRow
 			{
+			// Label=true означает "SL first" (как в SlOfflineBuilder).
 			public bool Label { get; set; }
 
 			[VectorType (MlSchema.FeatureCount)]
 			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
 
+			// Вес примера (время + ребаланс классов).
 			public float Weight { get; set; }
 			}
 
 		public ITransformer Train ( List<SlHitSample> samples, DateTime asOfUtc )
 			{
 			if (samples == null || samples.Count == 0)
-				throw new InvalidOperationException ("No SL samples to train.");
+				throw new InvalidOperationException ("[sl-model] No SL samples to train.");
+
+			if (asOfUtc == default || asOfUtc.Kind != DateTimeKind.Utc)
+				throw new ArgumentException ("asOfUtc must be initialized and UTC.", nameof (asOfUtc));
 
 			var trainRows = new List<SlHitTrainRow> (samples.Count);
 
 			foreach (var s in samples)
 				{
+				// Контракт: SlHitSample.EntryUtc — UTC, и не позже asOfUtc.
 				double ageDays = (asOfUtc - s.EntryUtc).TotalDays;
-				if (ageDays < 0) ageDays = 0;
+				if (ageDays < 0) ageDays = 0; // защита от случайной рассинхронизации дат
 				double ageMonths = ageDays / 30.0;
 
-				// затухание по времени
+				// Временной вес: свежие важнее.
 				float timeWeight =
 					ageMonths <= 3.0 ? 1.0f :
 					ageMonths <= 6.0 ? 0.7f :
@@ -57,22 +63,22 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			int slCount = trainRows.Count (r => r.Label);
 			int tpCount = trainRows.Count - slCount;
 
+			// Доп. ребаланс: обычно SL > TP → усиливаем TP, но ограничиваем множитель.
 			if (slCount > 0 && tpCount > 0)
 				{
-				// у нас обычно SL > TP → поднимаем TP сильнее, до x3
 				if (tpCount < slCount)
 					{
-					// ratio = во сколько раз SL больше TP
 					double ratio = slCount / (double) tpCount;
 					float mul = (float) Math.Min (ratio, 3.0); // максимум x3
+
 					foreach (var r in trainRows.Where (x => !x.Label))
 						r.Weight *= mul;
 					}
 				else if (slCount < tpCount)
 					{
-					// наоборот сильно не надо, но чуть можно
 					double ratio = tpCount / (double) slCount;
-					float mul = (float) Math.Min (ratio, 1.5);
+					float mul = (float) Math.Min (ratio, 1.5); // слегка, чтобы не перекосить обратно
+
 					foreach (var r in trainRows.Where (x => x.Label))
 						r.Weight *= mul;
 					}
@@ -86,20 +92,26 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				NumberOfIterations = 90,
 				LearningRate = 0.07f,
 				MinimumExampleCountPerLeaf = 15,
+
 				LabelColumnName = nameof (SlHitTrainRow.Label),
 				FeatureColumnName = nameof (SlHitTrainRow.Features),
 				ExampleWeightColumnName = nameof (SlHitTrainRow.Weight),
+
 				Seed = 42,
 				NumberOfThreads = 1
 				};
 
 			var model = _ml.BinaryClassification.Trainers.LightGbm (opts).Fit (data);
-			Console.WriteLine ($"[sl-model] trained on {trainRows.Count} samples (SL={slCount}, TP={tpCount}) asOf={asOfUtc:yyyy-MM-dd}");
+
+			Console.WriteLine (
+				$"[sl-model] trained on {trainRows.Count} samples (SL={slCount}, TP={tpCount}) asOf={asOfUtc:yyyy-MM-dd}");
+
 			return model;
 			}
 
 		public PredictionEngine<SlHitSample, SlHitPrediction> CreateEngine ( ITransformer model )
 			{
+			if (model == null) throw new ArgumentNullException (nameof (model));
 			return _ml.Model.CreatePredictionEngine<SlHitSample, SlHitPrediction> (model);
 			}
 
@@ -107,15 +119,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			{
 			var arr = new float[MlSchema.FeatureCount];
 			if (src == null) return arr;
+
 			int len = Math.Min (src.Length, MlSchema.FeatureCount);
 			Array.Copy (src, arr, len);
 			return arr;
 			}
 
 		/// <summary>
-		/// PFI + direction для SL-модели на произвольном наборе SlHitSample
-		/// (train / test / holdout). Весами здесь не пользуемся — все Weight=1.
-		/// Модель не переобучается, только логируется важность фич.
+		/// PFI + direction для SL-модели на произвольном наборе SlHitSample (train/test/holdout).
 		/// </summary>
 		public void LogFeatureImportance (
 			ITransformer model,
@@ -132,7 +143,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				return;
 				}
 
-			// Для анализа дублируем структуру train-строки, но Weight ставим = 1.
 			var rows = list
 				.Select (s => new SlHitTrainRow
 					{

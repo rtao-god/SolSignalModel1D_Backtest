@@ -16,7 +16,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	public static class WindowTailPrinter
 		{
 		public static void PrintBlockTails (
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IEnumerable<BacktestPolicyResult> policyResults,
 			int takeDays = 20,
@@ -29,8 +29,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			if (takeDays <= 0) return;
 			if (mornings == null || mornings.Count == 0) return;
 
-			// быстрая мапа дата → DataRow
-			var byDate = mornings.ToDictionary (r => r.Date, r => r);
+			// быстрая мапа дата → BacktestRecord
+			var byDate = mornings.ToDictionary (r => r.Causal.DateUtc, r => r);
 
 			ConsoleStyler.WriteHeader ($"=== {title}: {takeDays} → {skipDays} ===");
 
@@ -47,16 +47,16 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				var lastRec = block[^1]; // последний день окна = последний из взятых записей
 
 				blockIdx++;
-				var blockStartDate = block.First ().DateUtc.Date;
-				var blockEndDate = lastRec.DateUtc.Date;
+				var blockStartDate = block.First ().DateUtc.Causal.DateUtc;
+				var blockEndDate = lastRec.DateUtc.Causal.DateUtc;
 
-				// ищем соответствующий DataRow
+				// ищем соответствующий BacktestRecord
 				byDate.TryGetValue (lastRec.DateUtc, out var dayRow);
 
 				// Заголовок блока
 				ConsoleStyler.WriteHeader ($"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {lastRec.DateUtc:yyyy-MM-dd} ---");
 
-				// Шапка дня (включая Path-based поля, если есть DataRow)
+				// Шапка дня (включая Path-based поля, если есть BacktestRecord)
 				PrintDayHead (dayRow, lastRec);
 
 				// Сделки всех политик за этот день
@@ -71,7 +71,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 		// ===== helpers =====
 
-		private static void PrintDayHead ( DataRow? row, BacktestRecord r )
+		private static void PrintDayHead ( BacktestRecord? row, BacktestRecord r )
 			{
 			var t = new TextTable ();
 			t.AddHeader ("field", "value");
@@ -84,19 +84,19 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			t.AddRow ("close24", r.Close24.ToString ("0.0000"));
 			t.AddRow ("minMove", (r.MinMove * 100.0).ToString ("0.00") + "%");
 
-			// Path-based блок: если DataRow найден
+			// Path-based блок: если BacktestRecord найден
 			if (row != null)
 				{
-				t.AddRow ("path dir", PathDirToStr (row.PathFirstPassDir));
+				t.AddRow ("path dir", PathDirToStr (row.Forward.PathFirstPassDir));
 				t.AddRow (
 					"path firstPass",
-					row.PathFirstPassTimeUtc.HasValue
-						? row.PathFirstPassTimeUtc.Value.ToString ("yyyy-MM-dd HH:mm")
+					row.Forward.PathFirstPassTimeUtc.HasValue
+						? row.Forward.PathFirstPassTimeUtc.Value.ToString ("yyyy-MM-dd HH:mm")
 						: "—"
 				);
 				t.AddRow (
 					"path up% / down%",
-					$"{row.PathReachedUpPct * 100.0:0.00}% / {row.PathReachedDownPct * 100.0:0.00}%"
+					$"{row.Forward.PathReachedUpPct * 100.0:0.00}% / {row.Forward.PathReachedDownPct * 100.0:0.00}%"
 				);
 				}
 
@@ -113,7 +113,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			foreach (var pr in policyResults.OrderBy (x => x.PolicyName))
 				{
 				var dayTrades = pr.Trades?
-					.Where (tr => tr.DateUtc.Date == dayUtc.Date)
+					.Where (tr => tr.DateUtc.Causal.DateUtc == dayUtc.Causal.DateUtc)
 					.OrderBy (tr => tr.EntryTimeUtc)
 					.ToList () ?? new List<PnLTrade> ();
 

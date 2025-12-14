@@ -15,7 +15,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// Утренние точки (NY-окна), по которым считаются сигналы и PnL.
 		/// Это тот же набор, который используется в baseline-бэктесте.
 		/// </summary>
-		public IReadOnlyList<DataRow> Mornings { get; init; } = Array.Empty<DataRow> ();
+		public IReadOnlyList<BacktestRecord> Mornings { get; init; } = Array.Empty<BacktestRecord> ();
 
 		/// <summary>
 		/// PredictionRecord со всеми нужными полями (dir/micro/SL/Delayed и т.п.),

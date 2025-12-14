@@ -17,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 		private const double DeepMaxDelayHours = 4.0;
 
 		public static List<PullbackContinuationSample> Build (
-			List<DataRow> rows,
+			List<BacktestRecord> rows,
 			IReadOnlyList<Candle1h> sol1h,
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
@@ -29,7 +29,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 
 			foreach (var r in rows)
 				{
-				if (!sol6hDict.TryGetValue (r.Date, out var day6h))
+				if (!sol6hDict.TryGetValue (r.Causal.DateUtc, out var day6h))
 					continue;
 
 				double entry = day6h.Close;
@@ -38,7 +38,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 				double minMove = r.MinMove;
 				if (minMove <= 0) minMove = 0.02;
 
-				DateTime entryUtc = r.Date;
+				DateTime entryUtc = r.Causal.DateUtc;
 				DateTime endUtc;
 				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
 				catch (Exception ex)
@@ -66,7 +66,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 
 		private static void BuildForDir (
 			List<PullbackContinuationSample> sink,
-			DataRow r,
+			BacktestRecord r,
 			List<Candle1h> dayHours,
 			IReadOnlyList<Candle1h> allHours,
 			double entryPrice,
@@ -78,7 +78,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			bool strong = true;
 
 			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				dayHours, r.Date, goLong, goShort, entryPrice, dayMinMove, strong, nyTz);
+				dayHours, r.Causal.DateUtc, goLong, goShort, entryPrice, dayMinMove, strong, nyTz);
 
 			if (baseOutcome.Result != HourlyTradeResult.SlFirst)
 				return;
@@ -86,7 +86,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			foreach (var f in DeepFactors)
 				{
 				var delayed = DelayedEntryEvaluator.Evaluate (
-					dayHours, r.Date, goLong, goShort, entryPrice, dayMinMove, strong, f, DeepMaxDelayHours);
+					dayHours, r.Causal.DateUtc, goLong, goShort, entryPrice, dayMinMove, strong, f, DeepMaxDelayHours);
 
 				bool label = false;
 
@@ -102,13 +102,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					}
 
 				var feats = TargetLevelFeatureBuilder.Build (
-					r.Date, goLong, strong, dayMinMove, entryPrice, allHours);
+					r.Causal.DateUtc, goLong, strong, dayMinMove, entryPrice, allHours);
 
 				sink.Add (new PullbackContinuationSample
 					{
 					Label = label,
 					Features = feats,
-					EntryUtc = r.Date
+					EntryUtc = r.Causal.DateUtc
 					});
 				}
 			}

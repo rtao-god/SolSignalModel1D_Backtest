@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 		// MAIN ENTRY
 		// =====================================================================
 		public void Run (
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<PolicySpec> policies,
 			BacktestConfig config )

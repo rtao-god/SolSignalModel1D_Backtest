@@ -59,8 +59,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 			var evalData = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label != 1,
-					 Features = MlTrainingUtils.ToFloatFixed(r.Features)
+					Label = r.Forward.TrueLabel != 1,
+					 Features = MlTrainingUtils.ToFloatFixed(r.Causal.Features)
 					}));
 
 			var predSignal = bundleSignal.MoveModel!.Transform (evalData);
@@ -81,10 +81,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				$"Accuracy with shuffled labels should drop, got {metricsShuffled.Accuracy:F3} vs {metricsSignal.Accuracy:F3}");
 			}
 
-		private static List<DataRow> BuildSyntheticDailyRowsForMove ( int count, int seed = 123 )
+		private static List<BacktestRecord> BuildSyntheticDailyRowsForMove ( int count, int seed = 123 )
 			{
 			var rng = new Random (seed);
-			var rows = new List<DataRow> (count);
+			var rows = new List<BacktestRecord> (count);
 
 			// Даты нужны только для каузальной сортировки и фильтрации по trainUntil.
 			// Берём будние дни по порядку, чтобы Windowing / DailyDatasetBuilder не спотыкались.
@@ -114,7 +114,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 						Math.Abs (score) // сила сигнала
 						};
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = date,
 					Label = label,
@@ -130,13 +130,13 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 			return rows;
 			}
 
-		private static List<DataRow> CloneRowsWithShuffledLabel ( List<DataRow> source, int seed = 999 )
+		private static List<BacktestRecord> CloneRowsWithShuffledLabel ( List<BacktestRecord> source, int seed = 999 )
 			{
 			var rng = new Random (seed);
 
 			// Берём все лейблы, перемешиваем отдельно от строк.
 			var labels = source
-				.Select (r => r.Label)
+				.Select (r => r.Forward.TrueLabel)
 				.ToList ();
 
 			// Фишер–Йетс
@@ -146,21 +146,21 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				(labels[i], labels[j]) = (labels[j], labels[i]);
 				}
 
-			var result = new List<DataRow> (source.Count);
+			var result = new List<BacktestRecord> (source.Count);
 
 			for (int i = 0; i < source.Count; i++)
 				{
 				var src = source[i];
 
 				// Клонируем строку, но подставляем перемешанный Label.
-				result.Add (new DataRow
+				result.Add (new BacktestRecord
 					{
-					Date = src.Date,
+					Date = src.Causal.DateUtc,
 					Label = labels[i],
-					Features = (double[]) src.Features.Clone (),
+					Features = (double[]) src.Causal.Features.Clone (),
 
 					RegimeDown = src.RegimeDown,
-					IsMorning = src.IsMorning,
+					IsMorning = src.Causal.IsMorning,
 
 					// Остальные поля в этих тестах не используются, 
 					// оставляем значения по умолчанию.

@@ -10,7 +10,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 	/// </summary>
 	public static class TrendMetaStopper
 		{
-		public static int Apply ( DataRow r, int predClass, out string reason )
+		public static int Apply ( BacktestRecord r, int predClass, out string reason )
 			{
 			reason = string.Empty;
 
@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			const double upAbsThresh = 0.10;
 			const double downAbsThresh = 0.10;
 
-			double ret30 = r.SolRet30;
+			double ret30 = r.Causal.SolRet30;
 
 			if (predClass == 2 && !r.RegimeDown && ret30 >= upAbsThresh)
 				{

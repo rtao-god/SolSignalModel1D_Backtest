@@ -1,24 +1,18 @@
 ﻿using System;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Domain;
 
 namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 	{
 	/// <summary>
-	/// Омнисциентная строка для аналитики: causal + forward.
-	/// Важно: тренировка/инференс должны принимать только CausalDataRow
-	/// (или прямо FeaturesVector из него), а не OmniscientDataRow.
+	/// Контейнер, объединяющий каузальные фичи и рассчитанные forward-исходы для одного дня.
+	/// Используется для аналитики, метрик и построения бэктестовых рекордов.
 	/// </summary>
-	public sealed class OmniscientDataRow : IHasDateUtc
+	public sealed class OmniscientDataRow ( CausalDataRow causal, ForwardOutcomes outcomes ) : IHasDateUtc
 		{
-		public CausalDataRow Causal { get; }
-		public ForwardOutcomesRow Outcomes { get; }
+		public CausalDataRow Causal { get; } = causal ?? throw new ArgumentNullException (nameof (causal));
+		public ForwardOutcomes Outcomes { get; } = outcomes ?? throw new ArgumentNullException (nameof (outcomes));
 
 		public DateTime DateUtc => Causal.DateUtc;
-
-		public OmniscientDataRow ( CausalDataRow causal, ForwardOutcomesRow outcomes )
-			{
-			Causal = causal ?? throw new ArgumentNullException (nameof (causal));
-			Outcomes = outcomes ?? throw new ArgumentNullException (nameof (outcomes));
-			}
 		}
 	}

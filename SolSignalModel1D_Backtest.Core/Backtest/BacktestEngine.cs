@@ -20,7 +20,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// Данные (mornings/records/candles1m/policies) ожидаются уже подготовленными.
 		/// </summary>
 		public static BacktestSummary RunBacktest (
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
@@ -37,8 +37,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (config == null)
 				throw new ArgumentNullException (nameof (config));
 
-			var fromDate = mornings.Min (r => r.Date);
-			var toDate = mornings.Max (r => r.Date);
+			var fromDate = mornings.Min (r => r.Causal.DateUtc);
+			var toDate = mornings.Max (r => r.Causal.DateUtc);
 
 			// Тот же набор веток, что и в RollingLoop:
 			// BASE/ANTI-D × WITH SL / NO SL.

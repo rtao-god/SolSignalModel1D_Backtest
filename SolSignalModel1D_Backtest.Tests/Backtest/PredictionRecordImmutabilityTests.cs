@@ -7,7 +7,7 @@ using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Tests.Backtest
 	{
@@ -116,7 +116,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 				}
 
 			var mornings = records
-				.Select (r => new DataRow
+				.Select (r => new BacktestRecord
 					{
 					Date = r.DateUtc,
 					Features = Array.Empty<double> (),

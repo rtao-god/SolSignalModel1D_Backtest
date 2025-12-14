@@ -31,14 +31,14 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			if (policyResults == null) throw new ArgumentNullException (nameof (policyResults));
 
 			var recByDate = records
-				.GroupBy (r => r.DateUtc.Date)
+				.GroupBy (r => r.DateUtc.Causal.DateUtc)
 				.ToDictionary (g => g.Key, g => g.First ());
 
 			var dict = new Dictionary<(string policy, string regime, MarginMode margin), (HashSet<DateTime> days, int trades, double pnlUsd)> ();
 
 			foreach (var pol in policyResults)
 				{
-				foreach (var dayGrp in pol.Trades.GroupBy (t => t.DateUtc.Date))
+				foreach (var dayGrp in pol.Trades.GroupBy (t => t.DateUtc.Causal.DateUtc))
 					{
 					var day = dayGrp.Key;
 

@@ -1,11 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -111,8 +112,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			var firstDate = start.Date.AddDays (-60);
-			var lastDate = start.Date.AddDays (400);
+			var startDay = start.ToCausalDateUtc ();
+			var firstDate = startDay.AddDays (-60);
+			var lastDate = startDay.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -173,7 +175,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			foreach (var key in fngBase.Keys.ToList ())
 				{
-				if (key.Date > entryUtc.Date)
+				if (key.Causal.DateUtc > entryUtc.Causal.DateUtc)
 					{
 					fngB[key] = fngBase[key] + 100;
 					dxyB[key] = dxyBase[key] + 50.0;
@@ -193,8 +195,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			Assert.NotEmpty (rowsB);
 
-			var dictA = rowsA.ToDictionary (r => r.Date, r => r.RegimeDown);
-			var dictB = rowsB.ToDictionary (r => r.Date, r => r.RegimeDown);
+			var dictA = rowsA.ToDictionary (r => r.Causal.DateUtc, r => r.RegimeDown);
+			var dictB = rowsB.ToDictionary (r => r.Causal.DateUtc, r => r.RegimeDown);
 
 			// Для всех дат ≤ entryUtc RegimeDown должен совпасть.
 			foreach (var kv in dictA)
@@ -281,8 +283,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Date.AddDays (-60);
-			var lastDate = start.Date.AddDays (400);
+			var startDay = start.ToCausalDateUtc ();
+			var firstDate = startDay.AddDays (-60);
+			var lastDate = startDay.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -372,8 +375,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

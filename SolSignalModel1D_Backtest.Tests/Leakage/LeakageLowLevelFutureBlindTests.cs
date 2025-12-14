@@ -1,31 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
 	/// <summary>
 	/// Низкоуровневые тесты на "future-blindness" DataBuilder/Labeler.
 	/// Идея: мутируем хвост свечей после момента T и проверяем,
-	/// что строки DataRow "до T" (с учётом baseline-окна) не изменились.
+	/// что строки BacktestRecord "до T" (с учётом baseline-окна) не изменились.
 	/// </summary>
 	public sealed class LeakageLowLevelFutureBlindTests
 		{
 		/// <summary>
 		/// DataBuilder_Features_DoNotDepend_OnFutureCandles:
-		/// фичи в DataRow для безопасных дат не зависят от хвоста 6h/1m после T.
+		/// фичи в BacktestRecord для безопасных дат не зависят от хвоста 6h/1m после T.
 		/// </summary>
 		[Fact]
 		public void DataBuilder_Features_DoNotDepend_OnFutureCandles ()
 			{
-			// 1) Строим синтетические ряды 6h/1m + FNG/DXY и DataRow из них.
+			// 1) Строим синтетические ряды 6h/1m + FNG/DXY и BacktestRecord из них.
 			var nyTz = TimeZones.NewYork;
 
 			var (
@@ -89,13 +85,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			// их baseline-окно гарантированно полностью до mutateAfterUtc,
 			// значит любые изменения после mutateAfterUtc не должны их трогать.
 			var safeOriginal = rowsOriginal
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			Assert.NotEmpty (safeOriginal);
@@ -107,24 +103,24 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var b = safeMutated[i];
 
 				// Структура набора строк не должна меняться.
-				Assert.Equal (a.Date, b.Date);
+				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
 
 				// Размерность фич такая же.
-				Assert.Equal (a.Features.Length, b.Features.Length);
+				Assert.Equal (a.Causal.Features.Length, b.Causal.Features.Length);
 
 				// Все фичи должны совпадать (future-blind).
-				for (int j = 0; j < a.Features.Length; j++)
+				for (int j = 0; j < a.Causal.Features.Length; j++)
 					{
-					AssertAlmostEqual (a.Features[j], b.Features[j], 1e-9,
-						$"Feature[{j}] differs for Date={a.Date:O}");
+					AssertAlmostEqual (a.Causal.Features[j], b.Causal.Features[j], 1e-9,
+						$"Feature[{j}] differs for Date={a.Causal.DateUtc:O}");
 					}
 
 				// Дополнительно проверяем несколько "сырьевых" полей,
 				// которые не входят во вектор фич, но тоже должны быть future-blind.
-				AssertAlmostEqual (a.SolRet30, b.SolRet30, 1e-9, "SolRet30 mismatch");
-				AssertAlmostEqual (a.BtcRet30, b.BtcRet30, 1e-9, "BtcRet30 mismatch");
-				AssertAlmostEqual (a.AtrPct, b.AtrPct, 1e-9, "AtrPct mismatch");
-				AssertAlmostEqual (a.DynVol, b.DynVol, 1e-9, "DynVol mismatch");
+				AssertAlmostEqual (a.Causal.SolRet30, b.Causal.SolRet30, 1e-9, "SolRet30 mismatch");
+				AssertAlmostEqual (a.Causal.BtcRet30, b.Causal.BtcRet30, 1e-9, "BtcRet30 mismatch");
+				AssertAlmostEqual (a.Causal.AtrPct, b.Causal.AtrPct, 1e-9, "AtrPct mismatch");
+				AssertAlmostEqual (a.Causal.DynVol, b.Causal.DynVol, 1e-9, "DynVol mismatch");
 				}
 			}
 
@@ -191,13 +187,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			Assert.NotEmpty (rowsMutated);
 
 			var safeOriginal = rowsOriginal
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			Assert.NotEmpty (safeOriginal);
@@ -208,10 +204,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = safeOriginal[i];
 				var b = safeMutated[i];
 
-				Assert.Equal (a.Date, b.Date);
+				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
 
 				// Основной path-based таргет.
-				Assert.Equal (a.Label, b.Label);
+				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 
 				// Micro-facts (по pathUp/pathDown внутри baseline-окна).
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
@@ -221,10 +217,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				AssertAlmostEqual (a.SolFwd1, b.SolFwd1, 1e-9, "SolFwd1 mismatch");
 
 				// Path-first метрики.
-				Assert.Equal (a.PathFirstPassDir, b.PathFirstPassDir);
-				Assert.Equal (a.PathFirstPassTimeUtc, b.PathFirstPassTimeUtc);
-				AssertAlmostEqual (a.PathReachedUpPct, b.PathReachedUpPct, 1e-9, "PathReachedUpPct mismatch");
-				AssertAlmostEqual (a.PathReachedDownPct, b.PathReachedDownPct, 1e-9, "PathReachedDownPct mismatch");
+				Assert.Equal (a.Forward.PathFirstPassDir, b.Forward.PathFirstPassDir);
+				Assert.Equal (a.Forward.PathFirstPassTimeUtc, b.Forward.PathFirstPassTimeUtc);
+				AssertAlmostEqual (a.Forward.PathReachedUpPct, b.Forward.PathReachedUpPct, 1e-9, "PathReachedUpPct mismatch");
+				AssertAlmostEqual (a.Forward.PathReachedDownPct, b.Forward.PathReachedDownPct, 1e-9, "PathReachedDownPct mismatch");
 
 				// MinMove тоже должен быть future-blind (строится каузально по истории rows).
 				AssertAlmostEqual (a.MinMove, b.MinMove, 1e-9, "MinMove mismatch");
@@ -345,8 +341,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var fngHistory = new Dictionary<DateTime, double> ();
 			var dxySeries = new Dictionary<DateTime, double> ();
 
-			var day = firstMinuteLocal.Date;
-			var lastDay = lastExitLocal.Date;
+			var day = firstMinuteLocal.Causal.DateUtc;
+			var lastDay = lastExitLocal.Causal.DateUtc;
 
 			while (day <= lastDay)
 				{

@@ -1,9 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System.Globalization;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 	{
@@ -139,7 +136,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					nameof (historyWindowDays),
 					"[current] historyWindowDays должен быть > 0 при построении истории CurrentPredictionSnapshot");
 
-			var cutoffUtc = DateTime.UtcNow.Date.AddDays (-historyWindowDays);
+			var cutoffUtc = DateTime.UtcNow.ToCausalDateUtc ().AddDays (-historyWindowDays);
 
 			var ordered = records
 				.Where (r => r.DateUtc >= cutoffUtc)
@@ -176,11 +173,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				throw new InvalidOperationException (
 					"[current] records пустой при построении CurrentPredictionSnapshot по дате");
 
-			var targetDateUtc = predictionDateUtc.Date;
+			var targetDateUtc = predictionDateUtc.ToCausalDateUtc ();
 
 			var recForDay = records
 				.OrderBy (r => r.DateUtc)
-				.LastOrDefault (r => r.DateUtc.Date == targetDateUtc);
+				.LastOrDefault (r => r.DateUtc.ToCausalDateUtc () == targetDateUtc);
 
 			if (recForDay == null)
 				{
@@ -191,11 +188,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			return BuildFromRecord (recForDay, policies, walletBalanceUsd);
 			}
 
-		/// <summary>
-		/// Наполняет snapshot.ExplanationItems агрегированными причинами прогноза:
-		/// дневная модель, микро-модель, SL-модель, режим, MinMove, baseline 24h и политики.
-		/// Здесь НЕТ новой математической логики модели, только форматирование уже посчитанных полей.
-		/// </summary>
 		private static void BuildExplanationItems (
 			CurrentPredictionSnapshot snapshot,
 			BacktestRecord rec )
@@ -208,7 +200,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 			int rank = 1;
 
-			// 1. Дневная модель (основной класс)
 			items.Add (new CurrentPredictionExplanationItem
 				{
 				Kind = "model",
@@ -217,7 +208,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				Rank = rank++
 				});
 
-			// 2. Микро-модель (1m), только если она реально участвует (label=1/flat)
 			if (snapshot.PredLabel == 1 && !string.IsNullOrWhiteSpace (snapshot.MicroDisplay))
 				{
 				items.Add (new CurrentPredictionExplanationItem
@@ -229,7 +219,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					});
 				}
 
-			// 3. SL-модель: вероятность стопа и HIGH/OK-решение
 			items.Add (new CurrentPredictionExplanationItem
 				{
 				Kind = "model",
@@ -241,7 +230,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				Rank = rank++
 				});
 
-			// 4. Режим рынка (DOWN / NORMAL)
 			items.Add (new CurrentPredictionExplanationItem
 				{
 				Kind = "model",
@@ -252,8 +240,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				Rank = rank++
 				});
 
-			// 5. MinMove (адаптивный минимальный ход цены)
-			// Переводим в отдельный тип, чтобы фронт отличал его от PFI-фич.
 			items.Add (new CurrentPredictionExplanationItem
 				{
 				Kind = "metric",
@@ -263,7 +249,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				Rank = rank++
 				});
 
-			// 6. Forward 24h baseline, если есть
 			if (snapshot.Forward24h != null)
 				{
 				items.Add (new CurrentPredictionExplanationItem
@@ -294,9 +279,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					});
 				}
 
-			// 7. Взаимодействие SL-модели и ветки ANTI-D
-			// Если день рискованный и есть направление от дневной модели,
-			// ANTI-D переворачивает направление (LONG↔SHORT).
 			bool hasDirection = TryGetDirection (rec, out var goLongModel, out _);
 
 			if (hasDirection && snapshot.SlHighDecision)
@@ -323,16 +305,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			ILeveragePolicy policy,
 			double walletBalanceUsd )
 			{
-			// hasDir — есть ли направленный сигнал от дневной модели (LONG или SHORT).
 			bool hasDir = TryGetDirection (rec, out var goLongModel, out _);
-
-			// isRiskDay — решение SL-модели по дню (рискованный / нерискованный).
 			bool isRiskDay = rec.SlHighDecision;
 
 			double leverage = policy.ResolveLeverage (rec);
 			string policyName = policy.GetType ().Name;
 
-			// --- BASE branch: торгует только нерискованные дни по направлению модели ---
 				{
 				bool skipped = !hasDir || isRiskDay;
 				bool goLongBase = goLongModel;
@@ -351,7 +329,6 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				snapshot.PolicyRows.Add (row);
 				}
 
-			// --- ANTI-D branch: берёт только рискованные дни и переворачивает направление ---
 				{
 				bool skipped = !hasDir || !isRiskDay;
 				bool goLongAntiD = goLongModel;

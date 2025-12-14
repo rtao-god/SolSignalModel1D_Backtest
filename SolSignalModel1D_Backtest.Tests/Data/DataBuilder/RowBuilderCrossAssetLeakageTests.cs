@@ -10,7 +10,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
 	/// <summary>
 	/// Тест на cross-asset утечки:
-	/// фичи DataRow за день D не должны зависеть от будущих BTC/PAXG-данных.
+	/// фичи BacktestRecord за день D не должны зависеть от будущих BTC/PAXG-данных.
 	///
 	/// SOL-ряд при этом НЕ мутируется, чтобы не конфликтовать с уже существующими тестами.
 	/// </summary>
@@ -106,8 +106,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			var firstDate = start.Date.AddDays (-120);
-			var lastDate = start.Date.AddDays (400);
+			var firstDate = start.Causal.DateUtc.AddDays (-120);
+			var lastDate = start.Causal.DateUtc.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -173,8 +173,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: NyTz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
@@ -183,10 +183,10 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			Assert.Equal (rowA!.Label, rowB!.Label);
 
 			// Фичи — тоже.
-			Assert.Equal (rowA.Features.Length, rowB.Features.Length);
-			for (int i = 0; i < rowA.Features.Length; i++)
+			Assert.Equal (rowA.Causal.Features.Length, rowB.Causal.Features.Length);
+			for (int i = 0; i < rowA.Causal.Features.Length; i++)
 				{
-				Assert.Equal (rowA.Features[i], rowB.Features[i], 10);
+				Assert.Equal (rowA.Causal.Features[i], rowB.Causal.Features[i], 10);
 				}
 			}
 		}

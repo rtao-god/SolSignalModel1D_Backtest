@@ -26,8 +26,4 @@
 		<ProjectReference Include="SolSignalModel1D_Backtest.SanityChecks\SolSignalModel1D_Backtest.SanityChecks.csproj" />
 	</ItemGroup>
 
-	<ItemGroup>
-	  <Folder Include="Utils\" />
-	</ItemGroup>
-
 </Project>

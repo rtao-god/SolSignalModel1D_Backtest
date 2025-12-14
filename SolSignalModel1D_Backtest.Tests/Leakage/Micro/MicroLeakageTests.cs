@@ -17,10 +17,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 		public void BuildMicroFlatModel_ReturnsNull_WhenTooFewMicroDays ()
 			{
 			// Arrange: 10 микро-дней (< 30), фичи минимальные, но валидные.
-			var rows = new List<DataRow> ();
+			var rows = new List<BacktestRecord> ();
 			for (int i = 0; i < 10; i++)
 				{
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = new DateTime (2025, 1, 1).AddDays (i),
 					Features = new[] { 0.1, 0.2, 0.3 },
@@ -42,12 +42,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 		public void BuildMicroFlatModel_ReturnsModel_WhenEnoughMicroDays ()
 			{
 			// Arrange: 40 микро-дней (>= 30), фичи чуть-чуть различаются по дням.
-			var rows = new List<DataRow> ();
+			var rows = new List<BacktestRecord> ();
 			for (int i = 0; i < 40; i++)
 				{
 				var baseDate = new DateTime (2025, 1, 1);
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = baseDate.AddDays (i),
 

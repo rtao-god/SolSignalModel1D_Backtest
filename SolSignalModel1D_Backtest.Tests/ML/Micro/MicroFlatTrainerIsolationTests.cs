@@ -64,7 +64,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 				.Select (r => new MlSampleBinary
 					{
 					Label = r.FactMicroUp,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 					});
 
 			var data = ml.Data.LoadFromEnumerable (samples);
@@ -74,9 +74,9 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 				$"Expected high accuracy on synthetic micro dataset, got {metrics.Accuracy:0.000}");
 			}
 
-		private static List<DataRow> BuildMicroRows ( int count )
+		private static List<BacktestRecord> BuildMicroRows ( int count )
 			{
-			var rows = new List<DataRow> (count);
+			var rows = new List<BacktestRecord> (count);
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			for (int i = 0; i < count; i++)
@@ -89,7 +89,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 				// Фича напрямую кодирует направление микро-дня.
 				feats[0] = up ? 1.0 : -1.0;
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = date,
 					Features = feats,

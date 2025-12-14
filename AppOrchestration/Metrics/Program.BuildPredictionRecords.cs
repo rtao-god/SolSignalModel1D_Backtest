@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -12,8 +12,8 @@ namespace SolSignalModel1D_Backtest
 		/// Здесь инкапсулируется выбор PredictionEngine и вычисление forward-метрик.
 		/// </summary>
 		private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsync (
-			List<DataRow> allRows,
-			List<DataRow> mornings,
+			List<BacktestRecord> allRows,
+			List<BacktestRecord> mornings,
 			List<Candle6h> solAll6h
 		)
 			{
@@ -43,7 +43,7 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			// Логируем, какие вообще дни есть в утренних точках.
-			DumpRange ("mornings", mornings, r => r.Date);
+			DumpRange ("mornings", mornings, r => r.Causal.DateUtc);
 
 			// PredictionEngine создаётся один раз для всей дневной выборки.
 			var engine = CreatePredictionEngineOrFallback (allRows);

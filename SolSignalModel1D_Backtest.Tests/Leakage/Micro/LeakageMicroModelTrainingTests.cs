@@ -1,6 +1,7 @@
 ﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
@@ -58,13 +59,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 					$"LeakageMicroModelTrainingTests: micro dataset too small ({dsA.MicroRows.Count}).");
 
 			var mlA = new MLContext (seed: 42);
-			// ВАЖНО: тренер ожидает List<DataRow>, а датасет отдаёт IReadOnlyList<DataRow>.
+			// ВАЖНО: тренер ожидает List<BacktestRecord>, а датасет отдаёт IReadOnlyList<BacktestRecord>.
 			// Приводим явно, чтобы не расширять контракт Core ради тестов.
-			var modelA = MicroFlatTrainer.BuildMicroFlatModel (mlA, new List<DataRow> (dsA.TrainRows));
+			var modelA = MicroFlatTrainer.BuildMicroFlatModel (mlA, new List<BacktestRecord> (dsA.TrainRows));
 			Assert.NotNull (modelA);
 
 			var mlB = new MLContext (seed: 42);
-			var modelB = MicroFlatTrainer.BuildMicroFlatModel (mlB, new List<DataRow> (dsB.TrainRows));
+			var modelB = MicroFlatTrainer.BuildMicroFlatModel (mlB, new List<BacktestRecord> (dsB.TrainRows));
 			Assert.NotNull (modelB);
 
 			var predsA = GetMicroPredictions (mlA, modelA!, dsA.MicroRows.ToList ());
@@ -73,16 +74,16 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			AssertBinaryOutputsEqual (predsA, predsB);
 			}
 
-		private static List<DataRow> BuildSyntheticRows ( IReadOnlyList<DateTime> datesUtc )
+		private static List<BacktestRecord> BuildSyntheticRows ( IReadOnlyList<DateTime> datesUtc )
 			{
-			var rows = new List<DataRow> (datesUtc.Count);
+			var rows = new List<BacktestRecord> (datesUtc.Count);
 
 			for (int i = 0; i < datesUtc.Count; i++)
 				{
 				var isMicro = (i % 3 == 0);
 				var up = isMicro && (i % 6 == 0);
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = datesUtc[i],
 					Features = new[]
@@ -100,15 +101,15 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			return rows;
 			}
 
-		private static List<DataRow> CloneRows ( List<DataRow> src )
+		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
 			{
-			var res = new List<DataRow> (src.Count);
+			var res = new List<BacktestRecord> (src.Count);
 			foreach (var r in src)
 				{
-				res.Add (new DataRow
+				res.Add (new BacktestRecord
 					{
-					Date = r.Date,
-					Features = r.Features?.ToArray () ?? Array.Empty<double> (),
+					Date = r.Causal.DateUtc,
+					Features = r.Causal.Features?.ToArray () ?? Array.Empty<double> (),
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown
 					});
@@ -116,27 +117,27 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			return res;
 			}
 
-		private static void MutateOosTail ( List<DataRow> rows, TrainBoundary boundary )
+		private static void MutateOosTail ( List<BacktestRecord> rows, TrainBoundary boundary )
 			{
 			// Мутируем всё, что boundary НЕ считает train:
 			// цель — доказать, что обучение/датасет не зависит от OOS “будущего”.
 			foreach (var r in rows)
 				{
-				if (boundary.IsTrainEntry (r.Date))
+				if (boundary.IsTrainEntry (r.Causal.DateUtc))
 					continue;
 
 				r.FactMicroUp = !r.FactMicroUp;
 				r.FactMicroDown = !r.FactMicroDown;
 
-				if (r.Features is { Length: > 0 })
+				if (r.Causal.Features is { Length: > 0 })
 					{
-					for (int i = 0; i < r.Features.Length; i++)
-						r.Features[i] = 9999.0 + i;
+					for (int i = 0; i < r.Causal.Features.Length; i++)
+						r.Causal.Features[i] = 9999.0 + i;
 					}
 				}
 			}
 
-		private static void AssertRowsEqual ( IReadOnlyList<DataRow> xs, IReadOnlyList<DataRow> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<BacktestRecord> xs, IReadOnlyList<BacktestRecord> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
@@ -145,12 +146,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Date, b.Date);
+				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
 				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
 
-				var fa = a.Features ?? Array.Empty<double> ();
-				var fb = b.Features ?? Array.Empty<double> ();
+				var fa = a.Causal.Features ?? Array.Empty<double> ();
+				var fb = b.Causal.Features ?? Array.Empty<double> ();
 
 				Assert.Equal (fa.Length, fb.Length);
 				for (int j = 0; j < fa.Length; j++)
@@ -161,7 +162,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 		private static List<BinaryOutput> GetMicroPredictions (
 			MLContext ml,
 			ITransformer model,
-			List<DataRow> rows )
+			List<BacktestRecord> rows )
 			{
 			if (rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -170,7 +171,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				rows.Select (r => new MlSampleBinary
 					{
 					Label = r.FactMicroUp,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
 					}));
 
 			var scored = model.Transform (data);

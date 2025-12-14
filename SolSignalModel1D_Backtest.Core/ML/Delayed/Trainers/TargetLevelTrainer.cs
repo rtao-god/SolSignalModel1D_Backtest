@@ -36,7 +36,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 				if (s.EntryUtc >= asOfUtc)
 					continue;
 
-				float w = s.Label switch
+				float w = s.Forward.TrueLabel switch
 					{
 						2 => 3.0f,   // глубокий дип, самый редкий
 						1 => 2.0f,   // мелкое улучшение
@@ -44,11 +44,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 						};
 
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Features, feats, Math.Min (s.Features.Length, MlSchema.FeatureCount));
+				Array.Copy (s.Causal.Features, feats, Math.Min (s.Causal.Features.Length, MlSchema.FeatureCount));
 
 				trainRows.Add (new TargetTrainRow
 					{
-					Label = s.Label,
+					Label = s.Forward.TrueLabel,
 					Features = feats,
 					Weight = w
 					});

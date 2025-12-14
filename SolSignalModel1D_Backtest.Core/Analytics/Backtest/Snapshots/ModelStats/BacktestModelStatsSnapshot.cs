@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
@@ -640,8 +641,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			if (points == null || points.Count == 0)
 				return 0.0;
 
-			int totalPos = points.Count (p => p.Label == 1);
-			int totalNeg = points.Count (p => p.Label == 0);
+			int totalPos = points.Count (p => p.Forward.TrueLabel == 1);
+			int totalNeg = points.Count (p => p.Forward.TrueLabel == 0);
 
 			if (totalPos == 0)
 				return 0.0;

@@ -19,7 +19,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			Assert.True (exitUtc > entryUtc);
 
-			var rows = new List<DataRow>
+			var rows = new List<BacktestRecord>
 			{
 				CreateRow(dateUtc: entryUtc, label: 2, regimeDown: false)
 			};
@@ -50,7 +50,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				count: 120,
 				hour: 8);
 
-			var rows = new List<DataRow> (datesUtc.Count);
+			var rows = new List<BacktestRecord> (datesUtc.Count);
 			for (int i = 0; i < datesUtc.Count; i++)
 				{
 				rows.Add (CreateRow (
@@ -71,13 +71,13 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 
 			Assert.NotEmpty (ds.TrainRows);
 
-			static void AssertAllTrain ( IEnumerable<DataRow> xs, TrainBoundary b, string tag )
+			static void AssertAllTrain ( IEnumerable<BacktestRecord> xs, TrainBoundary b, string tag )
 				{
 				foreach (var r in xs)
 					{
 					Assert.True (
-						b.IsTrainEntry (r.Date),
-						$"{tag} contains non-train entry by TrainBoundary: {r.Date:O}");
+						b.IsTrainEntry (r.Causal.DateUtc),
+						$"{tag} contains non-train entry by TrainBoundary: {r.Causal.DateUtc:O}");
 					}
 				}
 
@@ -87,9 +87,9 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 			AssertAllTrain (ds.DirDownRows, boundary, nameof (ds.DirDownRows));
 			}
 
-		private static DataRow CreateRow ( DateTime dateUtc, int label, bool regimeDown )
+		private static BacktestRecord CreateRow ( DateTime dateUtc, int label, bool regimeDown )
 			{
-			return new DataRow
+			return new BacktestRecord
 				{
 				Date = dateUtc,
 				Label = label,

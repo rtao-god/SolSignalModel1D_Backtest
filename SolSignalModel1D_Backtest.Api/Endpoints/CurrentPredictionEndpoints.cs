@@ -39,11 +39,11 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 				DateTime? cutoff = null;
 				if (days.HasValue && days.Value > 0)
 					{
-					cutoff = DateTime.UtcNow.Date.AddDays (-days.Value);
+					cutoff = DateTime.UtcNow.Causal.DateUtc.AddDays (-days.Value);
 					}
 
 				var items = index
-					.Where (x => !cutoff.HasValue || x.PredictionDateUtc.Date >= cutoff.Value)
+					.Where (x => !cutoff.HasValue || x.PredictionDateUtc.Causal.DateUtc >= cutoff.Value)
 					.Select (x => new
 						{
 						id = x.Id,

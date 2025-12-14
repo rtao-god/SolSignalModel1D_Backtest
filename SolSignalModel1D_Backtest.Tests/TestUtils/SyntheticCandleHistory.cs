@@ -35,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Tests.TestUtils
 
 			for (int d = 0; d < days; d++)
 				{
-				var day = t.Date;
+				var day = t.Causal.DateUtc;
 
 				fngHistory[day] = 50.0 + (d % 10);
 				dxyHistory[day] = 95.0 + (d % 5);

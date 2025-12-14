@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Causal
 	{
@@ -44,7 +45,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 
 			// Это должно быть "следующее утро" (в NY).
 			var entryNy = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, Windowing.NyTz);
-			Assert.True (ny.Date >= entryNy.Date.AddDays (1));
+			Assert.True (ny.Causal.DateUtc >= entryNy.Causal.DateUtc.AddDays (1));
 			}
 
 		[Fact]

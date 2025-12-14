@@ -1,25 +1,26 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	public static class SlOfflineBuilder
 		{
-		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
-
 		public static List<SlHitSample> Build (
-			IReadOnlyList<DataRow> rows,
+			IReadOnlyList<BacktestRecord> rows,
 			IReadOnlyList<Candle1h>? sol1h,
 			IReadOnlyList<Candle1m>? sol1m,
 			IReadOnlyDictionary<DateTime, Candle6h> sol6hDict,
 			double tpPct = 0.03,
 			double slPct = 0.05,
-			Func<DataRow, bool>? strongSelector = null )
+			Func<BacktestRecord, bool>? strongSelector = null )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (sol6hDict == null) throw new ArgumentNullException (nameof (sol6hDict));
@@ -30,53 +31,66 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				throw new InvalidOperationException ("[sl-offline] sol1h is null/empty: cannot build SL features.");
 
 			// Контракт: всё уже отсортировано на бутстрапе.
-			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.Date, "sl-offline.rows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.Causal.DateUtc, "sl-offline.rows");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "sl-offline.sol1m");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1h, c => c.OpenTimeUtc, "sl-offline.sol1h");
 
+			if (tpPct < 0) throw new ArgumentOutOfRangeException (nameof (tpPct), tpPct, "tpPct must be >= 0.");
+			if (slPct < 0) throw new ArgumentOutOfRangeException (nameof (slPct), slPct, "slPct must be >= 0.");
+			if (tpPct <= 0 && slPct <= 0)
+				throw new ArgumentOutOfRangeException (
+					$"[sl-offline] Invalid config: tpPct<=0 and slPct<=0 (tp={tpPct}, sl={slPct}).");
+
 			var result = new List<SlHitSample> (rows.Count * 2);
 
-			// Filter сохраняет порядок (rows уже отсортирован).
-			var mornings = rows
-				.Where (r => r.IsMorning)
-				.ToList ();
+			// ВАЖНО:
+			// Where/ToList тут не нужны.
+			// 1) rows и так отсортированы;
+			// 2) фильтр “утренние входы” дешевле делать inline без аллокаций списка.
+			bool hasAnyMorning = false;
 
-			if (mornings.Count == 0)
-				return result;
-
-			foreach (var r in mornings)
+			foreach (var r in rows)
 				{
-				if (!sol6hDict.TryGetValue (r.Date, out var c6))
+				DateTime entryUtc = r.Causal.DateUtc;
+
+				// Утро вычисляем строго по time-contract, а не по полям prediction-record.
+				if (!Windowing.IsNyMorning (entryUtc, nyTz: TimeZones.NewYork))
+					continue;
+
+				hasAnyMorning = true;
+
+				if (!sol6hDict.TryGetValue (entryUtc, out var c6))
 					{
 					throw new InvalidOperationException (
-						$"[sl-offline] 6h candle not found for morning entry {r.Date:O}. " +
-						"Проверь согласование OpenTimeUtc 6h и DataRow.Date.");
+						$"[sl-offline] 6h candle not found for morning entry {entryUtc:O}. " +
+						"Проверь согласование OpenTimeUtc 6h и BacktestRecord.Causal.DateUtc.");
 					}
 
 				double entry = c6.Close;
 				if (entry <= 0)
 					{
 					throw new InvalidOperationException (
-						$"[sl-offline] Non-positive entry price from 6h close for {r.Date:O}: entry={entry}.");
+						$"[sl-offline] Non-positive entry price from 6h close for {entryUtc:O}: entry={entry}.");
 					}
 
+				// День-минимув нужен для SL-фич (если это твой контракт).
+				// Если r.MinMove отсутствует в BacktestRecord — это отдельная компил-ошибка
 				double dayMinMove = r.MinMove;
-				if (dayMinMove <= 0)
-					dayMinMove = 0.02;
+				if (dayMinMove <= 0.0 || double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove))
+					{
+					throw new InvalidOperationException (
+						$"[sl-offline] Invalid dayMinMove (MinMove) for {entryUtc:O}: {dayMinMove}. " +
+						"Это не лечится дефолтом. Почини источник MinMove или исключай такие дни явно до SL-датасета.");
+					}
 
 				bool strongSignal = strongSelector?.Invoke (r) ?? true;
 
-				DateTime entryUtc = r.Date;
+				using var _ = Infra.Causality.CausalityGuard.Begin ("SlOfflineBuilder.Build(morning)", entryUtc);
 
-				using var _ = Infra.Causality.CausalityGuard.Begin (
-					"SlOfflineBuilder.Build(morning)",
-					entryUtc
-				);
-
-				DateTime exitUtc;
+				DateTime exitUtcExclusive;
 				try
 					{
-					exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: NyTz);
+					exitUtcExclusive = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: TimeZones.NewYork);
 					}
 				catch (Exception ex)
 					{
@@ -85,22 +99,23 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 						ex);
 					}
 
-				if (exitUtc <= entryUtc)
+				if (exitUtcExclusive <= entryUtc)
 					{
 					throw new InvalidOperationException (
-						$"[sl-offline] Invalid baseline window: exitUtc <= entryUtc for entry {entryUtc:O}, exit={exitUtc:O}.");
+						$"[sl-offline] Invalid baseline window: exitUtcExclusive <= entryUtc for entry {entryUtc:O}, exit={exitUtcExclusive:O}.");
 					}
 
 				int startIdx = LowerBoundOpenTimeUtc (sol1m, entryUtc);
-				int endIdxExclusive = LowerBoundOpenTimeUtc (sol1m, exitUtc);
+				int endIdxExclusive = LowerBoundOpenTimeUtc (sol1m, exitUtcExclusive);
 
 				if (endIdxExclusive <= startIdx)
 					{
 					throw new InvalidOperationException (
-						$"[sl-offline] No 1m candles in baseline window for entry {entryUtc:O}, exit={exitUtc:O}. " +
+						$"[sl-offline] No 1m candles in baseline window for entry {entryUtc:O}, exitEx={exitUtcExclusive:O}. " +
 						$"Computed range=[{startIdx}; {endIdxExclusive}).");
 					}
 
+				// LONG
 					{
 					var labelRes = EvalPath1m (
 						all1m: sol1m,
@@ -131,6 +146,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 						}
 					}
 
+				// SHORT
 					{
 					var labelRes = EvalPath1m (
 						all1m: sol1m,
@@ -162,6 +178,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 					}
 				}
 
+			if (!hasAnyMorning)
+				return result;
+
 			Console.WriteLine (
 				$"[sl-offline] built {result.Count} SL-samples (1m path labels, 1h features, tp={tpPct:0.###}, sl={slPct:0.###})");
 
@@ -182,12 +201,18 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				throw new ArgumentOutOfRangeException (
 					$"Invalid 1m range: [{startIdx}; {endIdxExclusive}) for all1m.Count={all1m.Count}.");
 
-			if (entry <= 0) return HourlyTradeResult.None;
-			if (tpPct <= 0 && slPct <= 0) return HourlyTradeResult.None;
+			if (entry <= 0)
+				throw new InvalidOperationException ($"[sl-offline] entry must be > 0, got {entry}.");
+
+			if (tpPct < 0 || slPct < 0)
+				throw new ArgumentOutOfRangeException ($"[sl-offline] tpPct/slPct must be >=0. got tp={tpPct}, sl={slPct}.");
+
+			if (tpPct <= 0 && slPct <= 0)
+				throw new InvalidOperationException ($"[sl-offline] tpPct<=0 and slPct<=0 is invalid for path-eval.");
 
 			if (goLong)
 				{
-				double tp = entry * (1.0 + Math.Max (tpPct, 0.0));
+				double tp = tpPct > 0 ? entry * (1.0 + tpPct) : double.NaN;
 				double sl = slPct > 0 ? entry * (1.0 - slPct) : double.NaN;
 
 				for (int i = startIdx; i < endIdxExclusive; i++)
@@ -208,7 +233,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				}
 			else
 				{
-				double tp = entry * (1.0 - Math.Max (tpPct, 0.0));
+				double tp = tpPct > 0 ? entry * (1.0 - tpPct) : double.NaN;
 				double sl = slPct > 0 ? entry * (1.0 + slPct) : double.NaN;
 
 				for (int i = startIdx; i < endIdxExclusive; i++)

@@ -16,7 +16,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			{
 			return new List<ModelCandleProfile>
 			{
-				// дневной слой – строим DataRow: нужен SOL 6h, BTC 6h, PAXG 6h 
+				// дневной слой – строим BacktestRecord: нужен SOL 6h, BTC 6h, PAXG 6h 
 				new ModelCandleProfile(
 					"daily-rowbuilder",
 					new List<(string, CandleTimeframe)>

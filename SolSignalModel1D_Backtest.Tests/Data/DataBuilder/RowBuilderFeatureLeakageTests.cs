@@ -1,12 +1,13 @@
-﻿using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using Xunit;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
 	/// <summary>
-	/// Структурный тест: фичи DataRow для дня D не должны зависеть
+	/// Структурный тест: фичи BacktestRecord для дня D не должны зависеть
 	/// от того, какой close у свечи, покрывающей baseline-exit.
 	///
 	/// Если в RowBuilder в фичи подмешан SolFwd1 (как сейчас через EnableLeakageHackForTests),
@@ -79,12 +80,13 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Date.AddDays (-60);
-			var lastDate = start.Date.AddDays (400);
+			var startDay = start.ToCausalDateUtc ();
+			var firstDate = startDay.AddDays (-60);
+			var lastDate = startDay.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// Важно: Kind = Utc, чтобы совпадать с openUtc.Date.
+				// Важно: Kind = Utc, чтобы совпадать с openUtc.Causal.DateUtc.
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fng[key] = 50;
 				dxy[key] = 100.0;
@@ -174,8 +176,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
@@ -184,11 +186,11 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			Assert.NotEqual (rowA!.SolFwd1, rowB!.SolFwd1);
 
 			// А вот фичи — нет. Это и есть запрет утечки.
-			Assert.Equal (rowA.Features.Length, rowB.Features.Length);
+			Assert.Equal (rowA.Causal.Features.Length, rowB.Causal.Features.Length);
 
-			for (int i = 0; i < rowA.Features.Length; i++)
+			for (int i = 0; i < rowA.Causal.Features.Length; i++)
 				{
-				Assert.Equal (rowA.Features[i], rowB.Features[i], 10);
+				Assert.Equal (rowA.Causal.Features[i], rowB.Causal.Features[i], 10);
 				}
 			}
 		}

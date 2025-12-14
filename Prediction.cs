@@ -7,7 +7,7 @@ using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -26,16 +26,16 @@ namespace SolSignalModel1D_Backtest
 		/// - тренирует дневной move+dir и микро-слой;
 		/// - фиксирует границу train-периода в _trainUntilUtc (baseline-exit).
 		/// </summary>
-		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
+		private static PredictionEngine CreatePredictionEngineOrFallback ( List<BacktestRecord> allRows )
 			{
 			PredictionEngine.DebugAllowDisabledModels = false;
 
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 			if (allRows.Count == 0)
-				throw new InvalidOperationException ("[engine] Пустой список DataRow для обучения моделей");
+				throw new InvalidOperationException ("[engine] Пустой список BacktestRecord для обучения моделей");
 
 			var ordered = allRows
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			var minEntryUtc = ordered.First ().Date;
@@ -53,7 +53,7 @@ namespace SolSignalModel1D_Backtest
 			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
 
 			// Train/OOS режем только через baseline-exit контракт.
-			var split = boundary.Split (ordered, r => r.Date);
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
 			var trainRows = split.Train;
 
 			if (split.Excluded.Count > 0)
@@ -67,7 +67,7 @@ namespace SolSignalModel1D_Backtest
 
 			// --- Диагностика распределения таргетов на train ---
 			var labelHist = trainRows
-				.GroupBy (r => r.Label)
+				.GroupBy (r => r.Forward.TrueLabel)
 				.OrderBy (g => g.Key)
 				.Select (g => $"{g.Key}={g.Count ()}")
 				.ToArray ();
@@ -130,7 +130,7 @@ namespace SolSignalModel1D_Backtest
 		/// Разбиение train/OOS — строго через TrainBoundary (baseline-exit).
 		/// </summary>
 		private static async Task<List<BacktestRecord>> LoadPredictionRecordsAsync (
-			IReadOnlyList<DataRow> mornings,
+			IReadOnlyList<BacktestRecord> mornings,
 			IReadOnlyList<Candle6h> solAll6h,
 			PredictionEngine engine )
 			{
@@ -158,10 +158,10 @@ namespace SolSignalModel1D_Backtest
 				indexByOpenTime[openTime] = i;
 				}
 
-			var orderedMornings = mornings as List<DataRow> ?? mornings.ToList ();
+			var orderedMornings = mornings as List<BacktestRecord> ?? mornings.ToList ();
 
 			// Диагностика сплита: только через baseline-exit контракт.
-			var split = boundary.Split (orderedMornings, r => r.Date);
+			var split = boundary.Split (orderedMornings, r => r.Causal.DateUtc);
 
 			Console.WriteLine (
 				$"[forward] mornings total={orderedMornings.Count}, " +
@@ -193,7 +193,7 @@ namespace SolSignalModel1D_Backtest
 
 			foreach (var r in orderedMornings)
 				{
-				var entryUtc = r.Date;
+				var entryUtc = r.Causal.DateUtc;
 
 				// Baseline-exit по контракту.
 				if (!boundary.TryGetBaselineExitUtc (entryUtc, out var exitUtc))
@@ -283,7 +283,7 @@ namespace SolSignalModel1D_Backtest
 					{
 					DateUtc = entryUtc,
 
-					TrueLabel = r.Label,
+					TrueLabel = r.Forward.TrueLabel,
 					PredLabel = cls,
 
 					PredLabel_Day = predLabelDay,
@@ -384,7 +384,7 @@ namespace SolSignalModel1D_Backtest
 		/// Максимальный baseline-exit по заданному списку дней.
 		/// Используется как "граница" в режиме train==full-history, чтобы метрики не делали ручных <=/>.
 		/// </summary>
-		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<DataRow> rows, TimeZoneInfo nyTz )
+		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<BacktestRecord> rows, TimeZoneInfo nyTz )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));

@@ -81,8 +81,8 @@ namespace SolSignalModel1D_Backtest
 
 			// Окно бэктеста относительно последней 6h-свечи SOL (после сортировки это последний элемент).
 			var lastUtc = solAll6h[solAll6h.Count - 1].OpenTimeUtc;
-			fromUtc = lastUtc.Date.AddDays (-540);
-			toUtc = lastUtc.Date;
+			fromUtc = lastUtc.Causal.DateUtc.AddDays (-540);
+			toUtc = lastUtc.Causal.DateUtc;
 
 			sw.Stop ();
 			Console.WriteLine ($"[perf] LoadAllCandlesAndWindow done in {sw.Elapsed.TotalSeconds:F1}s");

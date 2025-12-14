@@ -8,7 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
@@ -32,7 +32,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public void DailyModel_EndToEnd_OnMonotonicTrendHistory_ProducesValidPredictions ()
 			{
 			var rows = BuildMonotonicHistory ();
-			var ordered = rows.OrderBy (r => r.Date).ToList ();
+			var ordered = rows.OrderBy (r => r.Causal.DateUtc).ToList ();
 
 			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
@@ -52,7 +52,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public void DailyModel_EndToEnd_OnZigZagHistory_UsesAtLeastTwoClasses ()
 			{
 			var rows = BuildZigZagHistory ();
-			var ordered = rows.OrderBy (r => r.Date).ToList ();
+			var ordered = rows.OrderBy (r => r.Causal.DateUtc).ToList ();
 
 			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
@@ -76,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// <summary>
 		/// Общая часть: делим на train/OOS, тренируем дневной бандл и прогоняем PredictionEngine по всей истории.
 		/// </summary>
-		private static DailyE2eResult TrainAndPredict ( List<DataRow> orderedRows, int holdoutDays )
+		private static DailyE2eResult TrainAndPredict ( List<BacktestRecord> orderedRows, int holdoutDays )
 			{
 			if (orderedRows == null) throw new ArgumentNullException (nameof (orderedRows));
 			Assert.NotEmpty (orderedRows);
@@ -87,11 +87,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var trainUntil = maxDate.AddDays (-holdoutDays);
 
 			var trainRows = orderedRows
-				.Where (r => r.Date <= trainUntil)
+				.Where (r => r.Causal.DateUtc <= trainUntil)
 				.ToList ();
 
 			var oosRows = orderedRows
-				.Where (r => r.Date > trainUntil)
+				.Where (r => r.Causal.DateUtc > trainUntil)
 				.ToList ();
 
 			Assert.True (trainRows.Count > 50,
@@ -138,7 +138,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// Строит монотонную историю: плавный ап-тренд + лёгкий шум.
 		/// Используется как smoke-тест пайплайна.
 		/// </summary>
-		private static List<DataRow> BuildMonotonicHistory ()
+		private static List<BacktestRecord> BuildMonotonicHistory ()
 			{
 			return BuildSyntheticRows (
 				solPriceFunc: i =>
@@ -154,7 +154,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// <summary>
 		/// Строит зигзагообразную историю: выраженные волны вверх/вниз по SOL.
 		/// </summary>
-		private static List<DataRow> BuildZigZagHistory ()
+		private static List<BacktestRecord> BuildZigZagHistory ()
 			{
 			return BuildSyntheticRows (
 				solPriceFunc: i =>
@@ -177,7 +177,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// - генерирует FNG/DXY;
 		/// - передаёт всё это в RowBuilder.BuildRowsDaily.
 		/// </summary>
-		private static List<DataRow> BuildSyntheticRows ( Func<int, double> solPriceFunc )
+		private static List<BacktestRecord> BuildSyntheticRows ( Func<int, double> solPriceFunc )
 			{
 			if (solPriceFunc == null) throw new ArgumentNullException (nameof (solPriceFunc));
 
@@ -265,8 +265,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Date.AddDays (-200);
-			var lastDate = start.Date.AddDays (400);
+			var firstDate = start.Causal.DateUtc.AddDays (-200);
+			var lastDate = start.Causal.DateUtc.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -289,7 +289,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			);
 
 			Assert.NotEmpty (rows);
-			return rows.OrderBy (r => r.Date).ToList ();
+			return rows.OrderBy (r => r.Causal.DateUtc).ToList ();
 			}
 		}
 	}

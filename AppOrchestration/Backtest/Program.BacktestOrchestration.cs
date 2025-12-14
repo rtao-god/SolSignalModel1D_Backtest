@@ -2,14 +2,9 @@
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -48,13 +43,13 @@ namespace SolSignalModel1D_Backtest
 		/// - сценарные стратегии по дневной модели.
 		/// </summary>
 		private static void RunBacktestAndReports (
-			List<DataRow> mornings,
+			List<BacktestRecord> mornings,
 			List<BacktestRecord> records,
-			List<Candle1m> sol1m )
+			IReadOnlyList<Candle1m> dayMinutes)
 			{
 			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
 			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (sol1m == null) throw new ArgumentNullException (nameof (sol1m));
+			if (dayMinutes == null) throw new ArgumentNullException (nameof (dayMinutes));
 
 			// === Baseline-конфиг бэктеста (SL/TP + политики) ===
 			var backtestConfig = BacktestConfigFactory.CreateBaseline ();
@@ -89,29 +84,27 @@ namespace SolSignalModel1D_Backtest
 			runner.Run (
 				mornings: mornings,
 				records: records,
-				candles1m: sol1m,
+				candles1m: dayMinutes,
 				policies: policies,
 				config: backtestConfig,
 				trainUntilUtc: _trainUntilUtc
 			);
 
-			// === Сохранение отчётов бэктеста ===
 			BacktestReportsOrchestrator.SaveBacktestReports (
 				mornings: mornings,
 				records: records,
-				sol1m: sol1m,
+				sol1m: dayMinutes,
 				policies: policies,
 				backtestConfig: backtestConfig,
 				nyTz: NyTz,
 				trainUntilUtc: _trainUntilUtc
 			);
 
-			// === Сценарные стратегии по дневной модели ===
 			RunStrategyScenarios (
-				mornings: mornings,
-				records: records,
-				sol1m: sol1m
-			);
+				mornings: mornings, 
+				records: records, 
+				sol1m: dayMinutes.ToList ()
+				);
 			}
 
 		private static List<ILeveragePolicy> ExtractLeveragePolicies (

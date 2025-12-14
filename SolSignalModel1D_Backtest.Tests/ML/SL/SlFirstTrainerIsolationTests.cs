@@ -67,8 +67,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 
 			var rows = evalSamples.Select (s => new SlHitEvalRow
 				{
-				Label = s.Label,
-				Features = EnsureFixedLength (s.Features),
+				Label = s.Forward.TrueLabel,
+				Features = EnsureFixedLength (s.Causal.Features),
 				Weight = 1.0f
 				});
 
@@ -77,7 +77,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 
 			return ml.BinaryClassification.Evaluate (
 				transformed,
-				labelColumnName: nameof (SlHitEvalRow.Label),
+				labelColumnName: nameof (SlHitEvalRow.Forward.TrueLabel),
 				scoreColumnName: "Score",
 				predictedLabelColumnName: "PredictedLabel");
 			}
@@ -128,7 +128,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 				result.Add (new SlHitSample
 					{
 					Label = newLabel,
-					Features = (float[]) src.Features.Clone (),
+					Features = (float[]) src.Causal.Features.Clone (),
 					EntryUtc = src.EntryUtc
 					});
 				}

@@ -1,9 +1,7 @@
 ﻿using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 using System;
@@ -22,35 +20,61 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 		private readonly int _gbmThreads = Math.Max (1, Environment.ProcessorCount - 1);
 		private readonly MLContext _ml = new MLContext (seed: 42);
 
-		// Важно: делаем UTC, т.к. DataRow.Date у тебя по контракту UTC.
-		private static readonly DateTime RecentCutoff = new DateTime (2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
 		private static readonly bool BalanceMove = false;
 		private static readonly bool BalanceDir = true;
 		private const double BalanceTargetFrac = 0.70;
 
 		public ModelBundle TrainAll (
-			IReadOnlyList<DataRow> trainRows,
+			IReadOnlyList<LabeledCausalRow> trainRows,
 			HashSet<DateTime>? datesToExclude = null )
 			{
 			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
 			if (trainRows.Count == 0)
 				throw new InvalidOperationException ("TrainAll: empty trainRows — нечего обучать.");
 
-			// ВАЖНО: trainUntil — в терминах baseline-exit.
-			var trainUntilUtc = DeriveMaxBaselineExitUtc (trainRows, Windowing.NyTz);
+			var ordered = trainRows
+				.OrderBy (r => r.DateUtc)
+				.ToList ();
 
-			var dataset = DailyDatasetBuilder.Build (
-				allRows: trainRows,
-				trainUntilUtc: trainUntilUtc,
-				balanceMove: BalanceMove,
-				balanceDir: BalanceDir,
-				balanceTargetFrac: BalanceTargetFrac,
-				datesToExclude: datesToExclude);
+			if (datesToExclude != null && datesToExclude.Count > 0)
+				ordered = ordered.Where (r => !datesToExclude.Contains (r.DateUtc)).ToList ();
 
-			var moveTrainRows = dataset.MoveTrainRows;
-			var dirNormalRows = dataset.DirNormalRows;
-			var dirDownRows = dataset.DirDownRows;
+			if (ordered.Count == 0)
+				throw new InvalidOperationException ("TrainAll: all rows excluded by datesToExclude.");
+
+			// Move: бинарная задача "движение vs flat"
+			var moveRows = ordered;
+
+			// Dir: только move-дни (не flat)
+			var dirRows = ordered.Where (r => r.TrueLabel != 1).ToList ();
+
+			// Разделение dir по режиму (если у тебя это реально используется)
+			var dirNormalRows = dirRows.Where (r => !r.Causal.RegimeDown).ToList ();
+			var dirDownRows = dirRows.Where (r => r.Causal.RegimeDown).ToList ();
+
+			if (BalanceMove)
+				{
+				moveRows = MlTrainingUtils.OversampleBinary (
+					src: moveRows,
+					isPositive: r => r.TrueLabel != 1,
+					dateSelector: r => r.DateUtc,
+					targetFrac: BalanceTargetFrac);
+				}
+
+			if (BalanceDir)
+				{
+				dirNormalRows = MlTrainingUtils.OversampleBinary (
+					src: dirNormalRows,
+					isPositive: r => r.TrueLabel == 2,
+					dateSelector: r => r.DateUtc,
+					targetFrac: BalanceTargetFrac);
+
+				dirDownRows = MlTrainingUtils.OversampleBinary (
+					src: dirDownRows,
+					isPositive: r => r.TrueLabel == 2,
+					dateSelector: r => r.DateUtc,
+					targetFrac: BalanceTargetFrac);
+				}
 
 			ITransformer? moveModel = null;
 
@@ -60,17 +84,17 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				}
 			else
 				{
-				if (moveTrainRows.Count == 0)
+				if (moveRows.Count == 0)
 					{
 					Console.WriteLine ("[2stage] move-model: train rows = 0, skipping");
 					}
 				else
 					{
 					var moveData = _ml.Data.LoadFromEnumerable (
-						moveTrainRows.Select (r => new MlSampleBinary
+						moveRows.Select (r => new MlSampleBinary
 							{
-							Label = r.Label != 1,
-							Features = MlTrainingUtils.ToFloatFixed (r.Features)
+							Label = r.TrueLabel != 1,
+							Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 							}));
 
 					var movePipe = _ml.BinaryClassification.Trainers.LightGbm (
@@ -85,7 +109,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 							});
 
 					moveModel = movePipe.Fit (moveData);
-					Console.WriteLine ($"[2stage] move-model trained on {moveTrainRows.Count} rows");
+					Console.WriteLine ($"[2stage] move-model trained on {moveRows.Count} rows");
 					}
 				}
 
@@ -118,9 +142,40 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				}
 			else
 				{
-				// ВАЖНО: MicroFlatTrainer должен принимать IReadOnlyList<DataRow>.
-				// Если сейчас он ожидает List<DataRow>, это и даёт твою CS1503 на ModelTrainer.cs(118).
-				microModel = MicroFlatTrainer.BuildMicroFlatModel (_ml, dataset.TrainRows);
+				// Micro тренируем ТОЛЬКО на flat-днях, где есть micro truth.
+				// Если truth нет — day считается нейтральным (и в обучении micro не участвует).
+				var microRows = ordered
+					.Where (r => r.TrueLabel == 1 && (r.FactMicroUp || r.FactMicroDown))
+					.ToList ();
+
+				if (microRows.Count < 40)
+					{
+					Console.WriteLine ($"[2stage] micro-flat: too few rows ({microRows.Count}), skipping");
+					microModel = null;
+					}
+				else
+					{
+					var microData = _ml.Data.LoadFromEnumerable (
+						microRows.Select (r => new MlSampleBinary
+							{
+							Label = r.FactMicroUp, // true=up, false=down
+							Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
+							}));
+
+					var microPipe = _ml.BinaryClassification.Trainers.LightGbm (
+						new LightGbmBinaryTrainer.Options
+							{
+							NumberOfLeaves = 16,
+							NumberOfIterations = 90,
+							LearningRate = 0.07f,
+							MinimumExampleCountPerLeaf = 15,
+							Seed = 42,
+							NumberOfThreads = _gbmThreads
+							});
+
+					microModel = microPipe.Fit (microData);
+					Console.WriteLine ($"[2stage] micro-flat trained on {microRows.Count} rows");
+					}
 				}
 
 			return new ModelBundle
@@ -133,7 +188,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				};
 			}
 
-		private ITransformer? BuildDirModel ( IReadOnlyList<DataRow> rows, string tag )
+		private ITransformer? BuildDirModel ( IReadOnlyList<LabeledCausalRow> rows, string tag )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 
@@ -143,13 +198,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				return null;
 				}
 
-			int recent = rows.Count (r => r.Date >= RecentCutoff);
-
 			var data = _ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label == 2,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.TrueLabel == 2,
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 					}));
 
 			var pipe = _ml.BinaryClassification.Trainers.LightGbm (
@@ -164,45 +217,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 					});
 
 			var model = pipe.Fit (data);
-			Console.WriteLine ($"[2stage] {tag}: trained on {rows.Count} rows (recent {recent})");
+			Console.WriteLine ($"[2stage] {tag}: trained on {rows.Count} rows");
 			return model;
-			}
-
-		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<DataRow> rows, TimeZoneInfo nyTz )
-			{
-			if (rows == null) throw new ArgumentNullException (nameof (rows));
-			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));
-			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
-
-			bool hasAny = false;
-			DateTime maxExit = default;
-
-			for (int i = 0; i < rows.Count; i++)
-				{
-				var entryUtc = rows[i].Date;
-
-				if (entryUtc == default)
-					throw new InvalidOperationException ("[2stage] DataRow.Date is default(DateTime).");
-				if (entryUtc.Kind != DateTimeKind.Utc)
-					throw new InvalidOperationException ($"[2stage] DataRow.Date must be UTC, got Kind={entryUtc.Kind} for {entryUtc:O}.");
-
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
-				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-					continue;
-
-				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
-
-				if (!hasAny || exitUtc > maxExit)
-					{
-					maxExit = exitUtc;
-					hasAny = true;
-					}
-				}
-
-			if (!hasAny)
-				throw new InvalidOperationException ("[2stage] failed to derive max baseline-exit: no working-day entries.");
-
-			return maxExit;
 			}
 		}
 	}

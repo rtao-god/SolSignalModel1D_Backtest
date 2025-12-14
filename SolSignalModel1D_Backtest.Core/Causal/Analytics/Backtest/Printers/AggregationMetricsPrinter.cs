@@ -1,268 +1,76 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Aggregation;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 	{
-	/// <summary>
-	/// Метрики по агрегации вероятностей:
-	/// для каждого сегмента (Train/OOS/Recent/Full) считает:
-	/// - confusion 3×3 и accuracy / micro-F1 / logloss
-	/// для трёх слоёв:
-	///   - Day          (PredLabel_Day, Prob*_Day),
-	///   - Day+Micro    (PredLabel_DayMicro, Prob*_DayMicro),
-	///   - Total        (PredLabel, Prob*_Total).
-	///
-	/// Важно: сегментация строго по TrainBoundary (через baseline-exit).
-	/// Excluded (дни без baseline-exit) не смешиваются в метрики.
-	/// </summary>
 	public static class AggregationMetricsPrinter
 		{
-		public static void Print (
-			IReadOnlyList<CausalPredictionRecord> records,
-			TrainBoundary boundary,
-			int recentDays = 240 )
+		public static void Print ( AggregationMetricsSnapshot snapshot )
 			{
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (records.Count == 0)
+			if (snapshot == null) throw new ArgumentNullException (nameof (snapshot));
+
+			ConsoleStyler.WriteHeader ("==== AGGREGATION METRICS ====");
+
+			if (snapshot.TotalInputRecords == 0)
 				{
-				ConsoleStyler.WriteHeader ("==== AGGREGATION METRICS ====");
 				Console.WriteLine ("[agg-metrics] no records, nothing to print.");
 				return;
 				}
 
-			if (recentDays <= 0) recentDays = 1;
-
-			ConsoleStyler.WriteHeader ("==== AGGREGATION METRICS ====");
-
-			// Стабильный порядок по дате.
-			var ordered = records
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
-
-			var split = boundary.Split (ordered, r => r.DateUtc);
-
-			var train = split.Train;
-			var oos = split.Oos;
-
-			// Eligible = train+oos, excluded не смешиваем в метрики.
-			var full = new List<CausalPredictionRecord> (train.Count + oos.Count);
-			full.AddRange (train);
-			full.AddRange (oos);
-
-			if (split.Excluded.Count > 0)
+			if (snapshot.ExcludedCount > 0)
 				{
 				Console.WriteLine (
-					$"[agg-metrics][WARN] excluded (no baseline-exit) = {split.Excluded.Count}. " +
-					"Они исключены из метрик, проверь контракт entryUtc/окна.");
-				}
-
-			if (full.Count == 0)
-				{
-				Console.WriteLine (
-					$"[agg-metrics][FAIL] eligible=0 (train+oos), excluded={split.Excluded.Count}. " +
-					$"trainUntil(exit<=)={boundary.TrainUntilIsoDate}");
-				return;
-				}
-
-			var maxDateUtc = full.Last ().DateUtc;
-
-			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
-			var recent = full
-				.Where (r => r.DateUtc >= fromRecentUtc)
-				.ToList ();
-
-			if (recent.Count == 0)
-				{
-				recent = full;
+					$"[agg-metrics][WARN] excluded (no baseline-exit) = {snapshot.ExcludedCount}. " +
+					"Проверь контракт entryUtc/окна.");
 				}
 
 			var meta = new TextTable ();
 			meta.AddHeader ("segment", "from", "to", "days");
 
-			AddSegmentMetaRow (meta, $"Train (exit<= {boundary.TrainUntilIsoDate})", train);
-			AddSegmentMetaRow (meta, $"OOS (exit>  {boundary.TrainUntilIsoDate})", oos);
-			AddSegmentMetaRow (meta, $"Recent({recentDays}d)", recent);
-			AddSegmentMetaRow (meta, "Full", full);
+			foreach (var seg in snapshot.Segments)
+				{
+				if (seg.RecordsCount == 0)
+					{
+					meta.AddRow (seg.SegmentLabel, "-", "-", "0");
+					continue;
+					}
+
+				meta.AddRow (
+					seg.SegmentLabel,
+					seg.FromDateUtc!.Value.ToString ("yyyy-MM-dd"),
+					seg.ToDateUtc!.Value.ToString ("yyyy-MM-dd"),
+					seg.RecordsCount.ToString ());
+				}
 
 			meta.WriteToConsole ();
 			Console.WriteLine ();
 
-			PrintSegmentMetrics ("Train", train);
-			PrintSegmentMetrics ("OOS", oos);
-			PrintSegmentMetrics ($"Recent (last {recentDays} days)", recent);
-			PrintSegmentMetrics ("Full history", full);
-			}
-
-		private static void AddSegmentMetaRow ( TextTable t, string name, IReadOnlyList<CausalPredictionRecord> seg )
-			{
-			if (seg == null || seg.Count == 0)
+			foreach (var seg in snapshot.Segments)
 				{
-				t.AddRow (name, "-", "-", "0");
-				return;
+				PrintSegment (seg);
 				}
-
-			var from = seg.First ().DateUtc;
-			var to = seg.Last ().DateUtc;
-
-			t.AddRow (
-				name,
-				from.ToString ("yyyy-MM-dd"),
-				to.ToString ("yyyy-MM-dd"),
-				seg.Count.ToString ());
 			}
 
-		// =====================================================================
-		// Метрики по сегменту
-		// =====================================================================
-
-		private sealed class LayerMetrics
+		private static void PrintSegment ( AggregationMetricsSegmentSnapshot seg )
 			{
-			public string LayerName { get; init; } = string.Empty;
-			public int[,] Confusion { get; init; } = new int[3, 3];
+			ConsoleStyler.WriteHeader ($"[agg-metrics] {seg.SegmentName}");
 
-			public int N { get; init; }
-			public int Correct { get; init; }
-			public double Accuracy { get; init; }
-			public double MicroF1 { get; init; }
-			public double LogLoss { get; init; }
-			public int InvalidForLogLoss { get; init; }
-			public int ValidForLogLoss { get; init; }
-			}
-
-		private static void PrintSegmentMetrics ( string title, IReadOnlyList<CausalPredictionRecord> seg )
-			{
-			ConsoleStyler.WriteHeader ($"[agg-metrics] {title}");
-
-			if (seg == null || seg.Count == 0)
+			if (seg.RecordsCount == 0)
 				{
 				Console.WriteLine ("[agg-metrics] segment is empty.");
 				Console.WriteLine ();
 				return;
 				}
 
-			var day = ComputeLayerMetrics (
-				seg,
-				"Day",
-				r => r.PredLabel_Day,
-				r => (r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day));
-
-			var dayMicro = ComputeLayerMetrics (
-				seg,
-				"Day+Micro",
-				r => r.PredLabel_DayMicro,
-				r => (r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro));
-
-			var total = ComputeLayerMetrics (
-				seg,
-				"Total",
-				r => r.PredLabel,
-				r => (r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total));
-
-			PrintLayerMetrics (day);
-			PrintLayerMetrics (dayMicro);
-			PrintLayerMetrics (total);
+			PrintLayer (seg.Day);
+			PrintLayer (seg.DayMicro);
+			PrintLayer (seg.Total);
 
 			Console.WriteLine ();
 			}
 
-		private static LayerMetrics ComputeLayerMetrics (
-			IReadOnlyList<CausalPredictionRecord> seg,
-			string layerName,
-			Func<CausalPredictionRecord, int> predSelector,
-			Func<CausalPredictionRecord, (double up, double flat, double down)> probSelector )
-			{
-			var conf = new int[3, 3];
-			int n = seg.Count;
-			int correct = 0;
-			double sumLog = 0.0;
-
-			int invalidForLogLoss = 0;
-			int validForLogLoss = 0;
-
-			foreach (var r in seg)
-				{
-				int y = r.TrueLabel;
-				if (y < 0 || y > 2)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Unexpected TrueLabel={y} for date {r.DateUtc:O}. Expected 0/1/2.");
-					}
-
-				int pred = predSelector (r);
-				if (pred < 0 || pred > 2)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Unexpected predicted label={pred} in layer '{layerName}' for date {r.DateUtc:O}. Expected 0/1/2.");
-					}
-
-				var (pUp, pFlat, pDown) = probSelector (r);
-
-				if (pUp < 0.0 || pFlat < 0.0 || pDown < 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Negative probability in layer '{layerName}' for date {r.DateUtc:O}. " +
-						$"P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
-					}
-
-				double sum = pUp + pFlat + pDown;
-				if (sum <= 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Degenerate probability triple (sum<=0) in layer '{layerName}' for date {r.DateUtc:O}. " +
-						$"P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
-					}
-
-				double pTrue = y switch
-					{
-						2 => pUp,
-						1 => pFlat,
-						0 => pDown,
-						_ => throw new InvalidOperationException ("Unreachable label branch")
-						};
-
-				conf[y, pred]++;
-
-				if (pred == y)
-					{
-					correct++;
-					}
-
-				if (pTrue <= 0.0)
-					{
-					invalidForLogLoss++;
-					}
-				else
-					{
-					validForLogLoss++;
-					sumLog += Math.Log (pTrue);
-					}
-				}
-
-			double accuracy = n > 0 ? (double) correct / n : double.NaN;
-			double microF1 = accuracy;
-
-			double logLoss = validForLogLoss == 0
-				? double.NaN
-				: -sumLog / validForLogLoss;
-
-			return new LayerMetrics
-				{
-				LayerName = layerName,
-				Confusion = conf,
-				N = n,
-				Correct = correct,
-				Accuracy = accuracy,
-				MicroF1 = microF1,
-				LogLoss = logLoss,
-				InvalidForLogLoss = invalidForLogLoss,
-				ValidForLogLoss = validForLogLoss
-				};
-			}
-
-		private static void PrintLayerMetrics ( LayerMetrics m )
+		private static void PrintLayer ( LayerMetricsSnapshot m )
 			{
 			ConsoleStyler.WriteHeader ($"[agg-metrics] layer = {m.LayerName}");
 
@@ -289,8 +97,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers
 			var metrics = new TextTable ();
 			metrics.AddHeader ("metric", "value");
 			metrics.AddRow ("N", m.N.ToString ());
-			metrics.AddRow ("accuracy", m.Accuracy.ToString ("0.000"));
-			metrics.AddRow ("micro-F1", m.MicroF1.ToString ("0.000"));
+			metrics.AddRow ("accuracy", double.IsNaN (m.Accuracy) ? "NaN" : m.Accuracy.ToString ("0.000"));
+			metrics.AddRow ("micro-F1", double.IsNaN (m.MicroF1) ? "NaN" : m.MicroF1.ToString ("0.000"));
 			metrics.AddRow ("logloss", double.IsNaN (m.LogLoss) ? "NaN" : m.LogLoss.ToString ("0.000"));
 			metrics.AddRow ("logloss_valid_days", m.ValidForLogLoss.ToString ());
 			metrics.AddRow ("logloss_invalid_days(p_true=0)", m.InvalidForLogLoss.ToString ());

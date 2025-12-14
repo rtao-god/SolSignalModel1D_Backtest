@@ -1,5 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -15,8 +15,8 @@ namespace SolSignalModel1D_Backtest
 		/// </summary>
 		private sealed class DailyRowsBundle
 			{
-			public List<DataRow> AllRows { get; init; } = new ();
-			public List<DataRow> Mornings { get; init; } = new ();
+			public List<BacktestRecord> AllRows { get; init; } = new ();
+			public List<BacktestRecord> Mornings { get; init; } = new ();
 			}
 
 		/// <summary>

@@ -43,14 +43,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 					ageDays <= 180 ? 0.7f :
 					0.4f;
 
-				float clsW = s.Label ? 2.5f : 1.0f;
+				float clsW = s.Forward.TrueLabel ? 2.5f : 1.0f;
 
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Features, feats, Math.Min (s.Features.Length, MlSchema.FeatureCount));
+				Array.Copy (s.Causal.Features, feats, Math.Min (s.Causal.Features.Length, MlSchema.FeatureCount));
 
 				rows.Add (new TrainRow
 					{
-					Label = s.Label,
+					Label = s.Forward.TrueLabel,
 					Features = feats,
 					Weight = timeW * clsW,
 					EntryUtc = s.EntryUtc

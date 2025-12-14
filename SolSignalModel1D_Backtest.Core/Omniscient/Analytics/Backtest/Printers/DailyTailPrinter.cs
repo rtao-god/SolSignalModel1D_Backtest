@@ -50,7 +50,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			foreach (var pr in policyResults.OrderBy (x => x.PolicyName))
 				{
 				var dayTrades = pr.Trades?
-					.Where (tr => tr.DateUtc.Date == lastDate.Date)
+					.Where (tr => tr.DateUtc.Causal.DateUtc == lastDate.Causal.DateUtc)
 					.OrderBy (tr => tr.EntryTimeUtc)
 					.ToList () ?? new List<PnLTrade> ();
 

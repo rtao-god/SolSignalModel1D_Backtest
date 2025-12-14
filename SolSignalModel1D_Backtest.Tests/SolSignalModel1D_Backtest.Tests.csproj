@@ -22,5 +22,6 @@
 
 	<ItemGroup>
 	  <Folder Include="Leakage\Dir\" />
+	  <Folder Include="Leakage\Old\" />
 	</ItemGroup>
 </Project>

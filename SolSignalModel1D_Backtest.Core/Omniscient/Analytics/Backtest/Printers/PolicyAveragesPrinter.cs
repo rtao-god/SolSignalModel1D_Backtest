@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				{
 				// агрегируем по дням (USD)
 				var byDay = r.Trades
-					.GroupBy (tr => tr.DateUtc.Date)
+					.GroupBy (tr => tr.DateUtc.Causal.DateUtc)
 					.Select (g => g.Sum (tr => tr.PositionUsd * tr.NetReturnPct / 100.0))
 					.ToList ();
 

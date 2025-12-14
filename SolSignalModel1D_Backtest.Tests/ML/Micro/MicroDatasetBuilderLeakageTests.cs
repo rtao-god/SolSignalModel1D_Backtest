@@ -18,13 +18,13 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 		public void Build_UsesOnlyRowsUpToTrainUntil ()
 			{
 			var start = new DateTime (2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-			var rows = new List<DataRow> ();
+			var rows = new List<BacktestRecord> ();
 
 			for (int i = 0; i < 50; i++)
 				{
 				var date = start.AddDays (i);
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = date,
 					Features = new double[2],
@@ -41,21 +41,21 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			Assert.NotEmpty (ds.TrainRows);
 			Assert.NotEmpty (ds.MicroRows);
 
-			Assert.All (ds.TrainRows, r => Assert.True (r.Date <= trainUntil));
-			Assert.All (ds.MicroRows, r => Assert.True (r.Date <= trainUntil));
+			Assert.All (ds.TrainRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
+			Assert.All (ds.MicroRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
 			}
 
 		[Fact]
 		public void Build_MicroRowsAreSubsetOfTrainRows ()
 			{
 			var start = new DateTime (2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-			var rows = new List<DataRow> ();
+			var rows = new List<BacktestRecord> ();
 
 			for (int i = 0; i < 50; i++)
 				{
 				var date = start.AddDays (i);
 
-				rows.Add (new DataRow
+				rows.Add (new BacktestRecord
 					{
 					Date = date,
 					Features = new double[2],
@@ -69,10 +69,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			// Позиционный вызов: переименование trainUntil* в Core не ломает тест.
 			var ds = MicroDatasetBuilder.Build (rows, trainUntil);
 
-			var trainDates = ds.TrainRows.Select (r => r.Date).ToHashSet ();
+			var trainDates = ds.TrainRows.Select (r => r.Causal.DateUtc).ToHashSet ();
 
 			foreach (var microRow in ds.MicroRows)
-				Assert.Contains (microRow.Date, trainDates);
+				Assert.Contains (microRow.Causal.DateUtc, trainDates);
 			}
 		}
 	}

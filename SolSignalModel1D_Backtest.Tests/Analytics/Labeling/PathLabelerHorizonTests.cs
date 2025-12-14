@@ -1,33 +1,24 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Xunit;
-using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Infra;
+using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Analytics.Labeling
 	{
-	/// <summary>
-	/// Тест горизонта PathLabeler:
-	/// label и все path-метрики не должны зависеть от минуток
-	/// ПОСЛЕ baseline-exit (Windowing.ComputeBaselineExitUtc).
-	/// </summary>
 	public sealed class PathLabelerHorizonTests
 		{
 		[Fact]
 		public void Label_DoesNotChange_WhenMinutesAfterExitAreMutated ()
 			{
-			// Берём будний день, чтобы Windowing.ComputeBaselineExitUtc не ругался.
-			var entryUtc = new DateTime (2020, 2, 24, 15, 0, 0, DateTimeKind.Utc); // понедельник
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc);
+			var nyTz = TimeZones.NewYork;
 
-			// entryPrice и minMove как в реальной логике.
+			var entryUtc = new DateTime (2020, 2, 24, 15, 0, 0, DateTimeKind.Utc);
+			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+
 			double entryPrice = 100.0;
 			double minMove = 0.02;
 
-			// Генерируем 1m-серию: от entryUtc - 1h до exitUtc + 12h,
-			// чтобы наверняка покрыть весь baseline-горизонт и "дальнее будущее".
 			var minutes = new List<Candle1m> ();
 
 			var start = entryUtc.AddHours (-1);
@@ -48,23 +39,17 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.Labeling
 					});
 				}
 
-			// A-сценарий: исходные минутки.
-			int dirA;
-			DateTime? timeA;
-			double upA, downA;
+			var windowA = Baseline1mWindow.Create (minutes, entryUtc, exitUtc);
 
 			int labelA = PathLabeler.AssignLabel (
-				entryUtc: entryUtc,
+				window: windowA,
 				entryPrice: entryPrice,
 				minMove: minMove,
-				minutes: minutes,
-				firstPassDir: out dirA,
-				firstPassTimeUtc: out timeA,
-				reachedUpPct: out upA,
-				reachedDownPct: out downA);
+				firstPassDir: out int dirA,
+				firstPassTimeUtc: out DateTime? timeA,
+				reachedUpPct: out double upA,
+				reachedDownPct: out double downA);
 
-			// B-сценарий: мутируем ВСЕ минутки ПОСЛЕ exitUtc, чтобы
-			// они выглядели как "адский ракета в космос".
 			var minutesB = minutes
 				.Select (m => new Candle1m
 					{
@@ -85,22 +70,16 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.Labeling
 					}
 				}
 
-			int dirB;
-			DateTime? timeB;
-			double upB, downB;
+			var windowB = Baseline1mWindow.Create (minutesB, entryUtc, exitUtc);
 
 			int labelB = PathLabeler.AssignLabel (
-				entryUtc: entryUtc,
+				window: windowB,
 				entryPrice: entryPrice,
 				minMove: minMove,
-				minutes: minutesB,
-				firstPassDir: out dirB,
-				firstPassTimeUtc: out timeB,
-				reachedUpPct: out upB,
-				reachedDownPct: out downB);
-
-			// Проверяем, что всё, что PathLabeler возвращает, совпадает,
-			// несмотря на то, что "будущее после exit" мы полностью сломали.
+				firstPassDir: out int dirB,
+				firstPassTimeUtc: out DateTime? timeB,
+				reachedUpPct: out double upB,
+				reachedDownPct: out double downB);
 
 			Assert.Equal (labelA, labelB);
 			Assert.Equal (dirA, dirB);

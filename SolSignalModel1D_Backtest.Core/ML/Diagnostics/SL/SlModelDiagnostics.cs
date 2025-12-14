@@ -34,7 +34,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 
 			var minDate = samples.Min (s => s.EntryUtc);
 			var maxDate = samples.Max (s => s.EntryUtc);
-			int pos = samples.Count (s => s.Label);
+			int pos = samples.Count (s => s.Forward.TrueLabel);
 			int neg = samples.Count - pos;
 
 			Console.WriteLine (
@@ -60,8 +60,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 			var data = ml.Data.LoadFromEnumerable (
 				samples.Select (s => new MlSampleBinary
 					{
-					Label = s.Label,
-					Features = s.Features
+					Label = s.Forward.TrueLabel,
+					Features = s.Causal.Features
 					})
 			);
 

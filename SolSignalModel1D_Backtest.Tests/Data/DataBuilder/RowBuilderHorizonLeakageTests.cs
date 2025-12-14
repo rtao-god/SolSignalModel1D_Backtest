@@ -6,12 +6,13 @@ using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
 	/// <summary>
 	/// Тест на "жёсткую" утечку по горизонту:
-	/// фичи DataRow за день D не должны зависеть ни от каких данных t > entryUtc
+	/// фичи BacktestRecord за день D не должны зависеть ни от каких данных t > entryUtc
 	/// (6h, 1m, макро), только от истории до entry.
 	/// Label при этом может меняться.
 	/// </summary>
@@ -109,8 +110,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			var firstDate = start.Date.AddDays (-60);
-			var lastDate = start.Date.AddDays (400);
+			var startDay = start.ToCausalDateUtc ();
+			var firstDate = startDay.AddDays (-60);
+			var lastDate = startDay.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -165,13 +167,13 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				}
 
 			// Макро: считаем допустимым использовать FNG/DXY текущего дня,
-			// но не будущие даты (строго > entryUtc.Date)
+			// но не будущие даты (строго > entryUtc.Causal.DateUtc)
 			var fngB = new Dictionary<DateTime, double> (fngBase);
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
 			foreach (var key in fngBase.Keys.ToList ())
 				{
-				if (key.Date > entryUtc.Date)
+				if (key.Causal.DateUtc > entryUtc.Causal.DateUtc)
 					{
 					fngB[key] = fngBase[key] + 100;   // сильная мутация
 					dxyB[key] = dxyBase[key] + 50.0;
@@ -189,8 +191,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
@@ -199,9 +201,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			// Главное — фичи не должны зависеть от t > entryUtc.
 			Assert.Equal (rowA!.Features.Length, rowB!.Features.Length);
 
-			for (int i = 0; i < rowA.Features.Length; i++)
+			for (int i = 0; i < rowA.Causal.Features.Length; i++)
 				{
-				Assert.Equal (rowA.Features[i], rowB.Features[i], 10);
+				Assert.Equal (rowA.Causal.Features[i], rowB.Causal.Features[i], 10);
 				}
 			}
 		}

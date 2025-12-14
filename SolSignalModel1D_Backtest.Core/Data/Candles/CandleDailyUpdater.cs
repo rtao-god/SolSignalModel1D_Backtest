@@ -109,12 +109,12 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 			else if (fullBackfillFromUtc.HasValue)
 				fromUtc = fullBackfillFromUtc.Value;
 			else
-				fromUtc = DateTime.UtcNow.Date.AddDays (-_catchupDays);
+				fromUtc = DateTime.UtcNow.Causal.DateUtc.AddDays (-_catchupDays);
 
 			var toUtc = DateTime.UtcNow;
 
-			if (!fullBackfillFromUtc.HasValue && (toUtc.Date - fromUtc.Date).TotalDays > _catchupDays)
-				fromUtc = toUtc.Date.AddDays (-_catchupDays);
+			if (!fullBackfillFromUtc.HasValue && (toUtc.Causal.DateUtc - fromUtc.Causal.DateUtc).TotalDays > _catchupDays)
+				fromUtc = toUtc.Causal.DateUtc.AddDays (-_catchupDays);
 
 			var raw = await DataLoading.GetBinanceKlinesRange (_http, _symbol, binanceInterval, fromUtc, toUtc);
 			if (raw.Count == 0)
@@ -205,13 +205,13 @@ namespace SolSignalModel1D_Backtest.Core.Data.Candles
 				if (lastCombined.HasValue)
 					fromUtc = lastCombined.Value + tf;
 				else
-					fromUtc = DateTime.UtcNow.Date.AddDays (-_catchupDays);
+					fromUtc = DateTime.UtcNow.Causal.DateUtc.AddDays (-_catchupDays);
 				}
 
 			var toUtc = DateTime.UtcNow;
 
-			if (!fullBackfillFromUtc.HasValue && (toUtc.Date - fromUtc.Date).TotalDays > _catchupDays)
-				fromUtc = toUtc.Date.AddDays (-_catchupDays);
+			if (!fullBackfillFromUtc.HasValue && (toUtc.Causal.DateUtc - fromUtc.Causal.DateUtc).TotalDays > _catchupDays)
+				fromUtc = toUtc.Causal.DateUtc.AddDays (-_catchupDays);
 
 			var raw = await DataLoading.GetBinanceKlinesRange (_http, _symbol, interval, fromUtc, toUtc);
 			if (raw.Count == 0)

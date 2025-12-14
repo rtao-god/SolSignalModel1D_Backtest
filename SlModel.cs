@@ -6,7 +6,7 @@ using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -21,7 +21,7 @@ namespace SolSignalModel1D_Backtest
 		/// как выбор порога "сильного" дня влияет на качество.
 		/// </summary>
 		private static void TrainAndApplySlModelOffline (
-			IReadOnlyList<DataRow> allRows,
+			IReadOnlyList<BacktestRecord> allRows,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle1m> sol1m,
@@ -58,18 +58,18 @@ namespace SolSignalModel1D_Backtest
 			const double MainStrongMinMoveThreshold = 0.030;
 
 			// ===== 1. Каузальный train-сабсет для SL-модели =====
-			// Берём только те DataRow, которые лежат в train-периоде дневной модели.
+			// Берём только те BacktestRecord, которые лежат в train-периоде дневной модели.
 			// Это убирает утечку: OOS-даты не попадают в обучающий датасет SL.
-			// _trainUntilUtc по контракту задан в терминах baseline-exit, поэтому сравнение entry-даты (r.Date <= _trainUntilUtc)
+			// _trainUntilUtc по контракту задан в терминах baseline-exit, поэтому сравнение entry-даты (r.Causal.DateUtc <= _trainUntilUtc)
 			// некорректно и может вернуть boundary leakage. Здесь режем строго через TrainBoundary.
 			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
 
 			// Стабилизируем порядок до сплита: одинаковый вход => одинаковый результат.
 			var orderedAllRows = allRows
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
-			var split = boundary.Split (orderedAllRows, r => r.Date);
+			var split = boundary.Split (orderedAllRows, r => r.Causal.DateUtc);
 
 			// По требованию: ничего не игнорировать.
 			if (split.Excluded.Count > 0)
@@ -98,13 +98,13 @@ namespace SolSignalModel1D_Backtest
 					"training SL-model on full allRows (train==test for SL).");
 
 				slTrainRows = allRows
-					.OrderBy (r => r.Date)
+					.OrderBy (r => r.Causal.DateUtc)
 					.ToList ();
 				}
 
 			// Логируем период train-части для SL.
-			var slTrainMin = slTrainRows.Min (r => r.Date);
-			var slTrainMax = slTrainRows.Max (r => r.Date);
+			var slTrainMin = slTrainRows.Min (r => r.Causal.DateUtc);
+			var slTrainMax = slTrainRows.Max (r => r.Causal.DateUtc);
 			Console.WriteLine (
 				$"[sl-offline] train rows = {slTrainRows.Count}, " +
 				$"period = {slTrainMin:yyyy-MM-dd}..{slTrainMax:yyyy-MM-dd}, " +
@@ -121,7 +121,7 @@ namespace SolSignalModel1D_Backtest
 				// Селектор "сильный/слабый" для данного порога:
 				//   - мягкий пол 0.02;
 				//   - логика strong/weak в SlStrongUtils.
-				Func<DataRow, bool> strongSelector = r =>
+				Func<BacktestRecord, bool> strongSelector = r =>
 				{
 					double mm = r.MinMove > 0 ? r.MinMove : 0.02;
 					return SlStrongUtils.IsStrongByMinMove (mm, r.RegimeDown, thr);
@@ -139,7 +139,7 @@ namespace SolSignalModel1D_Backtest
 
 				samplesByThreshold[thr] = samples;
 
-				int slCountThr = samples.Count (s => s.Label);
+				int slCountThr = samples.Count (s => s.Forward.TrueLabel);
 				int tpCountThr = samples.Count - slCountThr;
 
 				Console.WriteLine (
@@ -157,7 +157,7 @@ namespace SolSignalModel1D_Backtest
 
 			// ===== 3. Оффлайн-тренировка основной SL-модели (для runtime) =====
 			var trainer = new SlFirstTrainer ();
-			var asOf = slTrainRows.Max (r => r.Date);
+			var asOf = slTrainRows.Max (r => r.Causal.DateUtc);
 			var slModel = trainer.Train (slSamples, asOf);
 			var slEngine = trainer.CreateEngine (slModel);
 
@@ -339,7 +339,7 @@ namespace SolSignalModel1D_Backtest
 
 			foreach (var s in samples)
 				{
-				if (s.Label) trainPos++;
+				if (s.Forward.TrueLabel) trainPos++;
 				else trainNeg++;
 
 				var pred = engine.Predict (s);
@@ -348,7 +348,7 @@ namespace SolSignalModel1D_Backtest
 				if (!high) continue;
 
 				trainPredHigh++;
-				if (s.Label) trainTp++;
+				if (s.Forward.TrueLabel) trainTp++;
 				else trainFp++;
 				}
 

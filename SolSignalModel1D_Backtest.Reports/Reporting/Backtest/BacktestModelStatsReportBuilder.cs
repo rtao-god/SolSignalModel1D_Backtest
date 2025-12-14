@@ -213,7 +213,7 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			section.Items.Add (new KeyValueItem
 				{
 				Key = "Label",
-				Value = segment.Label ?? string.Empty
+				Value = segment.Forward.TrueLabel ?? string.Empty
 				});
 
 			section.Items.Add (new KeyValueItem

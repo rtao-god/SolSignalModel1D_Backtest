@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Data.Windowing;
+using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 	{

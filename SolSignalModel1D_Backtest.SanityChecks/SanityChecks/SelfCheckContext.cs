@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 	{
@@ -13,10 +13,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 	public sealed class SelfCheckContext
 		{
 		/// <summary>Все дневные строки (train + OOS).</summary>
-		public IReadOnlyList<DataRow> AllRows { get; init; } = Array.Empty<DataRow> ();
+		public IReadOnlyList<BacktestRecord> AllRows { get; init; } = Array.Empty<BacktestRecord> ();
 
 		/// <summary>Только утренние точки (NY-окно входа).</summary>
-		public IReadOnlyList<DataRow> Mornings { get; init; } = Array.Empty<DataRow> ();
+		public IReadOnlyList<BacktestRecord> Mornings { get; init; } = Array.Empty<BacktestRecord> ();
 
 		/// <summary>Прогнозы дневной модели по mornings.</summary>
 		public IReadOnlyList<BacktestRecord> Records { get; init; } = Array.Empty<BacktestRecord> ();

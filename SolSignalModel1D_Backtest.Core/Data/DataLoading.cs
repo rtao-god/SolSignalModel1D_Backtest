@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Text.Json;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
@@ -313,7 +314,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 						{
 						if (!el.TryGetProperty ("timestamp", out var tsEl)) continue;
 						if (!long.TryParse (tsEl.GetString (), out long ts)) continue;
-						DateTime d = DateTimeOffset.FromUnixTimeSeconds (ts).UtcDateTime.Date;
+						DateTime d = DateTimeOffset.FromUnixTimeSeconds (ts).UtcDateTime.Causal.DateUtc;
 						if (el.TryGetProperty ("value", out var vEl) && int.TryParse (vEl.GetString (), out int v))
 							dict[d] = v;
 						}
@@ -358,8 +359,9 @@ namespace SolSignalModel1D_Backtest.Core.Data
 							continue;
 
 						double idx = IndexFromRates (day.Value, out int used);
+						DateTime d = DateTimeOffset.FromUnixTimeSeconds (ts).UtcDateTime.Causal.DateUtc;
 						if (!double.IsNaN (idx) && used >= 4)
-							dict[d.Date] = idx;
+							dict[d.Causal.DateUtc] = idx;
 						}
 					}
 
@@ -408,7 +410,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				var dict = new Dictionary<DateTime, (double, double)> ();
 				foreach (var e in arr)
-					dict[e.Date.Date] = (e.Funding, e.OI);
+					dict[e.Date.ToCausalDateUtc ()] = (e.Funding, e.OI);
 
 				Console.WriteLine ($"[extra] загружено {dict.Count} строк доп. данных из '{path}'");
 				return dict;

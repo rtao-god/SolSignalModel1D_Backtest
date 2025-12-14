@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using DataRow = SolSignalModel1D_Backtest.Core.Data.DataBuilder.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 	{
@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 			{
 			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
 
-			var mornings = ctx.Mornings ?? Array.Empty<DataRow> ();
+			var mornings = ctx.Mornings ?? Array.Empty<BacktestRecord> ();
 			var records = ctx.Records ?? Array.Empty<BacktestRecord> ();
 
 			if (mornings.Count == 0 || records.Count == 0)
@@ -33,7 +33,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 			// Берём утренние точки с path-based микро-разметкой.
 			var labeled = mornings
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.Date)
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			if (labeled.Count < 20)
@@ -43,7 +43,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 				}
 
 			// Мапа дата → факт (FactMicroUp/Down).
-			var factByDate = labeled.ToDictionary (r => r.Date, r => r);
+			var factByDate = labeled.ToDictionary (r => r.Causal.DateUtc, r => r);
 
 			// Собираем пары (прогноз микро-слоя + факт).
 			var pairs = new List<(DateTime DateUtc, bool PredUp, bool FactUp)> ();

@@ -72,11 +72,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 
 			foreach (var r in scoredRows)
 				{
-				var feats = (float[]) r.Features.Clone ();
+				var feats = (float[]) r.Causal.Features.Clone ();
 
 				evalSamples.Add (new EvalSample
 					{
-					Label = r.Label,
+					Label = r.Forward.TrueLabel,
 					Features = feats
 					});
 				}
@@ -133,12 +133,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 				for (int i = 0; i < evalSamples.Count; i++)
 					{
 					var src = evalSamples[i];
-					var featCopy = (float[]) src.Features.Clone ();
+					var featCopy = (float[]) src.Causal.Features.Clone ();
 					featCopy[j] = col[idx[i]];
 
 					permSamples.Add (new EvalSample
 						{
-						Label = src.Label,
+						Label = src.Forward.TrueLabel,
 						Features = featCopy
 						});
 					}
@@ -187,10 +187,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 
 			foreach (var r in rows)
 				{
-				double yLabel = r.Label ? 1.0 : 0.0;
+				double yLabel = r.Forward.TrueLabel ? 1.0 : 0.0;
 				double yScore = r.Score;
 
-				var f = r.Features;
+				var f = r.Causal.Features;
 				if (f == null) continue;
 
 				int len = Math.Min (f.Length, featCount);
@@ -202,7 +202,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 					sumX[j] += x;
 					sumX2[j] += x * x;
 
-					if (r.Label)
+					if (r.Forward.TrueLabel)
 						{
 						sumPos[j] += x;
 						cntPos[j]++;

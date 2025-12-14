@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils;
 using System;
@@ -9,17 +10,17 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 	{
 	public sealed class DailyDataset
 		{
-		public IReadOnlyList<DataRow> TrainRows { get; }
-		public IReadOnlyList<DataRow> MoveTrainRows { get; }
-		public IReadOnlyList<DataRow> DirNormalRows { get; }
-		public IReadOnlyList<DataRow> DirDownRows { get; }
+		public IReadOnlyList<BacktestRecord> TrainRows { get; }
+		public IReadOnlyList<BacktestRecord> MoveTrainRows { get; }
+		public IReadOnlyList<BacktestRecord> DirNormalRows { get; }
+		public IReadOnlyList<BacktestRecord> DirDownRows { get; }
 		public DateTime TrainUntilUtc { get; }
 
 		public DailyDataset (
-			IReadOnlyList<DataRow> trainRows,
-			IReadOnlyList<DataRow> moveTrainRows,
-			IReadOnlyList<DataRow> dirNormalRows,
-			IReadOnlyList<DataRow> dirDownRows,
+			IReadOnlyList<BacktestRecord> trainRows,
+			IReadOnlyList<BacktestRecord> moveTrainRows,
+			IReadOnlyList<BacktestRecord> dirNormalRows,
+			IReadOnlyList<BacktestRecord> dirDownRows,
 			DateTime trainUntilUtc )
 			{
 			TrainRows = trainRows ?? throw new ArgumentNullException (nameof (trainRows));
@@ -41,7 +42,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 		private static readonly TimeZoneInfo NyTz = Windowing.NyTz;
 
 		public static DailyDataset Build (
-			IReadOnlyList<DataRow> allRows,
+			IReadOnlyList<BacktestRecord> allRows,
 			DateTime trainUntilUtc,
 			bool balanceMove,
 			bool balanceDir,
@@ -56,32 +57,32 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
 
 			// Контракт: allRows уже отсортирован на бутстрапе/RowBuilder.
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Date, "daily-dataset.allRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Causal.DateUtc, "daily-dataset.allRows");
 
 			// Split требует список: не сортируем, только приводим тип при необходимости.
-			var ordered = allRows as List<DataRow> ?? allRows.ToList ();
+			var ordered = allRows as List<BacktestRecord> ?? allRows.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
-			var split = boundary.Split (ordered, r => r.Date);
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.Date.ToString ("O"));
+					.Select (r => r.Causal.DateUtc.ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[daily-dataset] Found excluded days (baseline-exit undefined). " +
 					$"count={split.Excluded.Count}. sample=[{string.Join (", ", sample)}].");
 				}
 
-			// Builder ниже ожидает List<DataRow>.
-			List<DataRow> trainEligible = split.Train as List<DataRow> ?? split.Train.ToList ();
+			// Builder ниже ожидает List<BacktestRecord>.
+			List<BacktestRecord> trainEligible = split.Train as List<BacktestRecord> ?? split.Train.ToList ();
 
 			if (datesToExclude != null && datesToExclude.Count > 0)
 				{
 				trainEligible = trainEligible
-					.Where (r => !datesToExclude.Contains (r.Date))
+					.Where (r => !datesToExclude.Contains (r.Causal.DateUtc))
 					.ToList ();
 				}
 

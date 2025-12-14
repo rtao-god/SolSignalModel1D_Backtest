@@ -454,7 +454,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Utils.Backtest
 					// между дном просадки и моментом восстановления.
 					var signalDays = r.Trades?
 						.Where (tr => tr.ExitTimeUtc > ddValleyTime && tr.ExitTimeUtc <= recoverTime.Value)
-						.Select (tr => tr.DateUtc.Date)
+						.Select (tr => tr.DateUtc.Causal.DateUtc)
 						.Distinct ()
 						.Count () ?? 0;
 

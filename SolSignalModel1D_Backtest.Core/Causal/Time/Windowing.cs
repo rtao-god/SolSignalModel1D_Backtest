@@ -4,89 +4,111 @@ using SolSignalModel1D_Backtest.Core.Infra;
 namespace SolSignalModel1D_Backtest.Core.Causal.Time
 	{
 	/// <summary>
-	/// Каузальный time-contract для NY-окон:
-	/// - единая NY таймзона (один источник правды);
-	/// - вычисление baseline-exit (entryUtc -> следующее рабочее NY утро 08:00 - 2 минуты);
-	/// - проверка "NY morning" для entry-точек.
+	/// Каузальный time-contract для NY-окон.
+	/// Инварианты:
+	/// - входы всегда UTC;
+	/// - weekend-entry запрещён (baseline-exit не определён);
+	/// - "NY morning" зависит от DST: 07:00 зимой / 08:00 летом;
+	/// - baseline-exit = следующее NY-утро (07/08) минус 2 минуты (06:58/07:58).
 	/// </summary>
 	public static class Windowing
 		{
 		/// <summary>
-		/// Единый таймзон Нью-Йорка для всех расчётов окон.
-		/// Алиас к TimeZones.NewYork, чтобы был один источник правды.
+		/// Единый источник таймзоны Нью-Йорка для всего проекта.
 		/// </summary>
-		public static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+		public static TimeZoneInfo NyTz => TimeZones.NewYork;
 
 		/// <summary>
-		/// Основной удобный API: baseline-exit для дневной сделки в фиксированной NY-таймзоне.
-		/// </summary>
-		public static DateTime ComputeBaselineExitUtc ( DateTime entryUtc )
-			{
-			return ComputeBaselineExitUtc (entryUtc, NyTz);
-			}
-
-		/// <summary>
-		/// Низкоуровневая версия с явной таймзоной.
-		/// Вычисляет:
-		/// - следующее рабочее NY-утро 08:00 локального времени;
-		/// - минус 2 минуты (служебный оффсет).
-		/// </summary>
-		public static DateTime ComputeBaselineExitUtc ( DateTime entryUtc, TimeZoneInfo nyTz )
-			{
-			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
-
-			var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
-
-			// Контракт: для weekend entry baseline-exit не определён.
-			if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-				throw new InvalidOperationException (
-					$"Baseline exit is not defined for weekend entry: {entryUtc:O}");
-
-			DateTime exitDateLocal;
-
-			if (ny.DayOfWeek is DayOfWeek.Monday or DayOfWeek.Tuesday or DayOfWeek.Wednesday or DayOfWeek.Thursday)
-				{
-				// Переход на следующее утро в рабочий день.
-				exitDateLocal = ny.Date.AddDays (1);
-				}
-			else
-				{
-				// Для пятницы: следующее утро в первый рабочий день после уикенда.
-				exitDateLocal = ny.Date.AddDays (1);
-				while (exitDateLocal.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-					{
-					exitDateLocal = exitDateLocal.AddDays (1);
-					}
-				}
-
-			// 08:00 локального NY-времени (DST учитывается при конвертации в UTC).
-			var exitLocal = new DateTime (
-				exitDateLocal.Year,
-				exitDateLocal.Month,
-				exitDateLocal.Day,
-				8, 0, 0,
-				DateTimeKind.Unspecified);
-
-			var exitUtc = TimeZoneInfo.ConvertTimeToUtc (exitLocal, nyTz);
-
-			// Смещение на 2 минуты назад для визуального разделения открытия/закрытия.
-			return exitUtc.AddMinutes (-2);
-			}
-
-		/// <summary>
-		/// Проверяет, является ли момент utc утренним NY-окном:
-		/// будний день и 7/8 часов в зависимости от DST.
+		/// True, если момент UTC соответствует открытию "NY morning bar":
+		/// будний день и ровно 07:00 (зима) или 08:00 (DST) по NY локальному времени.
 		/// </summary>
 		public static bool IsNyMorning ( DateTime utc, TimeZoneInfo nyTz )
 			{
+			EnsureUtc (utc, nameof (utc));
 			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
 
-			var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, nyTz);
-			if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+			var local = TimeZoneInfo.ConvertTimeFromUtc (utc, nyTz);
+			if (local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
 				return false;
 
-			bool isDst = nyTz.IsDaylightSavingTime (ny);
-			return isDst ? ny.Hour == 8 : ny.Hour == 7;
+			// Ожидаемый час считается по локальному времени этого же момента,
+			// иначе на границах DST можно получить неверную классификацию.
+			int expectedHour = nyTz.IsDaylightSavingTime (local) ? 8 : 7;
+
+			return local.Hour == expectedHour
+				&& local.Minute == 0
+				&& local.Second == 0;
+			}
+
+		public static bool IsNyMorning ( DateTime utc ) => IsNyMorning (utc, NyTz);
+
+		/// <summary>
+		/// Основной API: baseline-exit для дневной сделки.
+		/// Weekend-entry запрещён: кидаем исключение (контракт строгий).
+		/// </summary>
+		public static DateTime ComputeBaselineExitUtc ( DateTime entryUtc ) =>
+			ComputeBaselineExitUtc (entryUtc, NyTz);
+
+		/// <summary>
+		/// То же, но с явной таймзоной.
+		/// Baseline-exit = следующее "NY morning" минус 2 минуты.
+		/// Для Friday переносим на ближайший рабочий день после уикенда.
+		/// </summary>
+		public static DateTime ComputeBaselineExitUtc ( DateTime entryUtc, TimeZoneInfo nyTz )
+			{
+			if (!TryComputeBaselineExitUtc (entryUtc, nyTz, out var exitUtc))
+				throw new InvalidOperationException ($"[windowing] Weekend entry is not allowed: {entryUtc:O}.");
+
+			return exitUtc;
+			}
+
+		/// <summary>
+		/// Мягкий вариант для сплитов/фильтров:
+		/// - на weekend возвращает false (exitUtc=default);
+		/// - на будни возвращает true и валидный exitUtc.
+		/// Важно: любые "невозможные" состояния (exit<=entry, bad Kind) не маскируем.
+		/// </summary>
+		public static bool TryComputeBaselineExitUtc ( DateTime entryUtc, TimeZoneInfo nyTz, out DateTime exitUtc )
+			{
+			EnsureUtc (entryUtc, nameof (entryUtc));
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+
+			var entryLocal = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
+
+			if (entryLocal.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+				{
+				exitUtc = default;
+				return false;
+				}
+
+			// Friday -> Monday (пропускаем выходные), иначе +1 день.
+			int addDays = entryLocal.DayOfWeek == DayOfWeek.Friday ? 3 : 1;
+			var targetDate = entryLocal.Date.AddDays (addDays);
+
+			// DST определяем по "целевому дню", чтобы Sunday DST switch не ломал инвариант.
+			var noon = new DateTime (targetDate.Year, targetDate.Month, targetDate.Day, 12, 0, 0, DateTimeKind.Unspecified);
+			bool dst = nyTz.IsDaylightSavingTime (noon);
+
+			int morningHour = dst ? 8 : 7;
+			var nextMorningLocal = new DateTime (
+				targetDate.Year, targetDate.Month, targetDate.Day,
+				morningHour, 0, 0,
+				DateTimeKind.Unspecified);
+
+			// 2 минуты назад — чтобы окно заканчивалось ДО следующего утреннего бара.
+			var exitLocal = nextMorningLocal.AddMinutes (-2);
+			exitUtc = TimeZoneInfo.ConvertTimeToUtc (exitLocal, nyTz);
+
+			if (exitUtc <= entryUtc)
+				throw new InvalidOperationException ($"[windowing] Invalid baseline window: start={entryUtc:O}, end={exitUtc:O}.");
+
+			return true;
+			}
+
+		private static void EnsureUtc ( DateTime dt, string name )
+			{
+			if (dt.Kind != DateTimeKind.Utc)
+				throw new InvalidOperationException ($"[windowing] {name} must be UTC. Got Kind={dt.Kind}.");
 			}
 		}
 	}

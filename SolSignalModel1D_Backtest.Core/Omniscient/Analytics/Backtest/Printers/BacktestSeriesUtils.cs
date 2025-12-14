@@ -13,12 +13,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			var dict = new SortedDictionary<DateTime, double> ();
 			double last = startEquity;
-			dict[DateTime.MinValue.Date] = startEquity;
+			dict[DateTime.MinValue.Causal.DateUtc] = startEquity;
 
 			foreach (var t in trades.OrderBy (t => t.DateUtc))
 				{
 				last = t.EquityAfter;
-				dict[t.DateUtc.Date] = last;
+				dict[t.DateUtc.Causal.DateUtc] = last;
 				}
 
 			return dict;
@@ -28,7 +28,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			SortedDictionary<DateTime, double> dailyEq )
 			{
 			var points = dailyEq
-				.Where (kv => kv.Key != DateTime.MinValue.Date)
+				.Where (kv => kv.Key != DateTime.MinValue.Causal.DateUtc)
 				.ToList ();
 
 			if (points.Count < 2)
@@ -73,7 +73,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			double peak = 0.0;
 			double maxDd = 0.0;
-			foreach (var kv in dailyEq.Where (k => k.Key != DateTime.MinValue.Date))
+			foreach (var kv in dailyEq.Where (k => k.Key != DateTime.MinValue.Causal.DateUtc))
 				{
 				double v = kv.Value;
 				if (v > peak) peak = v;

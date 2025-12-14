@@ -130,7 +130,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 			int ok = 0;
 			foreach (var r in records)
 				{
-				if (r.Causal.PredLabel == r.Causal.TrueLabel)
+				if (r.PredLabel_Total == r.TrueLabel)
 					ok++;
 				}
 
@@ -150,7 +150,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 			foreach (var r in records)
 				{
 				int randomLabel = rnd.Next (classesCount);
-				if (randomLabel == r.Causal.TrueLabel)
+				if (randomLabel == r.TrueLabel)
 					ok++;
 				}
 

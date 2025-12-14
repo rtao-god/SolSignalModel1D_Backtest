@@ -92,12 +92,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Date.AddDays (-120);
-			var lastDate = start.Date.AddDays (400);
+			var firstDate = start.Causal.DateUtc.AddDays (-120);
+			var lastDate = start.Causal.DateUtc.AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// Используем Kind = Utc, чтобы совпасть с openUtc.Date.
+				// Используем Kind = Utc, чтобы совпасть с openUtc.Causal.DateUtc.
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fngBase[key] = 50.0;
 				dxyBase[key] = 100.0;
@@ -145,13 +145,13 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				});
 
 			var entryUtc = solAll6h[entryIdx].OpenTimeUtc;
-			var entryDate = entryUtc.Date;
+			var entryDate = entryUtc.Causal.DateUtc;
 
 			// B: мутируем ТОЛЬКО extraDaily для всех дат > entryDate.
 			// Это "чистое будущее" относительно дня entryUtc.
 			foreach (var key in extraDailyB.Keys.ToList ())
 				{
-				if (key.Date > entryDate)
+				if (key.Causal.DateUtc > entryDate)
 					{
 					var ex = extraDailyB[key];
 					// Сильная мутация: funding + 0.5, OI * 10.
@@ -182,8 +182,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDailyB,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
@@ -192,10 +192,10 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			Assert.Equal (rowA!.Label, rowB!.Label);
 
 			// Фичи тоже не должны зависеть от extraDaily после entryDate.
-			Assert.Equal (rowA.Features.Length, rowB.Features.Length);
-			for (int i = 0; i < rowA.Features.Length; i++)
+			Assert.Equal (rowA.Causal.Features.Length, rowB.Causal.Features.Length);
+			for (int i = 0; i < rowA.Causal.Features.Length; i++)
 				{
-				Assert.Equal (rowA.Features[i], rowB.Features[i], 10);
+				Assert.Equal (rowA.Causal.Features[i], rowB.Causal.Features[i], 10);
 				}
 			}
 		}
