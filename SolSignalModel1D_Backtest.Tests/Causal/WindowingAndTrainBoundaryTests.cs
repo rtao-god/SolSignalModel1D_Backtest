@@ -18,7 +18,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 		[Fact]
 		public void ComputeBaselineExitUtc_Throws_ForWeekendEntry ()
 			{
-			// 2020-02-22 это суббота. Берём дневное UTC, чтобы в NY тоже была суббота.
+			// 2020-02-22 — суббота. Берём UTC-момент так, чтобы в NY это тоже была суббота.
 			var entryUtc = new DateTime (2020, 2, 22, 15, 0, 0, DateTimeKind.Utc);
 
 			var ex = Assert.Throws<InvalidOperationException> (
@@ -37,21 +37,22 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 
 			Assert.True (exitUtc > entryUtc);
 
-			var ny = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, Windowing.NyTz);
+			var exitNy = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, Windowing.NyTz);
 
 			// По контракту это 08:00 - 2 минуты => 07:58 NY.
-			Assert.Equal (7, ny.Hour);
-			Assert.Equal (58, ny.Minute);
+			Assert.Equal (7, exitNy.Hour);
+			Assert.Equal (58, exitNy.Minute);
 
-			// Это должно быть "следующее утро" (в NY).
+			// Это должно быть "следующее утро" в смысле NY-календарного дня.
+			// Сравниваем локальные даты (оба DateTime здесь Unspecified и принадлежат NY-контексту).
 			var entryNy = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, Windowing.NyTz);
-			Assert.True (ny.Causal.DateUtc >= entryNy.Causal.DateUtc.AddDays (1));
+			Assert.True (exitNy.Date >= entryNy.Date.AddDays (1));
 			}
 
 		[Fact]
 		public void ComputeBaselineExitUtc_ForFriday_GoesToNextBusinessMorning ()
 			{
-			// 2020-02-28 это пятница.
+			// 2020-02-28 — пятница.
 			var entryUtc = new DateTime (2020, 2, 28, 15, 0, 0, DateTimeKind.Utc);
 
 			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc);

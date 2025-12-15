@@ -83,7 +83,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			if (allRows.Count == 0) throw new InvalidOperationException ("RunDailyPipelineAsync: пустой allRows.");
 
 			// Стабильный порядок по времени.
-			var ordered = allRows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			var ordered = allRows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 
 			var maxDate = ordered[^1].Date;
 
@@ -105,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			// - заново сортируем,
 			// - заново берём trainRows,
 			// - приводим Features к каузальному вектору (иначе тренировка/инференс могут разъехаться).
-			ordered = allRows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			ordered = allRows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 			trainRows = TakeTrainRows (ordered, trainUntil);
 			SyncFeaturesWithCausalVector (trainRows);
 
@@ -126,11 +126,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			foreach (var r in ordered)
 				{
-				if (r.Causal.DateUtc <= trainUntil)
+				if (r.ToCausalDateUtc() <= trainUntil)
 					continue;
 
 				var p = engine.PredictCausal (r.ToCausal ());
-				oos.Add ((r.Causal.DateUtc, r.Forward.TrueLabel, p.Class));
+				oos.Add ((r.ToCausalDateUtc(), r.Forward.TrueLabel, p.Class));
 				}
 
 			var acc = ComputeAccuracy (oos);
@@ -159,7 +159,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var train = new List<BacktestRecord> (orderedByDate.Count);
 			foreach (var r in orderedByDate)
 				{
-				if (r.Causal.DateUtc <= trainUntilUtc)
+				if (r.ToCausalDateUtc() <= trainUntilUtc)
 					train.Add (r);
 				else
 					break;
@@ -185,7 +185,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var train = new List<BacktestRecord> (rows.Count);
 			foreach (var r in rows)
 				{
-				if (r.Causal.DateUtc <= trainUntilUtc)
+				if (r.ToCausalDateUtc() <= trainUntilUtc)
 					train.Add (r);
 				}
 
@@ -211,7 +211,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			foreach (var r in rows)
 				{
-				if (r.Causal.DateUtc > trainUntilUtc)
+				if (r.ToCausalDateUtc() > trainUntilUtc)
 					continue;
 
 				var feats = r.Causal.Features;

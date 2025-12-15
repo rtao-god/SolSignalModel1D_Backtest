@@ -1,12 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Microsoft.ML;
+﻿using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Micro
 	{
@@ -21,12 +23,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 			if (rows.Count == 0)
 				throw new ArgumentException ("rows must be non-empty.", nameof (rows));
 
+			// В проекте BacktestRecord хранит дату как DateUtc (UTC-инвариант).
+			// Проверяем Kind именно у DateUtc, т.к. свойства Date у BacktestRecord нет.
 			for (int i = 0; i < rows.Count; i++)
 				{
-				if (rows[i].Date.Kind != DateTimeKind.Utc)
+				if (rows[i].DateUtc.Kind != DateTimeKind.Utc)
 					{
 					throw new InvalidOperationException (
-						$"[2stage-micro] rows[{i}].Date must be UTC, got Kind={rows[i].Date.Kind}, Date={rows[i].Date:O}.");
+						$"[2stage-micro] rows[{i}].DateUtc must be UTC, got Kind={rows[i].DateUtc.Kind}, Date={rows[i].DateUtc:O}.");
 					}
 				}
 
@@ -106,7 +110,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 			while (iu < upBalanced.Count && id < dnBalanced.Count)
 				{
-				if (upBalanced[iu].Date <= dnBalanced[id].Date)
+				// У BacktestRecord дата — DateUtc.
+				if (upBalanced[iu].DateUtc <= dnBalanced[id].DateUtc)
 					flats.Add (upBalanced[iu++]);
 				else
 					flats.Add (dnBalanced[id++]);
@@ -122,7 +127,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 			foreach (var r in flats)
 				{
-				var feats = MlTrainingUtils.ToFloatFixed (r.Causal.Features);
+				var feats = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector);
 
 				if (feats == null)
 					{
@@ -204,7 +209,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-				var entryUtc = rows[i].Date;
+				// У BacktestRecord дата входа — DateUtc.
+				var entryUtc = rows[i].DateUtc;
 
 				if (entryUtc.Kind != DateTimeKind.Utc)
 					{

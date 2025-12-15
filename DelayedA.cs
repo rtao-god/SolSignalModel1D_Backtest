@@ -71,7 +71,7 @@ namespace SolSignalModel1D_Backtest
 
 			// Обучаем модель A на всей выборке (каузально: asOf = последняя дата + 1 день)
 			var pullbackTrainer = new PullbackContinuationTrainer ();
-			DateTime asOfDate = allRows.Max (r => r.Causal.DateUtc).AddDays (1);
+			DateTime asOfDate = allRows.Max (r => r.ToCausalDateUtc()).AddDays (1);
 			var pullbackModel = pullbackTrainer.Train (pullbackSamples, asOfDate);
 			var pullbackEngine = pullbackTrainer.CreateEngine (pullbackModel);
 
@@ -98,11 +98,12 @@ namespace SolSignalModel1D_Backtest
 					}
 
 				// 1. Гейт по SL-модели: используем A только если SL-модель считает день рискованным.
-				if (!causal.SlHighDecision)
+				if (causal.SlHighDecision != true)
 					{
 					causal.DelayedEntryUsed = false;
 					continue;
 					}
+
 
 				// dayStart = NY-утро (через BacktestRecord.DateUtc)
 				DateTime dayStart = rec.DateUtc;
@@ -111,7 +112,10 @@ namespace SolSignalModel1D_Backtest
 				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
 
 				bool strongSignal = (causal.PredLabel == 2 || causal.PredLabel == 0);
-				double dayMinMove = causal.MinMove > 0 ? causal.MinMove : 0.02;
+				if (double.IsNaN (causal.MinMove) || double.IsInfinity (causal.MinMove) || causal.MinMove <= 0.0)
+					throw new InvalidOperationException ($"[PopulateDelayedA] MinMove must be finite and positive for {dayStart:O}.");
+
+				double dayMinMove = causal.MinMove;
 
 				// 1h внутри baseline-окна — для фич модели A
 				var dayHours = sol1h

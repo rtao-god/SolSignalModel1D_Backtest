@@ -1,34 +1,36 @@
-﻿using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 	{
 	/// <summary>
 	/// Единственная точка, где считается "текущий прогноз":
 	/// - выбор последней записи;
-	/// - forward 24h (из PredictionRecord);
+	/// - forward 24h (если присутствует в записи);
 	/// - торговые планы по всем политикам и веткам BASE/ANTI-D.
 	///
-	/// Семантика веток:
-	/// - BASE: торгует только нерискованные дни по направлению дневной модели;
-	/// - ANTI-D: берёт только рискованные дни и переворачивает направление (LONG→SHORT, SHORT→LONG).
+	/// Важный инвариант:
+	/// политики плеча здесь строго каузальные (ICausalLeveragePolicy → CausalPredictionRecord),
+	/// чтобы исключить утечки через доступ к forward-фактам.
 	/// </summary>
 	public static class CurrentPredictionSnapshotBuilder
 		{
 		/// <summary>
 		/// Размер окна истории (в днях) для бэкфилла "текущего прогноза".
-		/// Это константа по умолчанию, которую удобно править руками.
 		/// </summary>
 		public const int DefaultHistoryWindowDays = 60;
 
 		/// <summary>
-		/// "Текущий" прогноз: берётся последняя PredictionRecord по времени.
-		/// Старое поведение сохранено, но реализация вынесена в BuildFromRecord.
+		/// "Текущий" прогноз: берётся последняя запись по времени.
 		/// </summary>
 		public static CurrentPredictionSnapshot Build (
 			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ILeveragePolicy> policies,
+			IReadOnlyList<ICausalLeveragePolicy> policies,
 			double walletBalanceUsd )
 			{
 			if (records == null)
@@ -38,9 +40,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 			if (records.Count == 0)
 				throw new InvalidOperationException (
-					"[current] records пустой при построении CurrentPredictionSnapshot — нет ни одной PredictionRecord");
+					"[current] records пустой при построении CurrentPredictionSnapshot — нет ни одной записи");
 
-			// Берётся последняя по времени запись модели — это "текущий" прогноз.
 			var last = records
 				.OrderBy (r => r.DateUtc)
 				.Last ();
@@ -49,13 +50,11 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			}
 
 		/// <summary>
-		/// Строит снапшот "текущего прогноза" по конкретной PredictionRecord.
-		/// Это кирпичик, который можно переиспользовать как для "текущего" дня,
-		/// так и для исторических дат.
+		/// Строит снапшот "текущего прогноза" по конкретной записи.
 		/// </summary>
 		public static CurrentPredictionSnapshot BuildFromRecord (
 			BacktestRecord rec,
-			IReadOnlyList<ILeveragePolicy> policies,
+			IReadOnlyList<ICausalLeveragePolicy> policies,
 			double walletBalanceUsd )
 			{
 			if (rec == null)
@@ -72,6 +71,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				throw new InvalidOperationException (
 					"[current] список политик пуст при построении CurrentPredictionSnapshot");
 
+			if (rec.Entry <= 0.0)
+				throw new InvalidOperationException ("[current] Entry <= 0 — нельзя построить CurrentPredictionSnapshot.");
+
+			// Каузальная часть должна существовать всегда; отсутствие — поломка сборки BacktestRecord.
+			_ = rec.Causal ?? throw new InvalidOperationException ("[current] rec.Causal is null — causal layer missing.");
+
 			var snapshot = new CurrentPredictionSnapshot
 				{
 				GeneratedAtUtc = DateTime.UtcNow,
@@ -80,16 +85,38 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				PredLabelDisplay = FormatLabel (rec),
 				MicroDisplay = FormatMicro (rec),
 				RegimeDown = rec.RegimeDown,
-				SlProb = rec.SlProb,
-				SlHighDecision = rec.SlHighDecision,
+
+				// SL-слой обязателен для текущего снапшота: отсутствие — ошибка пайплайна.
+				SlProb = rec.SlProb ?? throw new InvalidOperationException ("[current] SlProb is null — SL layer missing."),
+				SlHighDecision = rec.SlHighDecision ?? throw new InvalidOperationException ("[current] SlHighDecision is null — SL layer missing."),
+
 				Entry = rec.Entry,
 				MinMove = rec.MinMove,
-				Reason = rec.Reason ?? string.Empty,
+				Reason = rec.Reason,
+
 				WalletBalanceUsd = walletBalanceUsd
 				};
 
-			// Forward 24h уже заранее посчитан в PredictionRecord при построении records.
-			if (rec.MaxHigh24 > 0.0 && rec.MinLow24 > 0.0 && rec.Close24 > 0.0)
+			// Forward 24h опционален: либо есть весь набор (>0), либо отсутствует целиком (все 0).
+			bool hasAnyForward =
+				rec.MaxHigh24 != 0.0 ||
+				rec.MinLow24 != 0.0 ||
+				rec.Close24 != 0.0;
+
+			bool hasAllForward =
+				rec.MaxHigh24 > 0.0 &&
+				rec.MinLow24 > 0.0 &&
+				rec.Close24 > 0.0;
+
+			if (hasAnyForward && !hasAllForward)
+				{
+				throw new InvalidOperationException (
+					"[current] Forward24h данные заполнены частично: " +
+					$"MaxHigh24={rec.MaxHigh24:0.####}, MinLow24={rec.MinLow24:0.####}, Close24={rec.Close24:0.####}. " +
+					"Ожидается либо полный набор, либо полное отсутствие.");
+				}
+
+			if (hasAllForward)
 				{
 				snapshot.Forward24h = new Forward24hSnapshot
 					{
@@ -99,26 +126,22 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					};
 				}
 
-			// Для каждой политики строятся две ветки: BASE и ANTI-D.
 			foreach (var policy in policies)
 				{
 				AppendRowsForPolicy (snapshot, rec, policy, walletBalanceUsd);
 				}
 
-			// Объяснение прогноза поверх уже посчитанных полей снапшота.
 			BuildExplanationItems (snapshot, rec);
 
 			return snapshot;
 			}
 
 		/// <summary>
-		/// Строит снапшоты для исторического окна по датам PredictionRecord.
-		/// Окно задаётся в днях назад от текущего UTC-дня.
-		/// Используется для бэкфилла "текущего прогноза" (например, за последние 60 дней).
+		/// История снапшотов за окно historyWindowDays назад от текущего UTC-дня.
 		/// </summary>
 		public static IReadOnlyList<CurrentPredictionSnapshot> BuildHistory (
 			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ILeveragePolicy> policies,
+			IReadOnlyList<ICausalLeveragePolicy> policies,
 			double walletBalanceUsd,
 			int historyWindowDays )
 			{
@@ -147,20 +170,18 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 			foreach (var rec in ordered)
 				{
-				var snapshot = BuildFromRecord (rec, policies, walletBalanceUsd);
-				result.Add (snapshot);
+				result.Add (BuildFromRecord (rec, policies, walletBalanceUsd));
 				}
 
 			return result;
 			}
 
 		/// <summary>
-		/// Строит снапшот для конкретной календарной даты (по UTC).
-		/// Используется для запросов "покажи прогноз модели за такой-то день".
+		/// Снапшот для конкретной календарной даты (UTC).
 		/// </summary>
 		public static CurrentPredictionSnapshot BuildForDate (
 			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ILeveragePolicy> policies,
+			IReadOnlyList<ICausalLeveragePolicy> policies,
 			double walletBalanceUsd,
 			DateTime predictionDateUtc )
 			{
@@ -182,7 +203,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			if (recForDay == null)
 				{
 				throw new InvalidOperationException (
-					$"[current] Не найден PredictionRecord для даты {targetDateUtc:yyyy-MM-dd} (UTC) при построении CurrentPredictionSnapshot.");
+					$"[current] Не найдена запись для даты {targetDateUtc:yyyy-MM-dd} (UTC) при построении CurrentPredictionSnapshot.");
 				}
 
 			return BuildFromRecord (recForDay, policies, walletBalanceUsd);
@@ -219,14 +240,20 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					});
 				}
 
+			double slProb = snapshot.SlProb
+				?? throw new InvalidOperationException ("[current] SlProb is null in snapshot — SL layer missing.");
+
+			bool isRiskDay = snapshot.SlHighDecision
+				?? throw new InvalidOperationException ("[current] SlHighDecision is null in snapshot — SL layer missing.");
+
 			items.Add (new CurrentPredictionExplanationItem
 				{
 				Kind = "model",
 				Name = "sl",
 				Description =
-					$"SL-модель: вероятность стопа {snapshot.SlProb:0.0} %, " +
-					$"решение = {(snapshot.SlHighDecision ? "HIGH (рискованный день)" : "OK (обычный день)")}",
-				Value = snapshot.SlProb,
+					$"SL-модель: вероятность стопа {slProb:0.0} %, " +
+					$"решение = {(isRiskDay ? "HIGH (рискованный день)" : "OK (обычный день)")}",
+				Value = slProb,
 				Rank = rank++
 				});
 
@@ -281,7 +308,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 			bool hasDirection = TryGetDirection (rec, out var goLongModel, out _);
 
-			if (hasDirection && snapshot.SlHighDecision)
+			if (hasDirection && isRiskDay)
 				{
 				string baseDir = goLongModel ? "LONG" : "SHORT";
 				string antiDir = goLongModel ? "SHORT" : "LONG";
@@ -292,8 +319,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					Name = "anti_d_override",
 					Description =
 						"Ветка ANTI-D активна: базовая дневная модель даёт " + baseDir +
-						", SL-модель пометила день как рискованный → ветка ANTI-D " +
-						"торгует в обратную сторону (" + antiDir + ").",
+						", SL-модель пометила день как рискованный → ветка ANTI-D торгует в обратную сторону (" + antiDir + ").",
 					Rank = rank++
 					});
 				}
@@ -302,14 +328,23 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 		private static void AppendRowsForPolicy (
 			CurrentPredictionSnapshot snapshot,
 			BacktestRecord rec,
-			ILeveragePolicy policy,
+			ICausalLeveragePolicy policy,
 			double walletBalanceUsd )
 			{
-			bool hasDir = TryGetDirection (rec, out var goLongModel, out _);
-			bool isRiskDay = rec.SlHighDecision;
+			if (policy == null)
+				throw new ArgumentNullException (nameof (policy));
 
-			double leverage = policy.ResolveLeverage (rec);
-			string policyName = policy.GetType ().Name;
+			var causal = rec.Causal ?? throw new InvalidOperationException ("[current] rec.Causal is null — causal layer missing.");
+
+			bool hasDir = TryGetDirection (rec, out var goLongModel, out _);
+			bool isRiskDay = rec.SlHighDecision ?? throw new InvalidOperationException ("[current] SlHighDecision is null — SL layer missing.");
+
+			double leverage = policy.ResolveLeverage (causal);
+
+			if (double.IsNaN (leverage) || double.IsInfinity (leverage) || leverage <= 0.0)
+				throw new InvalidOperationException ($"[current] policy '{policy.Name}' returned invalid leverage={leverage} for {rec.DateUtc:yyyy-MM-dd}.");
+
+			string policyName = string.IsNullOrWhiteSpace (policy.Name) ? policy.GetType ().Name : policy.Name;
 
 				{
 				bool skipped = !hasDir || isRiskDay;
@@ -334,9 +369,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 				bool goLongAntiD = goLongModel;
 
 				if (!skipped && hasDir)
-					{
 					goLongAntiD = !goLongModel;
-					}
 
 				var row = BuildRow (
 					policyName,
@@ -413,10 +446,17 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 			{
 			double entry = rec.Entry;
 			if (entry <= 0.0)
-				throw new InvalidOperationException ("Entry <= 0 — нельзя построить торговый план.");
+				throw new InvalidOperationException ("[current] Entry <= 0 — нельзя построить торговый план.");
 
-			double baseMinMove = rec.MinMove > 0.0 ? rec.MinMove : 0.02;
+			if (rec.MinMove <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[current] MinMove <= 0 ({rec.MinMove:0.########}) — нельзя построить торговый план без валидной оценки волатильности.");
+				}
 
+			double baseMinMove = rec.MinMove;
+
+			// Risk-контур плана: это не “заглушка”, а явная политика ограничений.
 			double slPct = baseMinMove;
 			if (slPct < 0.01) slPct = 0.01;
 			else if (slPct > 0.04) slPct = 0.04;
@@ -446,14 +486,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 					{
 					const double mmr = 0.004;
 
-					if (goLong)
-						{
-						liqPrice = entry * (leverage - 1.0) / (leverage * (1.0 - mmr));
-						}
-					else
-						{
-						liqPrice = entry * (1.0 + leverage) / (leverage * (1.0 + mmr));
-						}
+					liqPrice = goLong
+						? entry * (leverage - 1.0) / (leverage * (1.0 - mmr))
+						: entry * (1.0 + leverage) / (leverage * (1.0 + mmr));
 
 					if (liqPrice.HasValue)
 						{

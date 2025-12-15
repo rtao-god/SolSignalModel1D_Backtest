@@ -41,8 +41,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			Assert.NotEmpty (ds.TrainRows);
 			Assert.NotEmpty (ds.MicroRows);
 
-			Assert.All (ds.TrainRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
-			Assert.All (ds.MicroRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
+			Assert.All (ds.TrainRows, r => Assert.True (r.ToCausalDateUtc() <= trainUntil));
+			Assert.All (ds.MicroRows, r => Assert.True (r.ToCausalDateUtc() <= trainUntil));
 			}
 
 		[Fact]
@@ -69,10 +69,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			// Позиционный вызов: переименование trainUntil* в Core не ломает тест.
 			var ds = MicroDatasetBuilder.Build (rows, trainUntil);
 
-			var trainDates = ds.TrainRows.Select (r => r.Causal.DateUtc).ToHashSet ();
+			var trainDates = ds.TrainRows.Select (r => r.ToCausalDateUtc()).ToHashSet ();
 
 			foreach (var microRow in ds.MicroRows)
-				Assert.Contains (microRow.Causal.DateUtc, trainDates);
+				Assert.Contains (microRow.ToCausalDateUtc(), trainDates);
 			}
 		}
 	}

@@ -177,8 +177,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

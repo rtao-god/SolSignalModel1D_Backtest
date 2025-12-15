@@ -219,12 +219,12 @@ namespace SolSignalModel1D_Backtest
 				datesToExclude: null
 			);
 
-			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.Causal.DateUtc));
+			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.ToCausalDateUtc()));
 
 			var trainRecords = new List<BacktestRecord> (trainDates.Count);
 			foreach (var r in records)
 				{
-				if (trainDates.Contains (r.Causal.DateUtc))
+				if (trainDates.Contains (r.ToCausalDateUtc()))
 					trainRecords.Add (r);
 				}
 
@@ -268,13 +268,13 @@ namespace SolSignalModel1D_Backtest
 			// Единый контракт сплита как в DailyDatasetBuilder/MicroDatasetBuilder:
 			// граница интерпретируется через baseline-exit (TrainBoundary).
 			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
-			var split = boundary.Split (records, r => r.Causal.DateUtc);
+			var split = boundary.Split (records, r => r.ToCausalDateUtc());
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.Causal.DateUtc.ToString ("O"));
+					.Select (r => r.ToCausalDateUtc().ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[train-split] Found excluded records (baseline-exit undefined). " +

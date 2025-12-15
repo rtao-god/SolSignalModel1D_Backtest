@@ -4,7 +4,6 @@ using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using System;
@@ -149,7 +148,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			sol6hDict = dict6h;
 			sol1m = all1m;
-			return rows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			return rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 			}
 
 		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
@@ -159,7 +158,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				{
 				res.Add (new BacktestRecord
 					{
-					Date = r.Causal.DateUtc,
+					Date = r.ToCausalDateUtc(),
 					IsMorning = r.Causal.IsMorning,
 					MinMove = r.MinMove
 					});
@@ -169,7 +168,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 		private static void MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntil )
 			{
-			foreach (var r in rows.Where (r => r.Causal.DateUtc > trainUntil))
+			foreach (var r in rows.Where (r => r.ToCausalDateUtc() > trainUntil))
 				{
 				r.Causal.IsMorning = !r.Causal.IsMorning;
 				r.MinMove = r.MinMove * 2.0;
@@ -185,7 +184,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.MinMove, b.MinMove);
 				}

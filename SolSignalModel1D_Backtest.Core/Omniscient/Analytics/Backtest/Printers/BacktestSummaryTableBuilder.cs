@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
@@ -31,14 +32,14 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			if (policyResults == null) throw new ArgumentNullException (nameof (policyResults));
 
 			var recByDate = records
-				.GroupBy (r => r.DateUtc.Causal.DateUtc)
+				.GroupBy (r => r.DateUtc.ToCausalDateUtc())
 				.ToDictionary (g => g.Key, g => g.First ());
 
 			var dict = new Dictionary<(string policy, string regime, MarginMode margin), (HashSet<DateTime> days, int trades, double pnlUsd)> ();
 
 			foreach (var pol in policyResults)
 				{
-				foreach (var dayGrp in pol.Trades.GroupBy (t => t.DateUtc.Causal.DateUtc))
+				foreach (var dayGrp in pol.Trades.GroupBy (t => t.DateUtc.ToCausalDateUtc()))
 					{
 					var day = dayGrp.Key;
 

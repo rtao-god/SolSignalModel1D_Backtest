@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -16,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 
 		public sealed class IndicatorLine ( DateTime dateUtc, double value )
 			{
-			public DateTime D { get; } = dateUtc.Causal.DateUtc;
+			public DateTime D { get; } = dateUtc.ToCausalDateUtc();
 			public double V { get; } = value;
 			}
 
@@ -48,7 +49,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				if (doc.RootElement.TryGetProperty ("d", out var dEl))
 					{
 					if (DateTime.TryParse (dEl.GetString (), out var d))
-						return DateTime.SpecifyKind (d.Causal.DateUtc, DateTimeKind.Utc);
+						return DateTime.SpecifyKind (d.ToCausalDateUtc(), DateTimeKind.Utc);
 					}
 
 				throw new InvalidOperationException (
@@ -78,7 +79,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 			}
 
 		/// <summary>
-		/// Читает словарь Date->value в диапазоне [startUtc.Causal.DateUtc, endUtc.Causal.DateUtc].
+		/// Читает словарь Date->value в диапазоне [startUtc.ToCausalDateUtc(), endUtc.ToCausalDateUtc()].
 		/// Любая битая строка приводит к InvalidOperationException – это как раз то,
 		/// чего ты хочешь: не маскировать ошибки в кэше индикаторов.
 		/// </summary>
@@ -111,8 +112,8 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 						throw new InvalidOperationException (
 							$"[indicators] cannot parse 'd' as DateTime in '{_path}' at line #{lineIndex}: '{line}'");
 
-					var date = DateTime.SpecifyKind (d.Causal.DateUtc, DateTimeKind.Utc);
-					if (date < startUtc.Causal.DateUtc || date > endUtc.Causal.DateUtc) continue;
+					var date = DateTime.SpecifyKind (d.ToCausalDateUtc(), DateTimeKind.Utc);
+					if (date < startUtc.ToCausalDateUtc() || date > endUtc.ToCausalDateUtc()) continue;
 
 					double v = vEl.GetDouble ();
 					res[date] = v;

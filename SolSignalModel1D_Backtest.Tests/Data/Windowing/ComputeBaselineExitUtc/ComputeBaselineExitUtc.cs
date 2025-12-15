@@ -35,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing.ComputeBaselineExitUtc
 					_ => 1,
 					};
 
-			var exitLocalDate = nyLocal.Causal.DateUtc.AddDays (addDays);
+			var exitLocalDate = nyLocal.ToCausalDateUtc().AddDays (addDays);
 			var morning = nyMorningLocalTime ?? DefaultNyMorningLocalTime;
 			var exitLocal = exitLocalDate + morning;
 

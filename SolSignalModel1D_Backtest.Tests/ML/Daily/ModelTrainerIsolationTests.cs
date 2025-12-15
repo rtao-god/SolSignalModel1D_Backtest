@@ -155,7 +155,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				// Клонируем строку, но подставляем перемешанный Label.
 				result.Add (new BacktestRecord
 					{
-					Date = src.Causal.DateUtc,
+					Date = src.ToCausalDateUtc(),
 					Label = labels[i],
 					Features = (double[]) src.Causal.Features.Clone (),
 

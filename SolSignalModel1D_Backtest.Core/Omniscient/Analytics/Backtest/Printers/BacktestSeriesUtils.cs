@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
@@ -13,12 +14,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			var dict = new SortedDictionary<DateTime, double> ();
 			double last = startEquity;
-			dict[DateTime.MinValue.Causal.DateUtc] = startEquity;
+			dict[DateTime.MinValue.ToCausalDateUtc()] = startEquity;
 
 			foreach (var t in trades.OrderBy (t => t.DateUtc))
 				{
 				last = t.EquityAfter;
-				dict[t.DateUtc.Causal.DateUtc] = last;
+				dict[t.DateUtc.ToCausalDateUtc()] = last;
 				}
 
 			return dict;
@@ -28,7 +29,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			SortedDictionary<DateTime, double> dailyEq )
 			{
 			var points = dailyEq
-				.Where (kv => kv.Key != DateTime.MinValue.Causal.DateUtc)
+				.Where (kv => kv.Key != DateTime.MinValue.ToCausalDateUtc())
 				.ToList ();
 
 			if (points.Count < 2)
@@ -73,7 +74,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			double peak = 0.0;
 			double maxDd = 0.0;
-			foreach (var kv in dailyEq.Where (k => k.Key != DateTime.MinValue.Causal.DateUtc))
+			foreach (var kv in dailyEq.Where (k => k.Key != DateTime.MinValue.ToCausalDateUtc()))
 				{
 				double v = kv.Value;
 				if (v > peak) peak = v;

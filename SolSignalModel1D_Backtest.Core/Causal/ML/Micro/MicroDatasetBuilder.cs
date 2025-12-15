@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils;
 using System;
@@ -45,18 +46,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
 
 			// Контракт: порядок уже стабилен (бутстрап/RowBuilder).
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Causal.DateUtc, "micro-dataset.allRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.ToCausalDateUtc(), "micro-dataset.allRows");
 
 			var ordered = allRows as List<BacktestRecord> ?? allRows.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.Causal.DateUtc.ToString ("O"));
+					.Select (r => r.ToCausalDateUtc().ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[micro-dataset] Found excluded days (baseline-exit undefined). " +

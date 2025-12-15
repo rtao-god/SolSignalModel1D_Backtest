@@ -27,8 +27,8 @@ namespace SolSignalModel1D_Backtest
 			SeriesGuards.EnsureStrictlyAscendingUtc (solAll1h, c => c.OpenTimeUtc, "bootstrap.solAll1h");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "bootstrap.sol1m");
 
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Causal.DateUtc, "bootstrap.allRows");
-			SeriesGuards.EnsureStrictlyAscendingUtc (mornings, r => r.Causal.DateUtc, "bootstrap.mornings");
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.ToCausalDateUtc(), "bootstrap.allRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (mornings, r => r.ToCausalDateUtc(), "bootstrap.mornings");
 
 			Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
 			if (mornings.Count == 0)

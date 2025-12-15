@@ -12,10 +12,8 @@ using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRe
 namespace SolSignalModel1D_Backtest.Tests.Backtest
 	{
 	/// <summary>
-	/// Инвариант: аналитика/бэктест не должны менять базовые поля BacktestRecord
+	/// Инвариант: бэктест/аналитика не должны мутировать базовые поля BacktestRecord
 	/// (каузальная часть + forward-исходы).
-	/// Если какой-то принтер/движок начнёт мутировать Date/TrueLabel/PredLabel/Entry/MinMove и т.п.,
-	/// этот тест должен падать.
 	/// </summary>
 	public sealed class PredictionRecordImmutabilityTests
 		{
@@ -42,22 +40,24 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
 			for (int i = 0; i < 20; i++)
 				{
-				var date = utcStart.AddDays (i);
-				int label = i % 3;
+				var dateUtc = utcStart.AddDays (i);
+				int trueLabel = i % 3;
 
 				double pUp = 0.5;
 				double pFlat = 0.2;
 				double pDown = 0.3;
 
+				// Важно: истина и micro-facts живут в ForwardOutcomes,
+				// а CausalPredictionRecord содержит только результаты inference + контекст.
 				var causal = new CausalPredictionRecord
 					{
-					DateUtc = date,
-					TrueLabel = label,
-					PredLabel = label,
+					DateUtc = dateUtc,
+					Features = null, // в этом тесте фичи не используются; проверяем иммутабельность.
 
-					PredLabel_Day = label,
-					PredLabel_DayMicro = label,
-					PredLabel_Total = label,
+					PredLabel = trueLabel,
+					PredLabel_Day = trueLabel,
+					PredLabel_DayMicro = trueLabel,
+					PredLabel_Total = trueLabel,
 
 					ProbUp_Day = pUp,
 					ProbFlat_Day = pFlat,
@@ -77,34 +77,41 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 					MicroPredicted = false,
 					PredMicroUp = false,
 					PredMicroDown = false,
-					FactMicroUp = false,
-					FactMicroDown = false,
 
 					RegimeDown = (i % 5 == 0),
 					Reason = "test",
 					MinMove = 0.02,
 
-					SlProb = 0.0,
-					SlHighDecision = false,
-					Conf_SlLong = 0.0,
-					Conf_SlShort = 0.0,
+					// Runtime-оверлеи в этом тесте не проверяются: оставляем null,
+					// чтобы не имитировать «посчитано».
+					SlProb = null,
+					SlHighDecision = null,
+					Conf_SlLong = null,
+					Conf_SlShort = null,
 
 					DelayedSource = null,
-					DelayedEntryAsked = false,
-					DelayedEntryUsed = false,
-					DelayedIntradayTpPct = 0.0,
-					DelayedIntradaySlPct = 0.0,
-					TargetLevelClass = 0
+					DelayedEntryAsked = null,
+					DelayedEntryUsed = null,
+					DelayedIntradayTpPct = null,
+					DelayedIntradaySlPct = null,
+					TargetLevelClass = null
 					};
 
 				var forward = new ForwardOutcomes
 					{
+					DateUtc = dateUtc,
+					TrueLabel = trueLabel,
+					FactMicroUp = false,
+					FactMicroDown = false,
+
 					Entry = 100.0,
 					MaxHigh24 = 110.0,
 					MinLow24 = 90.0,
 					Close24 = 102.0,
+
 					MinMove = 0.02,
-					WindowEndUtc = date.AddDays (1),
+					WindowEndUtc = dateUtc.AddDays (1),
+
 					DayMinutes = Array.Empty<Candle1m> ()
 					};
 
@@ -115,16 +122,9 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 					});
 				}
 
-			var mornings = records
-				.Select (r => new BacktestRecord
-					{
-					Date = r.DateUtc,
-					Features = Array.Empty<double> (),
-					Label = r.TrueLabel,
-					RegimeDown = r.RegimeDown,
-					IsMorning = true
-					})
-				.ToList ();
+			// Для этого теста нам не нужен отдельный «morning DTO».
+			// Важно только прогнать BacktestRunner и убедиться, что базовые поля записей не мутируются.
+			var mornings = records.ToList ();
 
 			var candles1m = Array.Empty<Candle1m> ();
 			var policies = Array.Empty<RollingLoop.PolicySpec> ();

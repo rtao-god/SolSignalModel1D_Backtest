@@ -2,8 +2,8 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
@@ -60,16 +60,16 @@ namespace SolSignalModel1D_Backtest
 			// ===== 1. Каузальный train-сабсет для SL-модели =====
 			// Берём только те BacktestRecord, которые лежат в train-периоде дневной модели.
 			// Это убирает утечку: OOS-даты не попадают в обучающий датасет SL.
-			// _trainUntilUtc по контракту задан в терминах baseline-exit, поэтому сравнение entry-даты (r.Causal.DateUtc <= _trainUntilUtc)
+			// _trainUntilUtc по контракту задан в терминах baseline-exit, поэтому сравнение entry-даты (r.ToCausalDateUtc() <= _trainUntilUtc)
 			// некорректно и может вернуть boundary leakage. Здесь режем строго через TrainBoundary.
 			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
 
 			// Стабилизируем порядок до сплита: одинаковый вход => одинаковый результат.
 			var orderedAllRows = allRows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
-			var split = boundary.Split (orderedAllRows, r => r.Causal.DateUtc);
+			var split = boundary.Split (orderedAllRows, r => r.ToCausalDateUtc());
 
 			// По требованию: ничего не игнорировать.
 			if (split.Excluded.Count > 0)
@@ -98,13 +98,13 @@ namespace SolSignalModel1D_Backtest
 					"training SL-model on full allRows (train==test for SL).");
 
 				slTrainRows = allRows
-					.OrderBy (r => r.Causal.DateUtc)
+					.OrderBy (r => r.ToCausalDateUtc())
 					.ToList ();
 				}
 
 			// Логируем период train-части для SL.
-			var slTrainMin = slTrainRows.Min (r => r.Causal.DateUtc);
-			var slTrainMax = slTrainRows.Max (r => r.Causal.DateUtc);
+			var slTrainMin = slTrainRows.Min (r => r.ToCausalDateUtc());
+			var slTrainMax = slTrainRows.Max (r => r.ToCausalDateUtc());
 			Console.WriteLine (
 				$"[sl-offline] train rows = {slTrainRows.Count}, " +
 				$"period = {slTrainMin:yyyy-MM-dd}..{slTrainMax:yyyy-MM-dd}, " +
@@ -157,7 +157,7 @@ namespace SolSignalModel1D_Backtest
 
 			// ===== 3. Оффлайн-тренировка основной SL-модели (для runtime) =====
 			var trainer = new SlFirstTrainer ();
-			var asOf = slTrainRows.Max (r => r.Causal.DateUtc);
+			var asOf = slTrainRows.Max (r => r.ToCausalDateUtc());
 			var slModel = trainer.Train (slSamples, asOf);
 			var slEngine = trainer.CreateEngine (slModel);
 

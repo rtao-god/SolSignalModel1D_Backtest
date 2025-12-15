@@ -6,13 +6,13 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 	/// Агрегатор вероятностей поверх дневной модели:
 	/// 1) микро-слой (Day → Day+Micro),
 	/// 2) SL-оверлей (Day+Micro → Total).
+	///
+	/// Ключевой контракт:
+	/// - ApplyMicroOverlay НЕ имеет “нейтральных дефолтов”: если micro отсутствует, оверлей = identity (day без изменений).
+	/// - Если micro.HasPrediction=true, то micro-вероятности обязаны быть конечными и валидными, иначе это ошибка пайплайна.
 	/// </summary>
 	internal static class ProbabilityAggregator
 		{
-		/// <summary>
-		/// Накладывает микро-оверлей на дневные вероятности.
-		/// Day → Day+Micro.
-		/// </summary>
 		public static DailyProbabilities ApplyMicroOverlay (
 			DailyProbabilities day,
 			MicroProbabilities micro,
@@ -21,18 +21,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 			if (cfg == null)
 				throw new ArgumentNullException (nameof (cfg));
 
-			// Sanity-check: базовые дневные вероятности должны образовывать валидное распределение.
-			double daySum = day.PUp + day.PFlat + day.PDown;
-			if (daySum <= 0.0)
-				{
-				throw new InvalidOperationException (
-					"[ProbabilityAggregator] ApplyMicroOverlay received day probabilities with sum <= 0. " +
-					$"PUp={day.PUp}, PFlat={day.PFlat}, PDown={day.PDown}");
-				}
+			ValidateDayDistribution (day, tag: "ApplyMicroOverlay");
 
-			// Нет микро-прогноза или низкая уверенность → ничего не меняем.
+			// Контракт оверлея: отсутствие микро-сигнала означает отсутствие воздействия (тождественное преобразование).
+			// Это НЕ “заглушка”, а корректная математика: нельзя использовать несуществующий сигнал.
 			if (!micro.HasPrediction)
 				return day;
+
+			ValidateMicroDistribution (micro);
 
 			if (micro.Confidence < cfg.MicroMinConfidence)
 				return day;
@@ -53,17 +49,17 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 				}
 			else
 				{
-				// Симметрия по микро → нет смысла двигать.
+				// Полная симметрия (0.5/0.5 или равные числа) → нет направленного сигнала.
 				return day;
 				}
 
-			// Сила эффекта: зависит от уверенности микро и "сомнительности" дневной модели.
 			double microSpan = Math.Max (1e-6, cfg.MicroStrongConfidence - cfg.MicroMinConfidence);
 			double microStrength = (micro.Confidence - cfg.MicroMinConfidence) / microSpan;
 			if (microStrength < 0.0) microStrength = 0.0;
 			if (microStrength > 1.0) microStrength = 1.0;
 
 			double dayFactor = 1.0 - Math.Max (0.0, Math.Min (1.0, day.Confidence));
+
 			double beta = cfg.BetaMicro;
 			if (beta < 0.0) beta = 0.0;
 
@@ -116,7 +112,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 				pFlat -= takeFromFlat;
 				}
 
-			// Нормализация результата: если сумма не положительна — это ошибка, а не повод молча вернуть day.
 			double sum = pUp + pFlat + pDown;
 			if (sum <= 0.0)
 				{
@@ -142,11 +137,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 				};
 			}
 
-		/// <summary>
-		/// SL-оверлей поверх Day+Micro: учитывает риск SL для long/short
-		/// и уменьшает привлекательность соответствующего направления.
-		/// Day+Micro → Total.
-		/// </summary>
 		public static DailyProbabilities ApplySlOverlay (
 			DailyProbabilities dayMicro,
 			SlProbabilities sl,
@@ -155,23 +145,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 			if (cfg == null)
 				throw new ArgumentNullException (nameof (cfg));
 
-			// Sanity-check: Day+Micro тоже должен быть валидным распределением.
-			double baseSum = dayMicro.PUp + dayMicro.PFlat + dayMicro.PDown;
-			if (baseSum <= 0.0)
-				{
-				throw new InvalidOperationException (
-					"[ProbabilityAggregator] ApplySlOverlay received Day+Micro probabilities with sum <= 0. " +
-					$"PUp={dayMicro.PUp}, PFlat={dayMicro.PFlat}, PDown={dayMicro.PDown}");
-				}
+			ValidateDayDistribution (dayMicro, tag: "ApplySlOverlay");
 
 			double pUp = dayMicro.PUp;
 			double pFlat = dayMicro.PFlat;
 			double pDown = dayMicro.PDown;
 
-			// Базовый класс дня до SL-оверлея.
 			int baseTop = ArgmaxLabel (pUp, pFlat, pDown);
 
-			// ===== Риск для long (уменьшаем P_up) =====
 			if (sl.ConfidenceLong >= cfg.SlMinConfidence && sl.PSlLong > 0.0)
 				{
 				double span = Math.Max (1e-6, cfg.SlStrongConfidence - cfg.SlMinConfidence);
@@ -193,7 +174,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 					}
 				}
 
-			// ===== Риск для short (уменьшаем P_down) =====
 			if (sl.ConfidenceShort >= cfg.SlMinConfidence && sl.PSlShort > 0.0)
 				{
 				double span = Math.Max (1e-6, cfg.SlStrongConfidence - cfg.SlMinConfidence);
@@ -215,7 +195,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 					}
 				}
 
-			// Нормализация: если сумма получилась некорректной, это ошибка.
 			double sum2 = pUp + pFlat + pDown;
 			if (sum2 <= 0.0)
 				{
@@ -227,7 +206,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 			pFlat /= sum2;
 			pDown /= sum2;
 
-			// Гарантия: класс дня не меняется.
 			int newTop = ArgmaxLabel (pUp, pFlat, pDown);
 			if (newTop != baseTop)
 				{
@@ -236,20 +214,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 				double pBase, o1, o2;
 				switch (baseTop)
 					{
-					case 2: // Up
-						pBase = pUp;
-						o1 = pFlat;
-						o2 = pDown;
+					case 2:
+						pBase = pUp; o1 = pFlat; o2 = pDown;
 						break;
-					case 0: // Down
-						pBase = pDown;
-						o1 = pUp;
-						o2 = pFlat;
+					case 0:
+						pBase = pDown; o1 = pUp; o2 = pFlat;
 						break;
-					default: // Flat
-						pBase = pFlat;
-						o1 = pUp;
-						o2 = pDown;
+					default:
+						pBase = pFlat; o1 = pUp; o2 = pDown;
 						break;
 					}
 
@@ -268,21 +240,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 
 						switch (baseTop)
 							{
-							case 2:
-								pUp = pBase;
-								pFlat = o1;
-								pDown = o2;
-								break;
-							case 0:
-								pDown = pBase;
-								pUp = o1;
-								pFlat = o2;
-								break;
-							default:
-								pFlat = pBase;
-								pUp = o1;
-								pDown = o2;
-								break;
+							case 2: pUp = pBase; pFlat = o1; pDown = o2; break;
+							case 0: pDown = pBase; pUp = o1; pFlat = o2; break;
+							default: pFlat = pBase; pUp = o1; pDown = o2; break;
 							}
 
 						double sum3 = pUp + pFlat + pDown;
@@ -308,6 +268,48 @@ namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 				BtcFilterBlockedFlat = dayMicro.BtcFilterBlockedFlat,
 				BtcFilterBlockedDown = dayMicro.BtcFilterBlockedDown
 				};
+			}
+
+		private static void ValidateDayDistribution ( DailyProbabilities day, string tag )
+			{
+			double sum = day.PUp + day.PFlat + day.PDown;
+			if (!double.IsFinite (sum) || sum <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[ProbabilityAggregator] {tag} received invalid day distribution: " +
+					$"PUp={day.PUp}, PFlat={day.PFlat}, PDown={day.PDown}, sum={sum}");
+				}
+			}
+
+		private static void ValidateMicroDistribution ( MicroProbabilities micro )
+			{
+			if (!double.IsFinite (micro.PUpGivenFlat) || !double.IsFinite (micro.PDownGivenFlat))
+				{
+				throw new InvalidOperationException (
+					$"[ProbabilityAggregator] micro.HasPrediction=true but micro probs are not finite: " +
+					$"PUpGivenFlat={micro.PUpGivenFlat}, PDownGivenFlat={micro.PDownGivenFlat}");
+				}
+
+			double sum = micro.PUpGivenFlat + micro.PDownGivenFlat;
+			if (sum <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[ProbabilityAggregator] micro distribution sum <= 0: sum={sum}");
+				}
+
+			// Для бинарного микро ожидаем 1.0 (с разумной терпимостью к FP).
+			if (Math.Abs (sum - 1.0) > 1e-6)
+				{
+				throw new InvalidOperationException (
+					$"[ProbabilityAggregator] micro distribution sum != 1: sum={sum}, " +
+					$"PUpGivenFlat={micro.PUpGivenFlat}, PDownGivenFlat={micro.PDownGivenFlat}");
+				}
+
+			if (!double.IsFinite (micro.Confidence) || micro.Confidence < 0.0 || micro.Confidence > 1.0)
+				{
+				throw new InvalidOperationException (
+					$"[ProbabilityAggregator] invalid micro.Confidence={micro.Confidence}. Expected finite value in [0..1].");
+				}
 			}
 
 		private static int ArgmaxLabel ( double pUp, double pFlat, double pDown )

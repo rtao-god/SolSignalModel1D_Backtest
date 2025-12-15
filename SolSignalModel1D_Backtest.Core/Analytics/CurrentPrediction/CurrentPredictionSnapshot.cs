@@ -26,9 +26,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
 		public bool RegimeDown { get; set; }
 
-		public double SlProb { get; set; }
+		public double? SlProb { get; set; }
 
-		public bool SlHighDecision { get; set; }
+		public bool? SlHighDecision { get; set; }
 
 		public double Entry { get; set; }
 

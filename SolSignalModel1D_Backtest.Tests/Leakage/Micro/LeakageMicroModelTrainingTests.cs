@@ -108,7 +108,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				{
 				res.Add (new BacktestRecord
 					{
-					Date = r.Causal.DateUtc,
+					Date = r.ToCausalDateUtc(),
 					Features = r.Causal.Features?.ToArray () ?? Array.Empty<double> (),
 					FactMicroUp = r.FactMicroUp,
 					FactMicroDown = r.FactMicroDown
@@ -123,7 +123,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			// цель — доказать, что обучение/датасет не зависит от OOS “будущего”.
 			foreach (var r in rows)
 				{
-				if (boundary.IsTrainEntry (r.Causal.DateUtc))
+				if (boundary.IsTrainEntry (r.ToCausalDateUtc()))
 					continue;
 
 				r.FactMicroUp = !r.FactMicroUp;
@@ -146,7 +146,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
 				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
 

@@ -1,13 +1,9 @@
-﻿using System;
-using Microsoft.ML.Data;
+﻿using Microsoft.ML.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
-	/// <summary>
-	/// Сэмпл для мелкого улучшения (Model B).
-	/// Label = true → "отложка исполнилась и не была хуже 12:00 на плохом дне".
-	/// </summary>
 	public sealed class SmallImprovementSample
 		{
 		[VectorType (MlSchema.FeatureCount)]
@@ -16,5 +12,16 @@ namespace SolSignalModel1D_Backtest.Core.Data
 		public bool Label { get; set; }
 
 		public DateTime EntryUtc { get; set; }
+
+		[NoColumn]
+		public BacktestRecord? Record { get; set; }
+
+		[NoColumn]
+		public CausalPredictionRecord Causal =>
+			Record?.Causal ?? throw new InvalidOperationException ("[ml] SmallImprovementSample.Record is null");
+
+		[NoColumn]
+		public ForwardOutcomes Forward =>
+			Record?.Forward ?? throw new InvalidOperationException ("[ml] SmallImprovementSample.Record is null");
 		}
 	}

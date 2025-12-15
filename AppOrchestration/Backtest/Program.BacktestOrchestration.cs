@@ -3,6 +3,7 @@ using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
@@ -10,59 +11,39 @@ namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
-		/// <summary>
-		/// Количество календарных дней, за которые сохраняются отчёты истории "текущего прогноза".
-		/// </summary>
 		private const int CurrentPredictionHistoryWindowDays = 30;
 
-		/// <summary>
-		/// Ленивая инициализация репозитория профилей бэктеста.
-		/// Внутри создаётся baseline-профиль, если файла ещё нет.
-		/// </summary>
 		private static async Task EnsureBacktestProfilesInitializedAsync ()
 			{
 			try
 				{
 				var profileRepo = new JsonBacktestProfileRepository ();
-
-				// Достаточно один раз прочитать все профили — baseline создастся автоматически.
 				await profileRepo.GetAllAsync ();
 				}
 			catch (Exception ex)
 				{
-				// Важно не падать: отсутствие профиля не должно ломать весь пайплайн.
 				Console.WriteLine ($"[profiles] failed to init backtest profiles: {ex.Message}");
 				}
 			}
 
-		/// <summary>
-		/// Полный цикл:
-		/// - сборка baseline-конфига;
-		/// - построение политик и запуск BacktestRunner;
-		/// - сохранение отчётов бэктеста;
-		/// - сценарные стратегии по дневной модели.
-		/// </summary>
 		private static void RunBacktestAndReports (
 			List<BacktestRecord> mornings,
 			List<BacktestRecord> records,
-			IReadOnlyList<Candle1m> dayMinutes)
+			IReadOnlyList<Candle1m> dayMinutes )
 			{
 			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
 			if (records == null) throw new ArgumentNullException (nameof (records));
 			if (dayMinutes == null) throw new ArgumentNullException (nameof (dayMinutes));
 
-			// === Baseline-конфиг бэктеста (SL/TP + политики) ===
 			var backtestConfig = BacktestConfigFactory.CreateBaseline ();
 
-			// Политики, построенные из конфига (PolicyConfig → PolicySpec + ILeveragePolicy)
+			// PolicySpec.Policy = IOmniscientLeveragePolicy (для PnL/RollingLoop).
 			var policies = BacktestPolicyFactory.BuildPolicySpecs (backtestConfig);
 			Console.WriteLine ($"[policies] total = {policies.Count}");
 
-			// Для отчёта "текущий прогноз" нужны только ILeveragePolicy (без MarginMode и имени).
-			var leveragePolicies = ExtractLeveragePolicies (policies);
+			// Для "current prediction" берём ТОЛЬКО каузальный интерфейс, без доступа к forward-фактам.
+			var leveragePolicies = ExtractCausalLeveragePolicies (policies);
 
-			// === Текущий прогноз + JSON-репорты ===
-			// Берём те же records и политики, что и в baseline-бэктесте: это важно для консистентности.
 			const double WalletBalanceUsd = 200.0;
 
 			BacktestReportsOrchestrator.SaveCurrentPredictionReport (
@@ -78,7 +59,6 @@ namespace SolSignalModel1D_Backtest
 				historyWindowDays: CurrentPredictionHistoryWindowDays
 			);
 
-			// === Baseline backtest ===
 			var runner = new BacktestRunner ();
 
 			runner.Run (
@@ -101,24 +81,38 @@ namespace SolSignalModel1D_Backtest
 			);
 
 			RunStrategyScenarios (
-				mornings: mornings, 
-				records: records, 
+				mornings: mornings,
+				records: records,
 				sol1m: dayMinutes.ToList ()
-				);
+			);
 			}
 
-		private static List<ILeveragePolicy> ExtractLeveragePolicies (
+		private static List<ICausalLeveragePolicy> ExtractCausalLeveragePolicies (
 			IReadOnlyList<RollingLoop.PolicySpec> policies )
 			{
-			// Важно фильтровать null явно: PolicySpec допускает отсутствие ILeveragePolicy.
-			// Отчёты "текущий прогноз" не должны падать из-за таких спецификаций.
-			var list = new List<ILeveragePolicy> (policies.Count);
+			if (policies == null) throw new ArgumentNullException (nameof (policies));
+
+			var list = new List<ICausalLeveragePolicy> (policies.Count);
 
 			foreach (var p in policies)
 				{
-				if (p.Policy != null)
-					list.Add (p.Policy);
+				if (p.Policy == null) continue;
+
+				// Инвариант: любая политика, используемая в омнисциентном PnL,
+				// обязана иметь каузальный интерфейс для построения "current prediction" без утечек.
+				if (p.Policy is ICausalLeveragePolicy causal)
+					{
+					list.Add (causal);
+					continue;
+					}
+
+				throw new InvalidOperationException (
+					$"[policies] policy '{p.Name}' ({p.Policy.GetType ().FullName}) does not implement ICausalLeveragePolicy. " +
+					"CurrentPrediction должен работать строго через causal-интерфейс.");
 				}
+
+			if (list.Count == 0)
+				throw new InvalidOperationException ("[policies] no causal leverage policies after extraction.");
 
 			return list;
 			}

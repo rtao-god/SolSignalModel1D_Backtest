@@ -32,7 +32,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public void DailyModel_EndToEnd_OnMonotonicTrendHistory_ProducesValidPredictions ()
 			{
 			var rows = BuildMonotonicHistory ();
-			var ordered = rows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			var ordered = rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 
 			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
@@ -52,7 +52,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public void DailyModel_EndToEnd_OnZigZagHistory_UsesAtLeastTwoClasses ()
 			{
 			var rows = BuildZigZagHistory ();
-			var ordered = rows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			var ordered = rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 
 			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
@@ -87,11 +87,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var trainUntil = maxDate.AddDays (-holdoutDays);
 
 			var trainRows = orderedRows
-				.Where (r => r.Causal.DateUtc <= trainUntil)
+				.Where (r => r.ToCausalDateUtc() <= trainUntil)
 				.ToList ();
 
 			var oosRows = orderedRows
-				.Where (r => r.Causal.DateUtc > trainUntil)
+				.Where (r => r.ToCausalDateUtc() > trainUntil)
 				.ToList ();
 
 			Assert.True (trainRows.Count > 50,
@@ -265,8 +265,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Causal.DateUtc.AddDays (-200);
-			var lastDate = start.Causal.DateUtc.AddDays (400);
+			var firstDate = start.ToCausalDateUtc().AddDays (-200);
+			var lastDate = start.ToCausalDateUtc().AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -289,7 +289,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			);
 
 			Assert.NotEmpty (rows);
-			return rows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			return rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 			}
 		}
 	}

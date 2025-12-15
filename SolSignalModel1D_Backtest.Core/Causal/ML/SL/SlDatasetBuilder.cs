@@ -3,7 +3,7 @@ using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
@@ -82,8 +82,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 			// 1. Берём только дни с Date <= trainUntil.
 			// Это гарантирует, что EntryUtc сэмпла не позже trainUntil.
 			var rowsTrain = rows
-				.Where (r => r.Causal.DateUtc <= trainUntil)
-				.OrderBy (r => r.Causal.DateUtc)
+				.Where (r => r.ToCausalDateUtc() <= trainUntil)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			if (rowsTrain.Count == 0)
@@ -137,8 +137,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 
 			// 4. Собираем утренние строки, по которым остались сэмплы.
 			var morningByDate = rowsTrain
-				.Where (r => r.Causal.IsMorning)
-				.GroupBy (r => r.Causal.DateUtc)
+				.Where (r => r.Causal.IsMorning == true)
+				.GroupBy (r => r.ToCausalDateUtc())
 				.ToDictionary (g => g.Key, g => g.First ());
 
 			var morningRows = new List<BacktestRecord> ();
@@ -153,8 +153,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 
 			// Делаем уникальными по Date (иначе long/short дадут дубликаты одного дня).
 			var distinctMorning = morningRows
-				.OrderBy (r => r.Causal.DateUtc)
-				.GroupBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
+				.GroupBy (r => r.ToCausalDateUtc())
 				.Select (g => g.First ())
 				.ToList ();
 

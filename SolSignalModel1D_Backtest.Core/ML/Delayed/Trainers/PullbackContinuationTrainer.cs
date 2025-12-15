@@ -5,13 +5,9 @@ using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 	{
-	/// <summary>
-	/// Trainer для Model A (deep pullback).
-	/// </summary>
 	public sealed class PullbackContinuationTrainer
 		{
 		private readonly MLContext _ml = new MLContext (seed: 42);
@@ -29,28 +25,35 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 		public ITransformer Train ( List<PullbackContinuationSample> samples, DateTime asOfUtc )
 			{
-			var rows = new List<TrainRow> ();
+			if (samples == null) throw new ArgumentNullException (nameof (samples));
+
+			var rows = new List<TrainRow> (samples.Count);
 
 			foreach (var s in samples)
 				{
+				if (s == null)
+					throw new InvalidOperationException ("[A-trainer] samples contains null item.");
+
 				if (s.EntryUtc >= asOfUtc)
 					continue;
 
-				// приоритет свежему
+				if (s.Features == null || s.Features.Length == 0)
+					throw new InvalidOperationException ($"[A-trainer] empty Features for sample entry={s.EntryUtc:O}.");
+
 				double ageDays = (asOfUtc - s.EntryUtc).TotalDays;
 				float timeW =
 					ageDays <= 90 ? 1.0f :
 					ageDays <= 180 ? 0.7f :
 					0.4f;
 
-				float clsW = s.Forward.TrueLabel ? 2.5f : 1.0f;
+				float clsW = s.Label ? 2.5f : 1.0f;
 
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Causal.Features, feats, Math.Min (s.Causal.Features.Length, MlSchema.FeatureCount));
+				Array.Copy (s.Features, feats, Math.Min (s.Features.Length, MlSchema.FeatureCount));
 
 				rows.Add (new TrainRow
 					{
-					Label = s.Forward.TrueLabel,
+					Label = s.Label,
 					Features = feats,
 					Weight = timeW * clsW,
 					EntryUtc = s.EntryUtc
@@ -82,7 +85,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 		public PredictionEngine<PullbackContinuationSample, SlHitPrediction> CreateEngine ( ITransformer model )
 			{
-			// используем тот же предсказательный тип, что и SL (Label:bool, Probability:float)
+			if (model == null) throw new ArgumentNullException (nameof (model));
 			return _ml.Model.CreatePredictionEngine<PullbackContinuationSample, SlHitPrediction> (model);
 			}
 		}

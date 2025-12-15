@@ -16,6 +16,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 		{
 		/// <summary>
 		/// Внутренний DTO для чтения данных из IDataView после Transform().
+		/// Важно: этот слой работает только с колонками Label/Features/Score,
+		/// и не должен ссылаться на доменные сущности (BacktestRecord, Causal/Forward).
 		/// </summary>
 		private sealed class BinaryScoredRow
 			{
@@ -77,6 +79,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 			baselineAuc = baseMetrics.AreaUnderRocCurve;
 
 			// 3) Материализуем скоренные строки для direction-метрик и PFI.
+			// Важно: здесь должны быть только колонки ML-уровня (Label/Features/Score).
 			var scoredRows = ml.Data.CreateEnumerable<BinaryScoredRow> (
 					scoredBase,
 					reuseRowObject: false)
@@ -89,8 +92,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 			var evalSamples = scoredRows
 				.Select (r => new EvalSample
 					{
-					Label = r.Forward.TrueLabel,
-					Features = (float[]) r.Causal.Features.Clone ()
+					Label = r.Label,
+					Features = (float[]) r.Features.Clone ()
 					})
 				.ToList ();
 
@@ -132,12 +135,14 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 				for (int i = 0; i < evalSamples.Count; i++)
 					{
 					var src = evalSamples[i];
-					var featCopy = (float[]) src.Causal.Features.Clone ();
+
+					// Клонирование обязательно: permutation не должен мутировать исходные данные.
+					var featCopy = (float[]) src.Features.Clone ();
 					featCopy[j] = col[idx[i]];
 
 					permSamples.Add (new EvalSample
 						{
-						Label = src.Forward.TrueLabel,
+						Label = src.Label,
 						Features = featCopy
 						});
 					}
@@ -191,11 +196,19 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 
 			foreach (var r in rows)
 				{
-				double yLabel = r.Forward.TrueLabel ? 1.0 : 0.0;
+				double yLabel = r.Label ? 1.0 : 0.0;
 				double yScore = r.Score;
 
-				var f = r.Causal.Features;
-				if (f == null) continue;
+				var f = r.Features;
+
+				// Если тут null — это не "плохие данные", а поломанная схема колонок (ошибка пайплайна).
+				if (f == null)
+					{
+					throw new InvalidOperationException (
+						"[pfi-core] Features is null in scored rows. " +
+						"Это означает несоответствие схемы IDataView ожидаемым колонкам (Label/Features). " +
+						"Исправляй построение IDataView/пайплайн модели, а не глуши это здесь.");
+					}
 
 				int len = Math.Min (f.Length, featCount);
 
@@ -206,7 +219,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 					sumX[j] += x;
 					sumX2[j] += x * x;
 
-					if (r.Forward.TrueLabel)
+					if (r.Label)
 						{
 						sumPos[j] += x;
 						cntPos[j]++;

@@ -1,10 +1,11 @@
 ﻿using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	/// <summary>
-	/// Преобразует логические PolicyConfig в реальные PolicySpec + ILeveragePolicy,
+	/// Преобразует логические PolicyConfig в реальные PolicySpec + IOmniscientLeveragePolicy,
 	/// которые используются RollingLoop/PnL-движком.
 	/// </summary>
 	public static class BacktestPolicyFactory
@@ -30,7 +31,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			return list;
 			}
 
-		private static ILeveragePolicy CreatePolicy ( PolicyConfig cfg )
+		private static IOmniscientLeveragePolicy CreatePolicy ( PolicyConfig cfg )
 			{
 			if (cfg == null) throw new ArgumentNullException (nameof (cfg));
 

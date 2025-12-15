@@ -167,13 +167,13 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				}
 
 			// Макро: считаем допустимым использовать FNG/DXY текущего дня,
-			// но не будущие даты (строго > entryUtc.Causal.DateUtc)
+			// но не будущие даты (строго > entryUtc.ToCausalDateUtc())
 			var fngB = new Dictionary<DateTime, double> (fngBase);
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
 			foreach (var key in fngBase.Keys.ToList ())
 				{
-				if (key.Causal.DateUtc > entryUtc.Causal.DateUtc)
+				if (key.ToCausalDateUtc() > entryUtc.ToCausalDateUtc())
 					{
 					fngB[key] = fngBase[key] + 100;   // сильная мутация
 					dxyB[key] = dxyBase[key] + 50.0;
@@ -191,8 +191,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

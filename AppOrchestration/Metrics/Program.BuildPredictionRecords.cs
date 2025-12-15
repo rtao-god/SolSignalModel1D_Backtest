@@ -43,7 +43,7 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			// Логируем, какие вообще дни есть в утренних точках.
-			DumpRange ("mornings", mornings, r => r.Causal.DateUtc);
+			DumpRange ("mornings", mornings, r => r.ToCausalDateUtc());
 
 			// PredictionEngine создаётся один раз для всей дневной выборки.
 			var engine = CreatePredictionEngineOrFallback (allRows);

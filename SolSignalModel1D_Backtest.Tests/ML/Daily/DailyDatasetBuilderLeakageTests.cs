@@ -76,8 +76,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				foreach (var r in xs)
 					{
 					Assert.True (
-						b.IsTrainEntry (r.Causal.DateUtc),
-						$"{tag} contains non-train entry by TrainBoundary: {r.Causal.DateUtc:O}");
+						b.IsTrainEntry (r.ToCausalDateUtc()),
+						$"{tag} contains non-train entry by TrainBoundary: {r.ToCausalDateUtc():O}");
 					}
 				}
 

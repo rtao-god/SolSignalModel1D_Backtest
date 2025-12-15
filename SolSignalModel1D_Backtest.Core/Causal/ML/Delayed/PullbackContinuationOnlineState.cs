@@ -1,7 +1,7 @@
 ﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 using System;
 using System.Collections.Generic;
 

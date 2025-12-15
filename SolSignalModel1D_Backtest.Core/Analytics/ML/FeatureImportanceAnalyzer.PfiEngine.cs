@@ -11,6 +11,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 		{
 		/// <summary>
 		/// Внутренний DTO: Label + Features + Score после прогонки через модель.
+		/// Важно: не должен ссылаться на доменные сущности (BacktestRecord/Causal/Forward).
 		/// </summary>
 		private sealed class BinaryScoredRow
 			{
@@ -72,11 +73,18 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 
 			foreach (var r in scoredRows)
 				{
-				var feats = (float[]) r.Causal.Features.Clone ();
+				if (r.Features == null)
+					{
+					throw new InvalidOperationException (
+						"[pfi] Features is null in scored rows. " +
+						"Это признак несоответствия схемы IDataView (колонки Label/Features).");
+					}
+
+				var feats = (float[]) r.Features.Clone ();
 
 				evalSamples.Add (new EvalSample
 					{
-					Label = r.Forward.TrueLabel,
+					Label = r.Label,
 					Features = feats
 					});
 				}
@@ -133,12 +141,14 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 				for (int i = 0; i < evalSamples.Count; i++)
 					{
 					var src = evalSamples[i];
-					var featCopy = (float[]) src.Causal.Features.Clone ();
+
+					// Клонирование обязательно: permutation не должен мутировать исходные данные.
+					var featCopy = (float[]) src.Features.Clone ();
 					featCopy[j] = col[idx[i]];
 
 					permSamples.Add (new EvalSample
 						{
-						Label = src.Forward.TrueLabel,
+						Label = src.Label,
 						Features = featCopy
 						});
 					}
@@ -187,11 +197,16 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 
 			foreach (var r in rows)
 				{
-				double yLabel = r.Forward.TrueLabel ? 1.0 : 0.0;
+				double yLabel = r.Label ? 1.0 : 0.0;
 				double yScore = r.Score;
 
-				var f = r.Causal.Features;
-				if (f == null) continue;
+				var f = r.Features;
+				if (f == null)
+					{
+					throw new InvalidOperationException (
+						"[pfi] Features is null in scored rows. " +
+						"Это означает несоответствие схемы IDataView ожидаемым колонкам (Label/Features).");
+					}
 
 				int len = Math.Min (f.Length, featCount);
 
@@ -202,7 +217,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 					sumX[j] += x;
 					sumX2[j] += x * x;
 
-					if (r.Forward.TrueLabel)
+					if (r.Label)
 						{
 						sumPos[j] += x;
 						cntPos[j]++;

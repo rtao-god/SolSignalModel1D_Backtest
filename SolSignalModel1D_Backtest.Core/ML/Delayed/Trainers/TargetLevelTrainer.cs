@@ -1,6 +1,6 @@
 ﻿using Microsoft.ML;
-using Microsoft.ML.Data;
 using Microsoft.ML.Trainers.LightGbm;
+using SolSignalModel1D_Backtest.Core.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using System;
 using System.Collections.Generic;
@@ -8,19 +8,19 @@ using System.Collections.Generic;
 namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 	{
 	/// <summary>
-	/// Trainer для таргет-слоя (0 / 1 / 2) поверх оффлайнов, с каузальным срезом.
-	/// Лейбл везде int.
+	/// Trainer для таргет-слоя (0 / 1 / 2).
+	/// ВАЖНО: тренер работает только с TargetLevelSample.Features (float[]),
+	/// никаких ссылок на Record/Causal/Forward — это убирает “скрытые” зависимости и ошибки типов.
 	/// </summary>
 	public sealed class TargetLevelTrainer
 		{
 		private readonly MLContext _ml = new MLContext (seed: 42);
 
-		private sealed class TargetTrainRow
+		private sealed class TrainRow
 			{
-			// важное: int, как и в TargetLevelSample
 			public int Label { get; set; }
 
-			[VectorType (MlSchema.FeatureCount)]
+			[Microsoft.ML.Data.VectorType (MlSchema.FeatureCount)]
 			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
 
 			public float Weight { get; set; }
@@ -28,27 +28,38 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 		public ITransformer Train ( List<TargetLevelSample> samples, DateTime asOfUtc )
 			{
-			var trainRows = new List<TargetTrainRow> ();
+			if (samples == null) throw new ArgumentNullException (nameof (samples));
 
-			foreach (var s in samples)
+			var trainRows = new List<TrainRow> (Math.Max (16, samples.Count));
+
+			for (int i = 0; i < samples.Count; i++)
 				{
-				// каузальность: не берём будущие дни
+				var s = samples[i];
 				if (s.EntryUtc >= asOfUtc)
 					continue;
 
-				float w = s.Forward.TrueLabel switch
+				if (s.Features == null || s.Features.Length != MlSchema.FeatureCount)
 					{
-						2 => 3.0f,   // глубокий дип, самый редкий
-						1 => 2.0f,   // мелкое улучшение
+					throw new InvalidOperationException (
+						$"[target] sample.Features invalid: expected len={MlSchema.FeatureCount}, actual={s.Features?.Length ?? 0}. " +
+						"Фичи должны быть собраны оффлайн-builder’ом строго под схему.");
+					}
+
+				// Веса по классу: подчёркиваем редкий “глубокий” класс.
+				float w = s.Label switch
+					{
+						2 => 3.0f,
+						1 => 2.0f,
 						_ => 1.0f
 						};
 
+				// Копирование можно убрать ради скорости/памяти, но оставляем как “идеальный” вариант против мутаций извне.
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Causal.Features, feats, Math.Min (s.Causal.Features.Length, MlSchema.FeatureCount));
+				Array.Copy (s.Features, feats, feats.Length);
 
-				trainRows.Add (new TargetTrainRow
+				trainRows.Add (new TrainRow
 					{
-					Label = s.Forward.TrueLabel,
+					Label = s.Label,
 					Features = feats,
 					Weight = w
 					});
@@ -59,7 +70,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 			var data = _ml.Data.LoadFromEnumerable (trainRows);
 
-			// 1) int -> key
 			var pipeline =
 				_ml.Transforms.Conversion.MapValueToKey (
 						outputColumnName: "Label",
@@ -77,7 +87,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 						Seed = 42,
 						NumberOfThreads = 1
 						}))
-				// 2) key -> int обратно
 				.Append (_ml.Transforms.Conversion.MapKeyToValue (
 					outputColumnName: "PredictedLabel",
 					inputColumnName: "PredictedLabel"));
@@ -89,13 +98,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 		public PredictionEngine<TargetLevelSample, TargetLevelPrediction> CreateEngine ( ITransformer model )
 			{
+			if (model == null) throw new ArgumentNullException (nameof (model));
 			return _ml.Model.CreatePredictionEngine<TargetLevelSample, TargetLevelPrediction> (model);
 			}
 		}
 
-	/// <summary>
-	/// Выход таргет-модели: после MapKeyToValue это будет Int32.
-	/// </summary>
 	public sealed class TargetLevelPrediction
 		{
 		public int PredictedLabel { get; set; }

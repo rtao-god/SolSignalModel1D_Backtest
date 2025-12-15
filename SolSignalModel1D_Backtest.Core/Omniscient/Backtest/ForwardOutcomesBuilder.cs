@@ -63,7 +63,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 				if (!truthByDate.TryGetValue (dayStart, out var truth))
 					throw new InvalidOperationException ($"[forward] No truth row for causal date {dayStart:O}.");
 
-				var dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
+				if (dayStart.Kind != DateTimeKind.Utc)
+					throw new InvalidOperationException ($"[forward] causal.DateUtc must be UTC: {dayStart:O}.");
+
+				var dayEnd = Windowing.ComputeBaselineExitUtc (dayStart, Windowing.NyTz);
+
 				if (dayEnd <= dayStart)
 					throw new InvalidOperationException ($"[forward] Некорректное baseline-окно: start={dayStart:O}, end={dayEnd:O}.");
 
@@ -127,6 +131,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 
 				double forwardMinMove = Math.Max (upMove, downMove);
 
+				// Truth по архитектуре живёт в Forward (BacktestRecord читает TrueLabel/FactMicro* именно оттуда),
+				// чтобы каузальный слой физически не мог “подсмотреть” истину будущего окна.
 				var forward = new ForwardOutcomes
 					{
 					DateUtc = dayStart,
@@ -136,17 +142,17 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 					MinLow24 = minLow,
 					Close24 = close24,
 					DayMinutes = dayMinutes,
-					MinMove = forwardMinMove
+					MinMove = forwardMinMove,
+
+					TrueLabel = truth.TrueLabel,
+					FactMicroUp = truth.FactMicroUp,
+					FactMicroDown = truth.FactMicroDown
 					};
 
 				result.Add (new BacktestRecord
 					{
 					Causal = causal,
-					Forward = forward,
-
-					TrueLabel = truth.TrueLabel,
-					FactMicroUp = truth.FactMicroUp,
-					FactMicroDown = truth.FactMicroDown
+					Forward = forward
 					});
 				}
 

@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	{
@@ -47,12 +43,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 				}
 
 			var ordered = allRecords
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			// ЕДИНЫЙ контракт сплита train/OOS — baseline-exit.
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
 
 			var trainRecords = split.Train;
 			var oosRecords = split.Oos;
@@ -72,12 +68,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 			fullRecords.AddRange (trainRecords);
 			fullRecords.AddRange (oosRecords);
 
-			var maxDateUtc = fullRecords[^1].Causal.DateUtc;
+			var maxDateUtc = fullRecords[^1].ToCausalDateUtc();
 
 			// Recent — также только eligible.
 			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
 			var recentRecords = fullRecords
-				.Where (r => r.Causal.DateUtc >= fromRecentUtc)
+				.Where (r => r.ToCausalDateUtc() >= fromRecentUtc)
 				.ToList ();
 
 			if (recentRecords.Count == 0)

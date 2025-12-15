@@ -37,7 +37,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var maxDate = allRows.Last ().Date;
 			var trainUntilUtc = maxDate.AddDays (-HoldoutDays);
 
-			Assert.Contains (allRows, r => r.Causal.DateUtc > trainUntilUtc);
+			Assert.Contains (allRows, r => r.ToCausalDateUtc() > trainUntilUtc);
 
 			// 2. Две копии: A — оригинал, B — с жёстко замутивированным хвостом.
 			var rowsA = CloneRows (allRows);
@@ -120,7 +120,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					});
 				}
 
-			return rows.OrderBy (r => r.Causal.DateUtc).ToList ();
+			return rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 			}
 
 		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
@@ -131,7 +131,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				{
 				res.Add (new BacktestRecord
 					{
-					Date = r.Causal.DateUtc,
+					Date = r.ToCausalDateUtc(),
 					Label = r.Forward.TrueLabel,
 					RegimeDown = r.RegimeDown,
 					Features = r.Causal.Features?.ToArray () ?? Array.Empty<double> ()
@@ -146,7 +146,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// </summary>
 		private static void MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntilUtc )
 			{
-			foreach (var r in rows.Where (r => r.Causal.DateUtc > trainUntilUtc))
+			foreach (var r in rows.Where (r => r.ToCausalDateUtc() > trainUntilUtc))
 				{
 				r.Forward.TrueLabel = 2;
 				r.RegimeDown = !r.RegimeDown;
@@ -168,7 +168,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
 				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 				Assert.Equal (a.RegimeDown, b.RegimeDown);
 

@@ -1,19 +1,17 @@
 ﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 	{
 	/// <summary>
 	/// Правила полного «скипа» дня для отдельных политик.
+	/// ВАЖНО: любые решения должны быть каузальными (без forward-фактов).
 	/// </summary>
 	public static class TradeSkipRules
 		{
-		// Порог из UltraSafePolicy: "торговать только нормальные дни".
 		private const double UltraSafeSlThresh = 0.6;
 
-		/// <summary>
-		/// Вернуть true, если для данной политики этот день не должен торговаться.
-		/// </summary>
-		public static bool ShouldSkipDay ( BacktestRecord rec, ILeveragePolicy policy )
+		public static bool ShouldSkipDay ( BacktestRecord rec, ICausalLeveragePolicy policy )
 			{
 			// Ultra-safe: не торгуем дни, где режим вниз либо SL-риск высокий.
 			if (policy is LeveragePolicies.UltraSafePolicy)
@@ -21,7 +19,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 				if (rec.RegimeDown)
 					return true;
 
-				if (rec.SlProb > UltraSafeSlThresh)
+				// SlProb обязан быть посчитан до PnL; null — это pipeline-bug.
+				double slProb = rec.SlProb
+					?? throw new System.InvalidOperationException ("[skip] SlProb is null — SL layer missing before PnL.");
+
+				if (slProb > UltraSafeSlThresh)
 					return true;
 				}
 

@@ -31,7 +31,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				throw new InvalidOperationException ("[sl-offline] sol1h is null/empty: cannot build SL features.");
 
 			// Контракт: всё уже отсортировано на бутстрапе.
-			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.Causal.DateUtc, "sl-offline.rows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.ToCausalDateUtc(), "sl-offline.rows");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "sl-offline.sol1m");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1h, c => c.OpenTimeUtc, "sl-offline.sol1h");
 
@@ -51,7 +51,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 
 			foreach (var r in rows)
 				{
-				DateTime entryUtc = r.Causal.DateUtc;
+				DateTime entryUtc = r.ToCausalDateUtc();
 
 				// Утро вычисляем строго по time-contract, а не по полям prediction-record.
 				if (!Windowing.IsNyMorning (entryUtc, nyTz: TimeZones.NewYork))
@@ -63,7 +63,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 					{
 					throw new InvalidOperationException (
 						$"[sl-offline] 6h candle not found for morning entry {entryUtc:O}. " +
-						"Проверь согласование OpenTimeUtc 6h и BacktestRecord.Causal.DateUtc.");
+						"Проверь согласование OpenTimeUtc 6h и BacktestRecord.ToCausalDateUtc().");
 					}
 
 				double entry = c6.Close;

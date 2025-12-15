@@ -56,7 +56,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 					dxySeries: dxyHistory,
 					extraDaily: null,
 					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			Assert.NotEmpty (rowsA);
@@ -90,18 +90,18 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 					dxySeries: dxyHistory,
 					extraDaily: null,
 					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			// 4. Берём только «безопасный» префикс:
 			// строки, у которых весь используемый горизонт гарантированно <= trainUntil.
 			// Запас 8 дней: baseline-exit и минутный путь короче.
 			var safeRowsA = rowsA
-				.Where (r => r.Causal.DateUtc.AddDays (8) <= trainUntil)
+				.Where (r => r.ToCausalDateUtc().AddDays (8) <= trainUntil)
 				.ToList ();
 
 			var safeRowsB = rowsB
-				.Where (r => r.Causal.DateUtc.AddDays (8) <= trainUntil)
+				.Where (r => r.ToCausalDateUtc().AddDays (8) <= trainUntil)
 				.ToList ();
 
 			Assert.NotEmpty (safeRowsA);
@@ -113,7 +113,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				var a = safeRowsA[i];
 				var b = safeRowsB[i];
 
-				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
 				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.MinMove, b.MinMove);
@@ -156,7 +156,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 
 			for (int d = 0; d < days; d++)
 				{
-				var day = t.Causal.DateUtc;
+				var day = t.ToCausalDateUtc();
 
 				// Простые детерминированные ряды FNG / DXY (double).
 				fngHistory[day] = 40.0 + (d % 20);

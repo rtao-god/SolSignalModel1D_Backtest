@@ -3,6 +3,7 @@ using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
@@ -30,7 +31,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			if (mornings == null || mornings.Count == 0) return;
 
 			// быстрая мапа дата → BacktestRecord
-			var byDate = mornings.ToDictionary (r => r.Causal.DateUtc, r => r);
+			var byDate = mornings.ToDictionary (r => r.ToCausalDateUtc(), r => r);
 
 			ConsoleStyler.WriteHeader ($"=== {title}: {takeDays} → {skipDays} ===");
 
@@ -47,8 +48,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				var lastRec = block[^1]; // последний день окна = последний из взятых записей
 
 				blockIdx++;
-				var blockStartDate = block.First ().DateUtc.Causal.DateUtc;
-				var blockEndDate = lastRec.DateUtc.Causal.DateUtc;
+				var blockStartDate = block.First ().DateUtc.ToCausalDateUtc();
+				var blockEndDate = lastRec.DateUtc.ToCausalDateUtc();
 
 				// ищем соответствующий BacktestRecord
 				byDate.TryGetValue (lastRec.DateUtc, out var dayRow);
@@ -113,7 +114,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			foreach (var pr in policyResults.OrderBy (x => x.PolicyName))
 				{
 				var dayTrades = pr.Trades?
-					.Where (tr => tr.DateUtc.Causal.DateUtc == dayUtc.Causal.DateUtc)
+					.Where (tr => tr.DateUtc.ToCausalDateUtc() == dayUtc.ToCausalDateUtc())
 					.OrderBy (tr => tr.EntryTimeUtc)
 					.ToList () ?? new List<PnLTrade> ();
 

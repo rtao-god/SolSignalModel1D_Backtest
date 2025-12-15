@@ -41,17 +41,17 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
 
 			var ordered = records
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.Causal.DateUtc.ToString ("O"));
+					.Select (r => r.ToCausalDateUtc().ToString ("O"));
 				throw new InvalidOperationException (
 					$"[pnl-bare] Found excluded days (baseline-exit undefined). " +
 					$"count={split.Excluded.Count}. sample=[{string.Join (", ", sample)}].");
@@ -248,7 +248,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 				if (!HasValidPrices (r))
 					{
 					Console.WriteLine (
-						$"[pnl-bare] WARNING: invalid prices for {r.Causal.DateUtc:O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
+						$"[pnl-bare] WARNING: invalid prices for {r.ToCausalDateUtc():O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
 					continue;
 					}
 
@@ -274,7 +274,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 				if (!HasValidPrices (r))
 					{
 					Console.WriteLine (
-						$"[pnl-bare] WARNING: invalid prices for {r.Causal.DateUtc:O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
+						$"[pnl-bare] WARNING: invalid prices for {r.ToCausalDateUtc():O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
 					continue;
 					}
 

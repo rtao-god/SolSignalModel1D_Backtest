@@ -37,7 +37,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			return new BacktestRecord
 				{
-				// ===== Truth живёт здесь, а не в CausalPredictionRecord =====
+				// ===== Truth =====
 				TrueLabel = trueLabel,
 				FactMicroUp = false,
 				FactMicroDown = false,

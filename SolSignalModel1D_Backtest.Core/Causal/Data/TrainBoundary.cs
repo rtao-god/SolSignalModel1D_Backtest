@@ -9,11 +9,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	/// Единый "контракт" разбиения train/OOS.
 	///
 	/// ВАЖНО: правило намеренно основано на baseline-exit, а не на entry-дате.
-	/// Причина: дневной таргет/оценка завязаны на forward-окно до baseline-exit,
-	/// Любой код, который продолжит сравнивать даты руками (<=/>), считается багом архитектуры:
-	/// он создаёт несогласованные сегменты и потенциальный boundary leakage.
+	/// Причина: дневной таргет/оценка завязаны на forward-окно до baseline-exit.
+	/// Любой код, который сравнивает entry-даты руками (<=/>), считается архитектурным багом:
+	/// это создаёт несогласованные сегменты и потенциальный boundary leakage.
 	/// </summary>
-	public readonly struct TrainBoundary
+	public sealed class TrainBoundary
 		{
 		private readonly DateTime _trainUntilUtc;
 		private readonly TimeZoneInfo _nyTz;
@@ -56,6 +56,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 			return true;
 			}
 
+		/// <summary>
+		/// Entry относится к train, если baseline-exit <= TrainUntilUtc.
+		/// </summary>
 		public bool IsTrainEntry ( DateTime entryUtc )
 			{
 			if (!TryGetBaselineExitUtc (entryUtc, out var exitUtc))
@@ -64,6 +67,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 			return exitUtc <= _trainUntilUtc;
 			}
 
+		/// <summary>
+		/// Entry относится к OOS, если baseline-exit > TrainUntilUtc.
+		/// </summary>
 		public bool IsOosEntry ( DateTime entryUtc )
 			{
 			if (!TryGetBaselineExitUtc (entryUtc, out var exitUtc))
@@ -73,7 +79,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 			}
 
 		/// <summary>
-		/// Единая точка разбиения любых сущностей по entryUtc (BacktestRecord.Causal.DateUtc, Record.DateUtc и т.п.).
+		/// Единая точка разбиения любых сущностей по entryUtc (BacktestRecord.ToCausalDateUtc(), Record.DateUtc и т.п.).
 		/// Excluded — это дни, для которых baseline-exit не определён (обычно weekend).
 		/// Их важно не "молча" относить ни к train, ни к OOS.
 		/// </summary>
@@ -109,19 +115,20 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 
 	public sealed class TrainOosSplit<T>
 		{
+		/// <summary>
+		/// Списки отдаются как IReadOnlyList, но без AsReadOnly(),
+		/// чтобы вызывающий код мог избежать лишних копий (например, через "as List&lt;T&gt;").
+		/// Инвариант: Split() возвращает свежие списки, которые не шарятся между компонентами.
+		/// </summary>
 		public IReadOnlyList<T> Train { get; }
 		public IReadOnlyList<T> Oos { get; }
 		public IReadOnlyList<T> Excluded { get; }
 
 		public TrainOosSplit ( List<T> train, List<T> oos, List<T> excluded )
 			{
-			if (train == null) throw new ArgumentNullException (nameof (train));
-			if (oos == null) throw new ArgumentNullException (nameof (oos));
-			if (excluded == null) throw new ArgumentNullException (nameof (excluded));
-
-			Train = train.AsReadOnly ();
-			Oos = oos.AsReadOnly ();
-			Excluded = excluded.AsReadOnly ();
+			Train = train ?? throw new ArgumentNullException (nameof (train));
+			Oos = oos ?? throw new ArgumentNullException (nameof (oos));
+			Excluded = excluded ?? throw new ArgumentNullException (nameof (excluded));
 			}
 		}
 	}

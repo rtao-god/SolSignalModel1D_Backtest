@@ -1,38 +1,46 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Utils
 	{
 	/// <summary>
 	/// Общие хелперы для подготовки данных к ML.NET:
-	/// - строгая конвертация double[]/FeaturesVector -> float[] фиксированной длины;
-	/// - oversample для бинарных задач без привязки к legacy DTO.
+	/// - строгая конвертация feature-vector -> float[] фиксированной длины (MlSchema.FeatureCount);
+	/// - oversample для бинарных задач.
 	/// </summary>
 	public static class MlTrainingUtils
 		{
 		public static float[] ToFloatFixed ( ReadOnlyMemory<double> featuresVector )
 			{
 			var src = featuresVector.Span;
-			int expected = CausalDataRow.FeatureCount;
+			int expected = MlSchema.FeatureCount;
 
 			if (src.Length != expected)
 				{
 				throw new InvalidOperationException (
 					$"[MlTrainingUtils] Feature vector length mismatch. got={src.Length}, expected={expected}. " +
-					"Это значит, что код генерации фичей рассинхронизирован с CausalDataRow.FeatureNames.");
+					"Это рассинхрон пайплайна: модель/ML schema ожидают фиксированную длину.");
 				}
 
 			var f = new float[expected];
 			for (int i = 0; i < expected; i++)
-				f[i] = (float) src[i];
+				{
+				var v = src[i];
+				if (double.IsNaN (v) || double.IsInfinity (v))
+					{
+					throw new InvalidOperationException (
+						$"[MlTrainingUtils] Non-finite feature at index {i}: {v}. " +
+						"Это ошибка данных/индикаторов; такие значения ломают метрики и могут имитировать «утечки».");
+					}
+
+				f[i] = (float) v;
+				}
 
 			return f;
 			}
 
-		/// <summary>
-		/// Oversample бинарной задачи:
-		/// - minor дублируется, пока его размер не достигнет major * targetFrac.
-		/// - сортировка по времени сохраняет каузальный порядок.
-		/// </summary>
 		public static List<T> OversampleBinary<T> (
 			IReadOnlyList<T> src,
 			Func<T, bool> isPositive,

@@ -65,7 +65,7 @@ namespace SolSignalModel1D_Backtest
 			// Обучение ограничивается train-окном (_trainUntilUtc), чтобы не ловить "look-ahead bias".
 				{
 				var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
-				var split = boundary.Split (allRows, r => r.Causal.DateUtc);
+				var split = boundary.Split (allRows, r => r.ToCausalDateUtc());
 
 				var slTrainRows = split.Train;
 

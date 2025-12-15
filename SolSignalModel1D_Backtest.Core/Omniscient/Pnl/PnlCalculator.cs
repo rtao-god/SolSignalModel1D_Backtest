@@ -1,40 +1,50 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 	{
 	/// <summary>
-	/// PnL-движок: дневной вход (TP/SL/close), delayed A/B, ликвидации по 1m,
-	/// Cross/Isolated, бакеты капитала и вывод средств.
-	/// Работает поверх BacktestRecord, где уже собраны causal-прогноз и forward-путь.
+	/// PnL-движок: дневной вход (TP/SL/close), delayed A/B, ликвидации по 1m.
+	///
+	/// Архитектурные инварианты:
+	/// - Решения (плечо/скипы/anti-D/направление) берутся ТОЛЬКО из causal-слоя (rec.Causal).
+	/// - Forward (DayMinutes/Entry/TrueLabel) используется только для симуляции исполнения, а не для принятия решений.
+	/// - Любые несогласованности окон/данных не маскируются фолбэками — это pipeline-bug и должно падать.
 	/// </summary>
 	public static partial class PnlCalculator
 		{
+		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+
+		// Комиссия taker (в обе стороны). Одна константа, чтобы не расползалось по коду.
 		private const double CommissionRate = 0.0004;
+
+		// "Капитал аккаунта" для метрик.
 		private const double TotalCapital = 20000.0;
 
+		// Доли бакетов.
 		private const double DailyShare = 0.60;
 		private const double IntradayShare = 0.25;
 		private const double DelayedShare = 0.15;
 
+		// Фракция бакета, которая используется как margin в сделке (до плеча).
 		private const double DailyPositionFraction = 1.0;
 		private const double IntradayPositionFraction = 0.0;
 		private const double DelayedPositionFraction = 0.4;
 
 		/// <summary>
 		/// Основной PnL-метод.
-		/// Принимает последовательность BacktestRecord, где Forward.DayMinutes уже
-		/// содержит baseline-1m-окно, и конфигурацию плеча/SL/TP.
+		/// Требование к данным: rec.Forward.DayMinutes содержит baseline 1m-окно.
 		/// </summary>
 		public static void ComputePnL (
 			IReadOnlyList<BacktestRecord> records,
-			ILeveragePolicy policy,
+			ICausalLeveragePolicy policy,
 			MarginMode marginMode,
 			out List<PnLTrade> trades,
 			out double totalPnlPct,
@@ -53,7 +63,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			if (records == null) throw new ArgumentNullException (nameof (records));
 			if (policy == null) throw new ArgumentNullException (nameof (policy));
 
-			// Пустой набор сигналов: валидный вырожденный кейс — просто нет сделок.
 			if (records.Count == 0)
 				{
 				trades = new List<PnLTrade> ();
@@ -76,8 +85,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			double antiDMinMoveMin = double.MaxValue;
 			double antiDMinMoveMax = 0.0;
 
-			var resultTrades = new List<PnLTrade> ();
+			var resultTrades = new List<PnLTrade> (capacity: records.Count * 2);
 			var resultBySource = new Dictionary<string, int> (StringComparer.OrdinalIgnoreCase);
+
 			var buckets = InitBuckets ();
 
 			double withdrawnLocal = 0.0;
@@ -95,48 +105,49 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 				double entryPrice,
 				double exitPrice,
 				double leverage,
-				IReadOnlyList<Candle1m> tradeMinutes )
+				IReadOnlyList<Candle1m> tradeMinutes,
+				bool isRealLiquidation )
 				{
 				if (globalDead) return;
 
 				if (!buckets.TryGetValue (bucketName, out var bucket))
-					throw new InvalidOperationException ($"[pnl] неизвестный бакет '{bucketName}'.");
+					throw new InvalidOperationException ($"[pnl] unknown bucket '{bucketName}'.");
 
 				if (bucket.IsDead) return;
 
 				if (leverage <= 0.0)
-					throw new InvalidOperationException ("[pnl] leverage должен быть > 0 в RegisterTrade().");
+					throw new InvalidOperationException ("[pnl] leverage must be > 0 in RegisterTrade().");
 
 				if (positionFraction <= 0.0)
-					throw new InvalidOperationException ("[pnl] positionFraction должен быть > 0 в RegisterTrade().");
+					throw new InvalidOperationException ("[pnl] positionFraction must be > 0 in RegisterTrade().");
 
 				if (entryPrice <= 0.0)
-					throw new InvalidOperationException ("[pnl] entryPrice должен быть > 0 в RegisterTrade().");
+					throw new InvalidOperationException ("[pnl] entryPrice must be > 0 in RegisterTrade().");
 
 				if (tradeMinutes == null || tradeMinutes.Count == 0)
-					throw new InvalidOperationException ("[pnl] tradeMinutes не должен быть пустым в RegisterTrade().");
+					throw new InvalidOperationException ("[pnl] tradeMinutes must not be empty in RegisterTrade().");
 
+				// Размер маржи, который пытаемся использовать из бакета.
 				double targetPosBase = bucket.BaseCapital * positionFraction;
 				if (targetPosBase <= 0.0)
-					throw new InvalidOperationException ("[pnl] targetPosBase должен быть > 0 в RegisterTrade().");
+					throw new InvalidOperationException ("[pnl] targetPosBase must be > 0 in RegisterTrade().");
 
 				double availableEquity = bucket.Equity;
 				if (availableEquity <= 0.0)
-					throw new InvalidOperationException ("[pnl] availableEquity должен быть > 0 для открытия сделки.");
+					throw new InvalidOperationException ("[pnl] bucket equity must be > 0 to open a trade.");
 
 				double marginUsed = Math.Min (targetPosBase, availableEquity);
 				if (marginUsed <= 0.0)
-					throw new InvalidOperationException ("[pnl] marginUsed должен быть > 0 в RegisterTrade().");
+					throw new InvalidOperationException ("[pnl] marginUsed must be > 0 in RegisterTrade().");
 
-				double liqPriceTheoretical = ComputeLiqPrice (entryPrice, isLong, leverage);
+				double liqPriceTheory = ComputeLiqPrice (entryPrice, isLong, leverage);
 				double liqPriceBacktest = ComputeBacktestLiqPrice (entryPrice, isLong, leverage);
 
-				var (liqHit, liqExit) = CheckLiquidation (entryPrice, isLong, leverage, tradeMinutes);
-				bool priceLiquidated = liqHit;
-				double finalExitPrice = liqHit ? liqExit : exitPrice;
+				// В случае неконсистентных TP/SL данных принудительно капаем хуже ликвидации.
+				double finalExitPrice = CapWorseThanLiquidation (
+					entryPrice, isLong, leverage, exitPrice, out bool forcedLiq);
 
-				finalExitPrice = CapWorseThanLiquidation (entryPrice, isLong, leverage, finalExitPrice, out bool forceLiq);
-				if (forceLiq) priceLiquidated = true;
+				bool priceLiquidated = isRealLiquidation || forcedLiq;
 
 				var (mae, mfe) = ComputeMaeMfe (entryPrice, isLong, tradeMinutes);
 
@@ -164,16 +175,14 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 					if (marginMode == MarginMode.Cross)
 						{
-						// В cross-сценарии смерть бакета трактуется как смерть всего аккаунта.
+						// Cross: смерть бакета трактуем как смерть всего аккаунта (строгий режим).
 						globalDead = true;
 						}
 					else
 						{
-						// В isolated-сценарии считаем аккаунт мёртвым, когда умерли все бакеты.
+						// Isolated: аккаунт мёртв, когда умерли все бакеты.
 						if (buckets.Values.All (b => b.IsDead))
-							{
 							globalDead = true;
-							}
 						}
 					}
 
@@ -195,7 +204,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					EquityAfter = Math.Round (bucket.Equity, 2),
 					IsLiquidated = priceLiquidated || diedThisTrade,
 					IsRealLiquidation = priceLiquidated,
-					LiqPrice = liqPriceTheoretical,
+					LiqPrice = liqPriceTheory,
 					LiqPriceBacktest = liqPriceBacktest,
 					MaxAdversePct = Math.Round (mae * 100.0, 4),
 					MaxFavorablePct = Math.Round (mfe * 100.0, 4),
@@ -208,73 +217,36 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					resultBySource[source] = cnt + 1;
 				}
 
-			// ===== Основной цикл по BacktestRecord =====
 			foreach (var rec in records.OrderBy (r => r.DateUtc))
 				{
 				if (globalDead) break;
+				if (rec == null) throw new InvalidOperationException ("[pnl] records contains null BacktestRecord item.");
+
+				DateTime dayStart = RequireUtcDayStart (rec.DateUtc, nameof (rec.DateUtc));
+				DateTime dayEnd = GetBaselineWindowEndUtcOrFail (rec, dayStart, NyTz);
 
 				var dayMinutes = rec.Forward.DayMinutes;
 				if (dayMinutes == null || dayMinutes.Count == 0)
-					{
-					throw new InvalidOperationException (
-						$"[pnl] Forward.DayMinutes пуст для окна, начинающегося {rec.DateUtc:yyyy-MM-dd}.");
-					}
+					throw new InvalidOperationException ($"[pnl] Forward.DayMinutes is empty for {dayStart:yyyy-MM-dd}.");
 
 				double entry = rec.Entry;
 				if (entry <= 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[pnl] Forward.Entry должен быть > 0 для {rec.DateUtc:yyyy-MM-dd}.");
-					}
+					throw new InvalidOperationException ($"[pnl] Forward.Entry must be > 0 for {dayStart:yyyy-MM-dd}.");
 
-				bool goLong;
-				bool goShort;
-
-				// Выбор направления в зависимости от режима агрегации вероятностей.
-				switch (predictionMode)
-					{
-					case PnlPredictionMode.DayOnly:
-							{
-							goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
-							goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
-							break;
-							}
-					case PnlPredictionMode.DayPlusMicro:
-							{
-							int cls = rec.PredLabel_DayMicro;
-							goLong = cls == 2;
-							goShort = cls == 0;
-							break;
-							}
-					case PnlPredictionMode.DayPlusMicroPlusSl:
-							{
-							double up = rec.ProbUp_Total;
-							double down = rec.ProbDown_Total;
-							double flat = rec.ProbFlat_Total;
-
-							goLong = up > down && up > flat;
-							goShort = down > up && down > flat;
-							break;
-							}
-					default:
-						throw new ArgumentOutOfRangeException (nameof (predictionMode), predictionMode, "Unknown prediction mode");
-					}
-
-				// Если ни одно направление не выбрано — сделка не открывается.
-				if (!goLong && !goShort)
+				// Направление из предсказаний (causal-решение).
+				if (!TryResolveDirection (rec, predictionMode, out bool goLong, out bool goShort))
 					continue;
 
+				// Политика может фильтровать дни (но фильтры должны быть только по causal).
 				if (TradeSkipRules.ShouldSkipDay (rec, policy))
 					continue;
 
-				double lev = policy.ResolveLeverage (rec);
+				// Плечо: строго causal.
+				double lev = policy.ResolveLeverage (rec.Causal);
 				if (double.IsNaN (lev) || double.IsInfinity (lev) || lev <= 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[pnl] политика плеча '{policy.Name}' вернула некорректное значение leverage={lev} на {rec.DateUtc:yyyy-MM-dd}.");
-					}
+					throw new InvalidOperationException ($"[pnl] leverage policy '{policy.Name}' returned invalid lev={lev} for {dayStart:yyyy-MM-dd}.");
 
-				// Anti-direction overlay: инвертирует направление при неблагоприятной конфигурации.
+				// Anti-direction overlay (строго по causal).
 				if (useAntiDirectionOverlay)
 					{
 					antiDChecked++;
@@ -286,38 +258,23 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						antiDApplied++;
 
 						if (rec.PredLabel is >= 0 and <= 2)
-							{
 							antiDByPredLabel[rec.PredLabel]++;
-							}
 
-						if (!antiDByLev.TryGetValue (lev, out var cnt))
-							cnt = 0;
-						antiDByLev[lev] = cnt + 1;
+						if (!antiDByLev.TryGetValue (lev, out var c)) c = 0;
+						antiDByLev[lev] = c + 1;
 
-						var mm = rec.MinMove;
+						double mm = rec.MinMove;
 						if (!double.IsNaN (mm) && mm > 0.0)
 							{
 							antiDMinMoveCount++;
 							antiDMinMoveSum += mm;
-
 							if (mm < antiDMinMoveMin) antiDMinMoveMin = mm;
 							if (mm > antiDMinMoveMax) antiDMinMoveMax = mm;
 							}
 
-						bool tmp = goLong;
-						goLong = goShort;
-						goShort = tmp;
+						(goLong, goShort) = (goShort, goLong);
 						rec.AntiDirectionApplied = true;
 						}
-					}
-
-				var dayStart = rec.DateUtc;
-				var dayEnd = rec.Forward.WindowEndUtc;
-
-				// Гарантируем валидный конец baseline-окна.
-				if (dayEnd <= dayStart)
-					{
-					dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
 					}
 
 				// ===== DAILY =====
@@ -333,9 +290,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						dayEnd
 					);
 
+					var (liqHit, _) = CheckLiquidation (entry, goLong, lev, dayMinutes);
+
 					RegisterTrade (
-						rec.DateUtc,
-						rec.DateUtc,
+						dayStart,
+						dayStart,
 						exitTimeUtc,
 						"Daily",
 						"daily",
@@ -344,59 +303,57 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						entryPrice: entry,
 						exitPrice: exitPrice,
 						leverage: lev,
-						tradeMinutes: dayMinutes
+						tradeMinutes: dayMinutes,
+						isRealLiquidation: liqHit
 					);
 					}
 
 				if (globalDead) break;
 
 				// ===== DELAYED =====
-				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedEntryExecuted)
+				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedEntryExecuted == true)
 					{
 					bool dLong = goLong;
+
 					double dEntry = rec.DelayedEntryPrice;
 					if (dEntry <= 0.0)
-						{
-						throw new InvalidOperationException (
-							$"[pnl] DelayedEntryPrice должен быть > 0 на {rec.DateUtc:yyyy-MM-dd}.");
-						}
+						throw new InvalidOperationException ($"[pnl] DelayedEntryPrice must be > 0 for {dayStart:yyyy-MM-dd}.");
 
-					DateTime delayedEntryTime = rec.DelayedEntryExecutedAtUtc ?? rec.DateUtc;
+					DateTime delayedEntryTime = rec.DelayedEntryExecutedAtUtc ?? dayStart;
+					if (delayedEntryTime < dayStart || delayedEntryTime >= dayEnd)
+						throw new InvalidOperationException ($"[pnl] DelayedEntryExecutedAtUtc={delayedEntryTime:O} is outside window {dayStart:O}..{dayEnd:O}.");
 
-					// Ищем индекс первой 1m-свечи не раньше времени delayedEntryTime.
-					int delayedStartIndex = -1;
-					for (int i = 0; i < dayMinutes.Count; i++)
-						{
-						if (dayMinutes[i].OpenTimeUtc >= delayedEntryTime)
-							{
-							delayedStartIndex = i;
-							break;
-							}
-						}
-
-					if (delayedStartIndex < 0 || delayedStartIndex >= dayMinutes.Count)
-						{
-						throw new InvalidOperationException (
-							$"[pnl] не найдены 1m-свечи для delayed-окна, начинающегося {rec.DateUtc:yyyy-MM-dd}.");
-						}
+					int delayedStartIndex = FindFirstMinuteIndexAtOrAfter (dayMinutes, delayedEntryTime);
+					if (delayedStartIndex < 0)
+						throw new InvalidOperationException ($"[pnl] cannot find 1m candles for delayed window starting {delayedEntryTime:O}.");
 
 					var delayedMinutes = new TradeMinutesSlice (dayMinutes, delayedStartIndex);
 
 					double dExit;
 					DateTime delayedExitTime;
 
-					// Используем уже посчитанный результат delayed-интрадей слоя.
-					if (rec.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst)
+					var delayedRes = (DelayedIntradayResult) rec.DelayedIntradayResult;
+
+					// Если слой сказал TpFirst/SlFirst — обязаны найти реальное пересечение в 1m.
+					if (delayedRes == DelayedIntradayResult.TpFirst)
 						{
-						double tpPctD = rec.DelayedIntradayTpPct;
-						dExit = dLong ? dEntry * (1.0 + tpPctD) : dEntry * (1.0 - tpPctD);
-						delayedExitTime = delayedMinutes[0].OpenTimeUtc;
+						double tpPctD = rec.DelayedIntradayTpPct
+							?? throw new InvalidOperationException ($"[pnl] DelayedIntradayTpPct is null for TpFirst at {dayStart:yyyy-MM-dd}.");
+
+						double tp = dLong ? dEntry * (1.0 + tpPctD) : dEntry * (1.0 - tpPctD);
+
+						delayedExitTime = FindFirstHitUtcOrFail (delayedMinutes, dLong, HitKind.TakeProfit, tp);
+						dExit = tp;
 						}
-					else if (rec.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst && useDelayedIntradayStops)
+					else if (delayedRes == DelayedIntradayResult.SlFirst && useDelayedIntradayStops)
 						{
-						double slPctD = rec.DelayedIntradaySlPct;
-						dExit = dLong ? dEntry * (1.0 - slPctD) : dEntry * (1.0 + slPctD);
-						delayedExitTime = delayedMinutes[0].OpenTimeUtc;
+						double slPctD = rec.DelayedIntradaySlPct
+							?? throw new InvalidOperationException ($"[pnl] DelayedIntradaySlPct is null for SlFirst at {dayStart:yyyy-MM-dd}.");
+
+						double sl = dLong ? dEntry * (1.0 - slPctD) : dEntry * (1.0 + slPctD);
+
+						delayedExitTime = FindFirstHitUtcOrFail (delayedMinutes, dLong, HitKind.StopLoss, sl);
+						dExit = sl;
 						}
 					else
 						{
@@ -405,10 +362,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						delayedExitTime = dayEnd;
 						}
 
+					var (liqHitD, _) = CheckLiquidation (dEntry, dLong, lev, delayedMinutes);
+
 					string src = rec.DelayedSource == "A" ? "DelayedA" : "DelayedB";
 
 					RegisterTrade (
-						rec.DateUtc,
+						dayStart,
 						delayedEntryTime,
 						delayedExitTime,
 						src,
@@ -418,7 +377,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						dEntry,
 						dExit,
 						lev,
-						delayedMinutes
+						delayedMinutes,
+						isRealLiquidation: liqHitD
 					);
 					}
 
@@ -437,13 +397,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			tradesBySource = resultBySource;
 			withdrawnTotal = finalWithdrawn;
 
-			bucketSnapshots = buckets.Values.Select (b => new PnlBucketSnapshot
-				{
-				Name = b.Name,
-				StartCapital = b.BaseCapital,
-				EquityNow = b.Equity,
-				Withdrawn = b.Withdrawn
-				}).ToList ();
+			bucketSnapshots = buckets.Values
+				.Select (b => new PnlBucketSnapshot
+					{
+					Name = b.Name,
+					StartCapital = b.BaseCapital,
+					EquityNow = b.Equity,
+					Withdrawn = b.Withdrawn
+					})
+				.ToList ();
 
 			totalPnlPct = Math.Round ((finalTotal - TotalCapital) / TotalCapital * 100.0, 2);
 			maxDdPct = Math.Round (maxDdAll * 100.0, 2);
@@ -461,13 +423,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					appliedPct
 				);
 
-				int lbl0 = antiDByPredLabel[0];
-				int lbl1 = antiDByPredLabel[1];
-				int lbl2 = antiDByPredLabel[2];
-
 				Console.WriteLine (
 					"[anti-d][labels] label0={0}, label1={1}, label2={2}",
-					lbl0, lbl1, lbl2
+					antiDByPredLabel[0], antiDByPredLabel[1], antiDByPredLabel[2]
 				);
 
 				if (antiDByLev.Count > 0)
@@ -484,218 +442,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					double avgMm = antiDMinMoveSum / antiDMinMoveCount;
 					Console.WriteLine (
 						"[anti-d][minMove] count={0}, avg={1:0.000}, min={2:0.000}, max={3:0.000}",
-						antiDMinMoveCount,
-						avgMm,
-						antiDMinMoveMin,
-						antiDMinMoveMax
+						antiDMinMoveCount, avgMm, antiDMinMoveMin, antiDMinMoveMax
 					);
 					}
-				}
-			}
-
-		/// <summary>
-		/// Лёгкий срез 1m-свечей без копирования данных.
-		/// Используется для delayed-сделок и любых подокон без аллокации новых списков.
-		/// </summary>
-		private readonly struct TradeMinutesSlice : IReadOnlyList<Candle1m>
-			{
-			private readonly IReadOnlyList<Candle1m> _source;
-			private readonly int _startIndex;
-
-			public TradeMinutesSlice ( IReadOnlyList<Candle1m> source, int startIndex )
-				{
-				_source = source ?? throw new ArgumentNullException (nameof (source));
-
-				if (startIndex < 0 || startIndex > source.Count)
-					throw new ArgumentOutOfRangeException (nameof (startIndex));
-
-				_startIndex = startIndex;
-				}
-
-			public int Count => _source.Count - _startIndex;
-
-			public Candle1m this[int index]
-				{
-				get
-					{
-					if (index < 0 || index >= Count)
-						throw new ArgumentOutOfRangeException (nameof (index));
-
-					return _source[_startIndex + index];
-					}
-				}
-
-			public IEnumerator<Candle1m> GetEnumerator ()
-				{
-				for (int i = _startIndex; i < _source.Count; i++)
-					{
-					yield return _source[i];
-					}
-				}
-
-			IEnumerator IEnumerable.GetEnumerator () => GetEnumerator ();
-			}
-
-		/// <summary>
-		/// MAE/MFE в долях от entry по 1m-пути сделки.
-		/// Работает поверх IReadOnlyList, одинаково для полного дня и срезов.
-		/// </summary>
-		private static (double mae, double mfe) ComputeMaeMfe (
-			double entryPrice,
-			bool isLong,
-			IReadOnlyList<Candle1m> minutes )
-			{
-			if (minutes == null) throw new ArgumentNullException (nameof (minutes));
-			if (minutes.Count == 0)
-				throw new InvalidOperationException ("[pnl] ComputeMaeMfe: minutes пуст.");
-
-			if (entryPrice <= 0.0)
-				throw new InvalidOperationException ("[pnl] ComputeMaeMfe: entryPrice должен быть > 0.");
-
-			double maxAdverse = 0.0;
-			double maxFavorable = 0.0;
-
-			for (int i = 0; i < minutes.Count; i++)
-				{
-				var m = minutes[i];
-
-				if (m.High <= 0.0 || m.Low <= 0.0)
-					continue;
-
-				double adverseMove;
-				double favorableMove;
-
-				if (isLong)
-					{
-					// Для long: неблагоприятный ход — падение до Low,
-					// благоприятный — рост до High.
-					adverseMove = (entryPrice - m.Low) / entryPrice;
-					if (adverseMove < 0.0) adverseMove = 0.0;
-
-					favorableMove = (m.High - entryPrice) / entryPrice;
-					if (favorableMove < 0.0) favorableMove = 0.0;
-					}
-				else
-					{
-					// Для short: неблагоприятный ход — рост до High,
-					// благоприятный — падение до Low.
-					adverseMove = (m.High - entryPrice) / entryPrice;
-					if (adverseMove < 0.0) adverseMove = 0.0;
-
-					favorableMove = (entryPrice - m.Low) / entryPrice;
-					if (favorableMove < 0.0) favorableMove = 0.0;
-					}
-
-				if (adverseMove > maxAdverse) maxAdverse = adverseMove;
-				if (favorableMove > maxFavorable) maxFavorable = favorableMove;
-				}
-
-			return (maxAdverse, maxFavorable);
-			}
-
-		/// <summary>
-		/// Поиск дневного TP/SL по 1m-окну с резервным закрытием в dayEndUtc.
-		/// </summary>
-		private static (double exitPrice, DateTime exitTimeUtc) TryHitDailyExit (
-			double entryPrice,
-			bool isLong,
-			double tpPct,
-			double slPct,
-			IReadOnlyList<Candle1m> minutes,
-			DateTime dayEndUtc )
-			{
-			if (minutes == null || minutes.Count == 0)
-				throw new ArgumentException (
-					"minutes must not be empty for TryHitDailyExit.",
-					nameof (minutes));
-
-			if (entryPrice <= 0.0)
-				throw new ArgumentException (
-					"entryPrice must be positive for TryHitDailyExit.",
-					nameof (entryPrice));
-
-			if (isLong)
-				{
-				double tp = entryPrice * (1.0 + tpPct);
-				double sl = slPct > 1e-9 ? entryPrice * (1.0 - slPct) : double.NaN;
-
-				for (int i = 0; i < minutes.Count; i++)
-					{
-					var m = minutes[i];
-
-					bool hitTp = m.High >= tp;
-					bool hitSl = !double.IsNaN (sl) && m.Low <= sl;
-
-					if (hitTp || hitSl)
-						{
-						return (hitSl ? sl : tp, m.OpenTimeUtc);
-						}
-					}
-				}
-			else
-				{
-				double tp = entryPrice * (1.0 - tpPct);
-				double sl = slPct > 1e-9 ? entryPrice * (1.0 + slPct) : double.NaN;
-
-				for (int i = 0; i < minutes.Count; i++)
-					{
-					var m = minutes[i];
-
-					bool hitTp = m.Low <= tp;
-					bool hitSl = !double.IsNaN (sl) && m.High >= sl;
-
-					if (hitTp || hitSl)
-						{
-						return (hitSl ? sl : tp, m.OpenTimeUtc);
-						}
-					}
-				}
-
-			// Ни TP, ни SL — закрытие по close последней минутки,
-			// но временем выхода считаем строго dayEndUtc (baseline-выход).
-			var last = minutes[minutes.Count - 1];
-			return (last.Close, dayEndUtc);
-			}
-
-		/// <summary>
-		/// Проверка достижения backtest-уровня ликвидации по 1m-пути.
-		/// Возвращает флаг ликвидации и цену выхода по ликвидации.
-		/// </summary>
-		private static (bool liqHit, double liqExitPrice) CheckLiquidation (
-			double entryPrice,
-			bool isLong,
-			double leverage,
-			IReadOnlyList<Candle1m> minutes )
-			{
-			if (minutes == null || minutes.Count == 0)
-				throw new InvalidOperationException ("[pnl] minutes must not be empty in CheckLiquidation().");
-
-			if (entryPrice <= 0.0)
-				throw new InvalidOperationException ("[pnl] entryPrice must be positive in CheckLiquidation().");
-
-			double liqPrice = ComputeBacktestLiqPrice (entryPrice, isLong, leverage);
-			if (liqPrice <= 0.0)
-				throw new InvalidOperationException ("[pnl] backtest liquidation price must be positive in CheckLiquidation().");
-
-			if (isLong)
-				{
-				for (int i = 0; i < minutes.Count; i++)
-					{
-					var m = minutes[i];
-					if (m.Low <= liqPrice)
-						return (true, liqPrice);
-					}
-				return (false, 0.0);
-				}
-			else
-				{
-				for (int i = 0; i < minutes.Count; i++)
-					{
-					var m = minutes[i];
-					if (m.High >= liqPrice)
-						return (true, liqPrice);
-					}
-				return (false, 0.0);
 				}
 			}
 		}

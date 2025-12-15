@@ -99,7 +99,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
 			foreach (var row in allRows)
 				{
-				var date = row.Causal.DateUtc;
+				var date = row.ToCausalDateUtc();
 
 				var targets = new List<(string Name, double Value)>
 				{
@@ -136,7 +136,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 				if (row.Causal.Features == null || row.Causal.Features.Length == 0)
 					continue;
 
-				if (!futureTargetsByDate.TryGetValue (row.Causal.DateUtc, out var targets) || targets.Count == 0)
+				if (!futureTargetsByDate.TryGetValue (row.ToCausalDateUtc(), out var targets) || targets.Count == 0)
 					continue;
 
 				var feats = row.Causal.Features;
@@ -156,7 +156,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 							{
 							suspiciousMatches.Add (new MatchInfo
 								{
-								Date = row.Causal.DateUtc,
+								Date = row.ToCausalDateUtc(),
 								FeatureIndex = fi,
 								TargetName = name,
 								FeatureVal = fVal,
@@ -266,10 +266,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
 				result.Warnings.Add (header);
 
-				foreach (var sample in g.AllMatches.OrderBy (x => x.Causal.DateUtc).Take (5))
+				foreach (var sample in g.AllMatches.OrderBy (x => x.ToCausalDateUtc()).Take (5))
 					{
 					var line =
-						$"[rows-leak:noise]   date={sample.Causal.DateUtc:O}, " +
+						$"[rows-leak:noise]   date={sample.ToCausalDateUtc():O}, " +
 						$"featureVal={sample.FeatureVal:0.########}, " +
 						$"targetVal={sample.TargetVal:0.########}, " +
 						$"label={sample.Forward.TrueLabel}, minMove={sample.MinMove:0.####}, " +
@@ -313,10 +313,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.fracTotal"] = fracTotal;
 				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.fracNonZero"] = fracNonZero;
 
-				foreach (var sample in g.NonZeroMatches.OrderBy (x => x.Causal.DateUtc).Take (5))
+				foreach (var sample in g.NonZeroMatches.OrderBy (x => x.ToCausalDateUtc()).Take (5))
 					{
 					var line =
-						$"[rows-leak]   date={sample.Causal.DateUtc:O}, " +
+						$"[rows-leak]   date={sample.ToCausalDateUtc():O}, " +
 						$"featureVal={sample.FeatureVal:0.########}, " +
 						$"targetVal={sample.TargetVal:0.########}, " +
 						$"label={sample.Forward.TrueLabel}, minMove={sample.MinMove:0.####}, " +

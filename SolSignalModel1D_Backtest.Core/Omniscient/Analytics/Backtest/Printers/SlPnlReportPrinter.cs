@@ -4,6 +4,7 @@ using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
@@ -30,8 +31,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 			var gatedDays = new HashSet<DateTime> (
 				records
-					.Where (r => r.SlHighDecision)
-					.Select (r => r.DateUtc.Causal.DateUtc));
+					.Where (r => r.SlHighDecision == true)
+					.Select (r => r.DateUtc.ToCausalDateUtc()));
 
 			var globalDeltas = new List<double> ();
 			var globalGatedDeltas = new List<double> ();
@@ -59,7 +60,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 						perPolicyDeltas.Add (delta);
 						globalDeltas.Add (delta);
 
-						bool isGatedDay = gatedDays.Contains (tw.DateUtc.Causal.DateUtc)
+						bool isGatedDay = gatedDays.Contains (tw.DateUtc.ToCausalDateUtc())
 							&& string.Equals (tw.Source, "Daily", StringComparison.OrdinalIgnoreCase);
 
 						if (isGatedDay)
@@ -126,8 +127,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			var withTrades = withSl.Trades ?? new List<PnLTrade> ();
 			var noTrades = noSl.Trades ?? new List<PnLTrade> ();
 
-			var daysWith = new HashSet<DateTime> (withTrades.Select (t => t.DateUtc.Causal.DateUtc));
-			var daysNo = new HashSet<DateTime> (noTrades.Select (t => t.DateUtc.Causal.DateUtc));
+			var daysWith = new HashSet<DateTime> (withTrades.Select (t => t.DateUtc.ToCausalDateUtc()));
+			var daysNo = new HashSet<DateTime> (noTrades.Select (t => t.DateUtc.ToCausalDateUtc()));
 
 			int baseDays = daysNo.Count;
 			int skipped = baseDays > 0 ? daysNo.Except (daysWith).Count () : 0;

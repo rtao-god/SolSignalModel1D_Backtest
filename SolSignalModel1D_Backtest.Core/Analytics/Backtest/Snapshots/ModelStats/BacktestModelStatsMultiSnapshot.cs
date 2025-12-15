@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	{

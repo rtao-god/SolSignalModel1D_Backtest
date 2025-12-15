@@ -1,12 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Backtest;
+﻿using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 	{
@@ -15,7 +16,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 		public sealed class PolicySpec
 			{
 			public string Name { get; init; } = string.Empty;
-			public ILeveragePolicy? Policy { get; init; }
+
+			/// <summary>
+			/// Omniscient-политика плеча: работает по BacktestRecord (может читать causal+forward часть).
+			/// Null допускается: такие PolicySpec считаются "disabled" и пропускаются.
+			/// </summary>
+			public IOmniscientLeveragePolicy? Policy { get; init; }
+
 			public MarginMode Margin { get; init; }
 			}
 

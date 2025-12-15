@@ -15,13 +15,13 @@ namespace SolSignalModel1D_Backtest
 			List<Candle6h> solAll6h )
 			{
 			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
-			var split = boundary.Split (allRows, r => r.Causal.DateUtc);
+			var split = boundary.Split (allRows, r => r.ToCausalDateUtc());
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.Causal.DateUtc.ToString ("O"));
+					.Select (r => r.ToCausalDateUtc().ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[sl-offline] Found excluded days (baseline-exit undefined). " +

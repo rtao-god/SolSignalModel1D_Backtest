@@ -5,10 +5,10 @@ using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
@@ -68,7 +68,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 					dxySeries: dxyHistory,
 					extraDaily: null,
 					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			Assert.NotEmpty (rowsAAll);
@@ -97,17 +97,17 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 					dxySeries: dxyHistory,
 					extraDaily: null,
 					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
-			var splitA = boundary.Split (rowsAAll, r => r.Causal.DateUtc);
-			var splitB = boundary.Split (rowsBAll, r => r.Causal.DateUtc);
+			var splitA = boundary.Split (rowsAAll, r => r.ToCausalDateUtc());
+			var splitB = boundary.Split (rowsBAll, r => r.ToCausalDateUtc());
 
 			Assert.Empty (splitA.Excluded);
 			Assert.Empty (splitB.Excluded);
 
-			var trainRowsA = splitA.Train.OrderBy (r => r.Causal.DateUtc).ToList ();
-			var trainRowsB = splitB.Train.OrderBy (r => r.Causal.DateUtc).ToList ();
+			var trainRowsA = splitA.Train.OrderBy (r => r.ToCausalDateUtc()).ToList ();
+			var trainRowsB = splitB.Train.OrderBy (r => r.ToCausalDateUtc()).ToList ();
 
 			Assert.NotEmpty (trainRowsA);
 			Assert.Equal (trainRowsA.Count, trainRowsB.Count);
@@ -233,7 +233,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
 				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.MinMove, b.MinMove);

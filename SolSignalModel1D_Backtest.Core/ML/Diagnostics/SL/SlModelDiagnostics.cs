@@ -7,13 +7,13 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 	{
 	/// <summary>
 	/// Диагностика SL-модели (SlFirstTrainer):
-	/// строит/использует модель на готовых SlHitSample и считает PFI + direction.
+	/// строит/использует модель на готовых SlHitSample и считает PFI.
 	/// </summary>
 	public static class SlModelDiagnostics
 		{
 		/// <summary>
-		/// PFI + direction по SL-модели на заданном наборе SlHitSample.
-		/// 
+		/// PFI по SL-модели на заданном наборе SlHitSample.
+		///
 		/// samples — любой срез (train / OOS / holdout), без утечек.
 		/// modelOverride — если передан, используем его; иначе тренируем модель сами.
 		/// featureNames — имена фич; если null, используем sl_f00..sl_fNN.
@@ -34,7 +34,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 
 			var minDate = samples.Min (s => s.EntryUtc);
 			var maxDate = samples.Max (s => s.EntryUtc);
-			int pos = samples.Count (s => s.Forward.TrueLabel);
+
+			// Label здесь уже bool (true = сначала SL, false = сначала TP).
+			int pos = samples.Count (s => s.Label);
 			int neg = samples.Count - pos;
 
 			Console.WriteLine (
@@ -48,6 +50,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 				}
 			else
 				{
+				// Тренер ожидает ровно SlHitSample.
 				var trainer = new SlFirstTrainer ();
 				var asOf = maxDate;
 				model = trainer.Train (samples, asOf);
@@ -57,11 +60,12 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
 			var ml = new MLContext (seed: 42);
 
 			// Для PFI достаточно Label + Features.
+			// Здесь намеренно используем MlSampleBinary как унифицированный контейнер.
 			var data = ml.Data.LoadFromEnumerable (
 				samples.Select (s => new MlSampleBinary
 					{
-					Label = s.Forward.TrueLabel,
-					Features = s.Causal.Features
+					Label = s.Label,
+					Features = s.Features
 					})
 			);
 

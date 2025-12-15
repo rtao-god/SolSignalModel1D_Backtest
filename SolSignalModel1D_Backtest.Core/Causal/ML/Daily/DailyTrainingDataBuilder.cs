@@ -23,15 +23,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				throw new InvalidOperationException ("[daily-train] trainRows is empty.");
 
 			// Контракт: trainRows уже отсортирован по Date и в UTC.
-			SeriesGuards.EnsureStrictlyAscendingUtc (trainRows, r => r.Causal.DateUtc, "daily-train.trainRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (trainRows, r => r.ToCausalDateUtc (), "daily-train.trainRows");
 
 			// ===== 1. Move-датасет: все дни =====
 			if (balanceMove)
 				{
 				moveTrainRows = MlTrainingUtils.OversampleBinary (
-					trainRows,
-					r => r.Forward.TrueLabel != 1,
-					balanceTargetFrac);
+					src: trainRows,
+					isPositive: r => r.Forward.TrueLabel != 1,
+					dateSelector: r => r.ToCausalDateUtc (),
+					targetFrac: balanceTargetFrac);
 				}
 			else
 				{
@@ -56,14 +57,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 			if (balanceDir)
 				{
 				dirNormalRows = MlTrainingUtils.OversampleBinary (
-					dirNormalRows,
-					r => r.Forward.TrueLabel == 2,
-					balanceTargetFrac);
+					src: dirNormalRows,
+					isPositive: r => r.Forward.TrueLabel == 2,
+					dateSelector: r => r.ToCausalDateUtc (),
+					targetFrac: balanceTargetFrac);
 
 				dirDownRows = MlTrainingUtils.OversampleBinary (
-					dirDownRows,
-					r => r.Forward.TrueLabel == 2,
-					balanceTargetFrac);
+					src: dirDownRows,
+					isPositive: r => r.Forward.TrueLabel == 2,
+					dateSelector: r => r.ToCausalDateUtc (),
+					targetFrac: balanceTargetFrac);
 				}
 			}
 		}

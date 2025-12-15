@@ -1,7 +1,10 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Utils.Indicators;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using CausalDataRowDto = SolSignalModel1D_Backtest.Core.Causal.Data.CausalDataRow;
 using Corendicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
@@ -23,6 +26,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 		private const int SolEmaSlow = 200;
 		private const int BtcEmaFast = 50;
 		private const int BtcEmaSlow = 200;
+
+		// Инвариант: dynVol использует lookback по 6h-окнам; ранние индексы дают 0 => это warm-up, а не "значение".
+		private const int DynVolLookbackWindows = 10;
 
 		public static DailyRowsBuildResult BuildDailyRows (
 			List<Candle6h> solWinTrain,
@@ -84,6 +90,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				LastQuantileTune = DateTime.MinValue
 				};
 
+			// История для MinMove: только факты прошлых дней (realized амплитуда path),
+			// чтобы minMove был строго каузальным.
+			var minMoveHistory = new List<MinMoveHistoryRow> (solWinTrain.Count);
+
 			var causalRows = new List<CausalDataRowDto> (solWinTrain.Count);
 			var labeledRows = new List<LabeledCausalRowDto> (solWinTrain.Count);
 
@@ -108,8 +118,20 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				if (!paxgIndexByOpen.TryGetValue (openUtc, out int gIdx))
 					throw new InvalidOperationException ($"[RowBuilder] no PAXG candle for SOL entry {openUtc:O}.");
 
-				if (solIdx == 0 || btcIdx == 0)
+				// Warm-up: отсекаем ранние дни, где индикаторы/ретёрны не определены.
+				// Это предотвращает "ложные аварии" (dynVol/atr=0 из-за недостатка истории)
+				// и убирает тихие дефолты, которые портят распределение фичей на старте датасета.
+				if (WarmupGuards.ShouldSkipDailyRowWarmup (
+					solIdx: solIdx,
+					btcIdx: btcIdx,
+					goldIdx: gIdx,
+					retLookbackMax: 30,
+					dynVolLookbackWindows: DynVolLookbackWindows,
+					goldLookbackWindows: 30,
+					out var warmupSkipReason))
+					{
 					continue;
+					}
 
 				double solClose = c.Close;
 				if (solClose <= 0)
@@ -125,31 +147,32 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 
 				if (double.IsNaN (solRet1) || double.IsNaN (solRet3) || double.IsNaN (solRet30) ||
 					double.IsNaN (btcRet1) || double.IsNaN (btcRet3) || double.IsNaN (btcRet30))
+					{
+					// Здесь NaN означает "не хватает истории / невалидные цены".
+					// Это не маскируем, но и не рушим пайплайн: просто пропускаем такой день.
 					continue;
+					}
 
 				double solBtcRet30 = solRet30 - btcRet30;
 				double gapBtcSol1 = btcRet1 - solRet1;
 				double gapBtcSol3 = btcRet3 - solRet3;
 
-				double solEma50Val = Corendicators.FindNearest (solEma50, openUtc, 0.0);
-				double solEma200Val = Corendicators.FindNearest (solEma200, openUtc, 0.0);
-				double btcEma50Val = Corendicators.FindNearest (btcEma50, openUtc, 0.0);
-				double btcEma200Val = Corendicators.FindNearest (btcEma200, openUtc, 0.0);
+				// Убираем FindNearest+default: в датасете лучше не иметь "нулевых" индикаторов из-за ранней истории.
+				if (!solEma50.TryGetValue (openUtc, out double solEma50Val)) continue;
+				if (!solEma200.TryGetValue (openUtc, out double solEma200Val)) continue;
+				if (!btcEma50.TryGetValue (openUtc, out double btcEma50Val)) continue;
+				if (!btcEma200.TryGetValue (openUtc, out double btcEma200Val)) continue;
 
-				double solAboveEma50 = solEma50Val > 0
-					? (solClose - solEma50Val) / solEma50Val
-					: 0.0;
+				if (solEma50Val <= 0 || solEma200Val <= 0 || btcEma50Val <= 0 || btcEma200Val <= 0)
+					throw new InvalidOperationException ($"[RowBuilder] non-positive EMA values at {openUtc:O}.");
 
-				double solEma50vs200 = solEma200Val > 0
-					? (solEma50Val - solEma200Val) / solEma200Val
-					: 0.0;
-
-				double btcEma50vs200 = btcEma200Val > 0
-					? (btcEma50Val - btcEma200Val) / btcEma200Val
-					: 0.0;
+				double solAboveEma50 = (solClose - solEma50Val) / solEma50Val;
+				double solEma50vs200 = (solEma50Val - solEma200Val) / solEma200Val;
+				double btcEma50vs200 = (btcEma50Val - btcEma200Val) / btcEma200Val;
 
 				var causalDayUtc = openUtc.ToCausalDateUtc ();
 
+				// 4.2: больше не "тихо дефолтим" — при дырках в рядах хотим явно падать.
 				double fng = Corendicators.PickNearestFng (fngHistory, causalDayUtc);
 				double fngNorm = (fng - 50.0) / 50.0;
 
@@ -182,11 +205,17 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				double solRsiCentered = solRsiVal - 50.0;
 				double rsiSlope3 = Corendicators.GetRsiSlope6h (solRsi, openUtc, 3);
 
-				double dynVol = Corendicators.ComputeDynVol6h (solWinTrain, solIdx, 10);
-				if (dynVol <= 0)
+				double dynVol = Corendicators.ComputeDynVol6h (solWinTrain, solIdx, DynVolLookbackWindows);
+
+				// Важно различать warm-up и "сломанные данные":
+				// - warm-up мы уже отсекаем выше;
+				// - здесь 0/NaN почти всегда означает ошибку источника/индикаторов.
+				if (double.IsNaN (dynVol) || double.IsInfinity (dynVol) || dynVol <= 0)
 					throw new InvalidOperationException ($"[RowBuilder] dynVol is non-positive at {openUtc:O}.");
 
-				double atrAbs = Corendicators.FindNearest (solAtr, openUtc, 0.0);
+				if (!solAtr.TryGetValue (openUtc, out double atrAbs))
+					continue;
+
 				if (atrAbs <= 0)
 					throw new InvalidOperationException ($"[RowBuilder] ATR is non-positive at {openUtc:O}.");
 
@@ -201,7 +230,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					regimeDown: isDownRegime,
 					atrPct: atrPct,
 					dynVol: dynVol,
-					historyRows: causalRows,
+					historyRows: minMoveHistory,
 					cfg: minCfg,
 					state: minState);
 
@@ -273,6 +302,14 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					trueLabel: trueLabel,
 					factMicroUp: factMicroUp,
 					factMicroDown: factMicroDown));
+
+				// Обновляем историю minMove ПОСЛЕ расчёта текущего дня,
+				// чтобы текущий forward не мог повлиять на minMove этого же дня.
+				double realizedAmp = Math.Max (pathUp, Math.Abs (pathDown));
+				if (double.IsNaN (realizedAmp) || double.IsInfinity (realizedAmp) || realizedAmp < 0)
+					throw new InvalidOperationException ($"[RowBuilder] invalid realizedAmp={realizedAmp} at {openUtc:O}.");
+
+				minMoveHistory.Add (new MinMoveHistoryRow (causalDayUtc, realizedAmp));
 				}
 
 			return new DailyRowsBuildResult

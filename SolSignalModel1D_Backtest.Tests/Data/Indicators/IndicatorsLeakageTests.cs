@@ -95,12 +95,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Causal.DateUtc.AddDays (-120);
-			var lastDate = start.Causal.DateUtc.AddDays (400);
+			var firstDate = start.ToCausalDateUtc().AddDays (-120);
+			var lastDate = start.ToCausalDateUtc().AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// ВАЖНО: Kind = Utc, чтобы совпадать с openUtc.Causal.DateUtc.
+				// ВАЖНО: Kind = Utc, чтобы совпадать с openUtc.ToCausalDateUtc().
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fngBase[key] = 50;
 				dxyBase[key] = 100.0;
@@ -131,7 +131,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
 			// Сдвигаем "будущее" после cutoff + 10 дней.
-			var mutateFrom = cutoff.Causal.DateUtc.AddDays (10);
+			var mutateFrom = cutoff.ToCausalDateUtc().AddDays (10);
 
 			foreach (var key in fngB.Keys.ToList ())
 				{
@@ -163,8 +163,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				nyTz: tz);
 
 			// Сопоставляем строки по дате.
-			var dictA = rowsA.ToDictionary (r => r.Causal.DateUtc, r => r);
-			var dictB = rowsB.ToDictionary (r => r.Causal.DateUtc, r => r);
+			var dictA = rowsA.ToDictionary (r => r.ToCausalDateUtc(), r => r);
+			var dictB = rowsB.ToDictionary (r => r.ToCausalDateUtc(), r => r);
 
 			// Для всех дат <= cutoff:
 			// - Label должен быть одинаковым;

@@ -132,7 +132,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 
 			// И в MorningRows такой день тоже не должен остаться,
 			// т.к. он релевантен только сэмплам, которые отрезаны.
-			Assert.DoesNotContain (ds.MorningRows, r => r.Causal.DateUtc == entryUtc);
+			Assert.DoesNotContain (ds.MorningRows, r => r.ToCausalDateUtc() == entryUtc);
 			}
 		}
 	}

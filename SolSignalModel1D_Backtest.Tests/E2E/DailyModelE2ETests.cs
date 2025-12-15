@@ -141,8 +141,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			var solAll1m = BuildMinuteSeriesFrom6h (solAll6h);
 
 			// --- 2. Макро-ряды FNG/DXY: ровные, без шума, только чтобы RowBuilder не падал ---
-			var firstDate = solAll6h.First ().OpenTimeUtc.Causal.DateUtc.AddDays (-120);
-			var lastDate = solAll6h.Last ().OpenTimeUtc.Causal.DateUtc.AddDays (120);
+			var firstDate = solAll6h.First ().OpenTimeUtc.ToCausalDateUtc().AddDays (-120);
+			var lastDate = solAll6h.Last ().OpenTimeUtc.ToCausalDateUtc().AddDays (120);
 
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
@@ -172,7 +172,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			Assert.True (rows.Count > 200, $"Too few rows built for e2e test: {rows.Count}");
 
 			var ordered = rows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			// --- 4. Диагностика таргетов на трене: Label не должен быть константой ---
@@ -198,7 +198,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			DateTime trainUntil = maxDate.AddDays (-holdoutDays);
 
 			var trainRows = ordered
-				.Where (r => r.Causal.DateUtc <= trainUntil)
+				.Where (r => r.ToCausalDateUtc() <= trainUntil)
 				.ToList ();
 
 			Assert.True (trainRows.Count >= 100,
@@ -216,7 +216,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			// --- 7. Гоним предсказания по OOS-части и смотрим распределение PredLabel ---
 			var evalRows = ordered
-				.Where (r => r.Causal.DateUtc > trainUntil)
+				.Where (r => r.ToCausalDateUtc() > trainUntil)
 				.ToList ();
 
 			if (evalRows.Count < 100)

@@ -1,4 +1,5 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
+﻿using System;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters
 	{
@@ -25,6 +26,23 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters
 					$"[proj] Invalid micro fact flags: both FactMicroUp and FactMicroDown are true for {r.DateUtc:O}.");
 				}
 
+			// По контракту BacktestAggRow SL-поля обязательны.
+			// Null в BacktestRecord означает "SL слой не посчитан/не применим" — это недопустимо для агрегационной аналитики,
+			// иначе метрики будут молча искажаться.
+			if (r.SlProb is not double slProb)
+				{
+				throw new InvalidOperationException (
+					$"[proj] SlProb is null for {r.DateUtc:O}. " +
+					"Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
+				}
+
+			if (r.SlHighDecision is not bool slHighDecision)
+				{
+				throw new InvalidOperationException (
+					$"[proj] SlHighDecision is null for {r.DateUtc:O}. " +
+					"Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
+				}
+
 			return new BacktestAggRow
 				{
 				DateUtc = r.DateUtc,
@@ -49,8 +67,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters
 				Conf_Day = r.Conf_Day,
 				Conf_Micro = r.Conf_Micro,
 
-				SlProb = r.SlProb,
-				SlHighDecision = r.SlHighDecision,
+				SlProb = slProb,
+				SlHighDecision = slHighDecision,
 
 				PredMicroUp = r.PredMicroUp,
 				PredMicroDown = r.PredMicroDown,

@@ -42,11 +42,11 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 
 			// Упорядочиваем по entryUtc (Causal.DateUtc), чтобы корректно выделять последний train и первый OOS.
 			var ordered = records
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
 
 			var train = split.Train;
 			var oos = split.Oos;
@@ -109,13 +109,13 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 				}
 
 			var trainSample = train
-				.OrderByDescending (r => r.Causal.DateUtc)
+				.OrderByDescending (r => r.ToCausalDateUtc())
 				.Take (boundarySampleCount)
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			var oosSample = oos
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.Take (boundarySampleCount)
 				.ToList ();
 

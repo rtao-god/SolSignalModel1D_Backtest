@@ -37,8 +37,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (config == null)
 				throw new ArgumentNullException (nameof (config));
 
-			var fromDate = mornings.Min (r => r.Causal.DateUtc);
-			var toDate = mornings.Max (r => r.Causal.DateUtc);
+			var fromDate = mornings.Min (r => r.ToCausalDateUtc());
+			var toDate = mornings.Max (r => r.ToCausalDateUtc());
 
 			// Тот же набор веток, что и в RollingLoop:
 			// BASE/ANTI-D × WITH SL / NO SL.

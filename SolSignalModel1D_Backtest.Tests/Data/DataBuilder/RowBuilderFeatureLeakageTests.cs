@@ -86,7 +86,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// Важно: Kind = Utc, чтобы совпадать с openUtc.Causal.DateUtc.
+				// Важно: Kind = Utc, чтобы совпадать с openUtc.ToCausalDateUtc().
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fng[key] = 50;
 				dxy[key] = 100.0;
@@ -176,8 +176,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

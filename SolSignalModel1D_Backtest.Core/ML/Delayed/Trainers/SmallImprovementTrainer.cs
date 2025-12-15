@@ -8,9 +8,6 @@ using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 	{
-	/// <summary>
-	/// Trainer для Model B (small improve).
-	/// </summary>
 	public sealed class SmallImprovementTrainer
 		{
 		private readonly MLContext _ml = new MLContext (seed: 42);
@@ -27,12 +24,20 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 		public ITransformer Train ( List<SmallImprovementSample> samples, DateTime asOfUtc )
 			{
-			var rows = new List<TrainRow> ();
+			if (samples == null) throw new ArgumentNullException (nameof (samples));
+
+			var rows = new List<TrainRow> (samples.Count);
 
 			foreach (var s in samples)
 				{
+				if (s == null)
+					throw new InvalidOperationException ("[B-trainer] samples contains null item.");
+
 				if (s.EntryUtc >= asOfUtc)
 					continue;
+
+				if (s.Features == null || s.Features.Length == 0)
+					throw new InvalidOperationException ($"[B-trainer] empty Features for sample entry={s.EntryUtc:O}.");
 
 				double ageDays = (asOfUtc - s.EntryUtc).TotalDays;
 				float timeW =
@@ -40,14 +45,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 					ageDays <= 180 ? 0.7f :
 					0.4f;
 
-				float clsW = s.Forward.TrueLabel ? 2.0f : 1.0f;
+				float clsW = s.Label ? 2.0f : 1.0f;
 
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Causal.Features, feats, Math.Min (s.Causal.Features.Length, MlSchema.FeatureCount));
+				Array.Copy (s.Features, feats, Math.Min (s.Features.Length, MlSchema.FeatureCount));
 
 				rows.Add (new TrainRow
 					{
-					Label = s.Forward.TrueLabel,
+					Label = s.Label,
 					Features = feats,
 					Weight = timeW * clsW
 					});
@@ -60,8 +65,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 			var opts = new LightGbmBinaryTrainer.Options
 				{
-				LabelColumnName = nameof (TrainRow.Forward.TrueLabel),
-				FeatureColumnName = nameof (TrainRow.Causal.Features),
+				LabelColumnName = nameof (TrainRow.Label),
+				FeatureColumnName = nameof (TrainRow.Features),
 				ExampleWeightColumnName = nameof (TrainRow.Weight),
 				NumberOfLeaves = 16,
 				NumberOfIterations = 90,
@@ -78,6 +83,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 		public PredictionEngine<SmallImprovementSample, SlHitPrediction> CreateEngine ( ITransformer model )
 			{
+			if (model == null) throw new ArgumentNullException (nameof (model));
 			return _ml.Model.CreatePredictionEngine<SmallImprovementSample, SlHitPrediction> (model);
 			}
 		}

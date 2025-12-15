@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 	{
 	/// <summary>
 	/// Тест на отсутствие lookahead в MinMoveEngine:
 	/// результат ComputeAdaptive(asOfUtc, ...) не должен зависеть от historyRows
-	/// с датами строго > asOfUtc.Causal.DateUtc.
+	/// с датами строго > asOfUtc.ToCausalDateUtc().
 	/// </summary>
 	public sealed class MinMoveNoLookaheadTests
 		{
@@ -75,19 +76,19 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				cfg: cfg,
 				state: stateA);
 
-			// Сценарий B: копия истории, но "будущее" после asOfUtc.Causal.DateUtc
+			// Сценарий B: копия истории, но "будущее" после asOfUtc.ToCausalDateUtc()
 			// жёстко мутируется (амплитуды path становятся огромными).
 			var historyMutated = new List<BacktestRecord> (historyBase.Count);
 			foreach (var r in historyBase)
 				{
 				var clone = new BacktestRecord
 					{
-					Date = r.Causal.DateUtc,
+					Date = r.ToCausalDateUtc(),
 					PathReachedUpPct = r.Forward.PathReachedUpPct,
 					PathReachedDownPct = r.Forward.PathReachedDownPct
 					};
 
-				if (clone.Causal.DateUtc.Date > asOfUtc.Causal.DateUtc)
+				if (clone.ToCausalDateUtc().Date > asOfUtc.ToCausalDateUtc())
 					{
 					// Сильно увеличиваем амплитуды, чтобы эффект точно был заметен,
 					// если MinMoveEngine вдруг смотрит в будущее.
@@ -108,7 +109,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				state: stateB);
 
 			// Проверяем, что результаты полностью совпадают:
-			// будущее (Date > asOf.Causal.DateUtc) не должно влиять на MinMove/Vol/Q.
+			// будущее (Date > asOf.ToCausalDateUtc()) не должно влиять на MinMove/Vol/Q.
 			Assert.Equal (resultA.MinMove, resultB.MinMove, 10);
 			Assert.Equal (resultA.LocalVol, resultB.LocalVol, 10);
 			Assert.Equal (resultA.EwmaVol, resultB.EwmaVol, 10);
@@ -117,7 +118,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 			// Заодно убеждаемся, что состояние тоже не зависит от future-части.
 			Assert.Equal (stateA.EwmaVol, stateB.EwmaVol, 10);
 			Assert.Equal (stateA.QuantileQ, stateB.QuantileQ, 10);
-			Assert.Equal (stateA.LastQuantileTune.Causal.DateUtc, stateB.LastQuantileTune.Causal.DateUtc);
+			Assert.Equal (stateA.LastQuantileTune.ToCausalDateUtc(), stateB.LastQuantileTune.ToCausalDateUtc());
 			}
 		}
 	}

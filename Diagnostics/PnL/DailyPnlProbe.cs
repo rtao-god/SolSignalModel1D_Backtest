@@ -40,11 +40,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 
 			// Стабильный порядок по entryUtc.
 			var ordered = records
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
 
 			var train = split.Train;
 			var oos = split.Oos;

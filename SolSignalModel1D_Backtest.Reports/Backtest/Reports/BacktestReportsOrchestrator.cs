@@ -1,21 +1,23 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
-using SolSignalModel1D_Backtest.Core.Analytics.ML;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
+using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 using SolSignalModel1D_Backtest.Reports.CurrentPrediction;
 using SolSignalModel1D_Backtest.Reports.Reporting;
 using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
-using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 	{
@@ -258,7 +260,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// </summary>
 		public static void SaveCurrentPredictionReport (
 			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ILeveragePolicy> leveragePolicies,
+			IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
 			double walletBalanceUsd = 200.0 )
 			{
 			if (records == null) throw new ArgumentNullException (nameof (records));
@@ -324,7 +326,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// </summary>
 		public static void SaveCurrentPredictionHistoryReports (
 			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ILeveragePolicy> leveragePolicies,
+			IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
 			double walletBalanceUsd = 200.0,
 			int historyWindowDays = CurrentPredictionHistoryWindowDays )
 			{
@@ -376,8 +378,8 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 					storage.Save (report);
 					}
 
-				var minDateUtc = snapshots.First ().PredictionDateUtc.Causal.DateUtc;
-				var maxDateUtc = snapshots.Last ().PredictionDateUtc.Causal.DateUtc;
+				var minDateUtc = snapshots.First ().PredictionDateUtc.ToCausalDateUtc();
+				var maxDateUtc = snapshots.Last ().PredictionDateUtc.ToCausalDateUtc();
 
 				Console.WriteLine (
 					$"[current-report-history] saved {snapshots.Count} current_prediction reports " +
@@ -391,12 +393,12 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 
 		/// <summary>
 		/// Строит и сохраняет отчёт "текущий прогноз" за конкретную дату (UTC).
-		/// Берётся последняя PredictionRecord с DateUtc.Causal.DateUtc == predictionDateUtc.Causal.DateUtc.
+		/// Берётся последняя PredictionRecord с DateUtc.ToCausalDateUtc() == predictionDateUtc.ToCausalDateUtc().
 		/// Это заготовка под API/фронт для выбора даты из всей выборки.
 		/// </summary>
 		public static void SaveCurrentPredictionReportForDate (
 			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ILeveragePolicy> leveragePolicies,
+			IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
 			DateTime predictionDateUtc,
 			double walletBalanceUsd = 200.0 )
 			{

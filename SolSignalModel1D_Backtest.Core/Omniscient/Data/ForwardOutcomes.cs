@@ -53,5 +53,22 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 		/// Path-based волатильность: максимальный ход в любую сторону от entry.
 		/// </summary>
 		public double MinMove { get; init; }
+
+		/// <summary>
+		/// Истина (класс) по forward-окну. Хранится в forward-части, чтобы causal-слой не мог подсмотреть.
+		/// </summary>
+		public int TrueLabel { get; init; }
+
+		/// <summary>Истина по микро-направлению (если используется).</summary>
+		public bool FactMicroUp { get; init; }
+
+		/// <summary>Истина по микро-направлению (если используется).</summary>
+		public bool FactMicroDown { get; init; }
+
+		// path-метрики (их ждёт WindowTailPrinter и др.)
+		public int PathFirstPassDir { get; init; }
+		public DateTime? PathFirstPassTimeUtc { get; init; }
+		public double PathReachedUpPct { get; init; }
+		public double PathReachedDownPct { get; init; }
 		}
 	}

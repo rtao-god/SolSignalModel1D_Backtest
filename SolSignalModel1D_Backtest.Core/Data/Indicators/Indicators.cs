@@ -225,41 +225,94 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 		/// Берём FNG на дату asOfUtcDate; если точной нет — ближайшая предыдущая (до 14 дней).
 		/// Если нет, вернём 50.
 		/// </summary>
-		public static double PickNearestFng (
-			Dictionary<DateTime, double> fngByDate,
-			DateTime asOfUtcDate )
+		public static double PickNearestFng ( Dictionary<DateTime, double> fngByDate, DateTime asOfUtcDate )
 			{
 			if (fngByDate == null || fngByDate.Count == 0)
-				return 50.0;
+				throw new InvalidOperationException ("[indicators] FNG series is null or empty.");
 
-			if (fngByDate.TryGetValue (asOfUtcDate.Causal.DateUtc, out double v))
+			if (asOfUtcDate.Kind != DateTimeKind.Utc)
+				throw new InvalidOperationException ($"[indicators] asOfUtcDate must be UTC. Got Kind={asOfUtcDate.Kind}.");
+
+			if (fngByDate.TryGetValue (asOfUtcDate, out double v))
 				return v;
 
 			for (int i = 1; i <= 14; i++)
 				{
-				var d = asOfUtcDate.Causal.DateUtc.AddDays (-i);
+				var d = asOfUtcDate.AddDays (-i);
 				if (fngByDate.TryGetValue (d, out v))
 					return v;
 				}
 
-			return 50.0;
+			throw new InvalidOperationException ($"[indicators] FNG value not found for {asOfUtcDate:O} (lookback=14d).");
 			}
 
-		/// <summary>
-		/// Из dxySeries считаем изменение за 30 дней: DXY(t)/DXY(t-30d) - 1
-		/// Используем ближайшие ПРЕДЫДУЩИЕ даты.
-		/// </summary>
+		public static bool TryPickNearestFng ( Dictionary<DateTime, double> fngByDate, DateTime asOfUtcDate, out double value )
+			{
+			value = default;
+
+			if (fngByDate == null || fngByDate.Count == 0) return false;
+			if (asOfUtcDate.Kind != DateTimeKind.Utc) return false;
+
+			if (fngByDate.TryGetValue (asOfUtcDate, out value))
+				return true;
+
+			for (int i = 1; i <= 14; i++)
+				{
+				var d = asOfUtcDate.AddDays (-i);
+				if (fngByDate.TryGetValue (d, out value))
+					return true;
+				}
+
+			value = default;
+			return false;
+			}
+
 		public static double GetDxyChange30 ( Dictionary<DateTime, double> dxySeries, DateTime asOfUtcDate )
 			{
-			if (dxySeries == null || dxySeries.Count == 0) return 0.0;
+			if (dxySeries == null || dxySeries.Count == 0)
+				throw new InvalidOperationException ("[indicators] DXY series is null or empty.");
 
-			double now = FindNearest (dxySeries, asOfUtcDate.Causal.DateUtc, double.NaN, maxBackSteps: 40, step: TimeSpan.FromDays (1));
-			if (double.IsNaN (now)) return 0.0;
+			if (asOfUtcDate.Kind != DateTimeKind.Utc)
+				throw new InvalidOperationException ($"[indicators] asOfUtcDate must be UTC. Got Kind={asOfUtcDate.Kind}.");
 
-			double past = FindNearest (dxySeries, asOfUtcDate.Causal.DateUtc.AddDays (-30), double.NaN, maxBackSteps: 45, step: TimeSpan.FromDays (1));
-			if (double.IsNaN (past) || past <= 0) return 0.0;
+			double now = FindNearest (
+				dxySeries,
+				asOfUtcDate,
+				double.NaN,
+				maxBackSteps: 40,
+				step: TimeSpan.FromDays (1));
+
+			if (double.IsNaN (now) || double.IsInfinity (now) || now <= 0)
+				throw new InvalidOperationException ($"[indicators] DXY 'now' not found/invalid for {asOfUtcDate:O}.");
+
+			double past = FindNearest (
+				dxySeries,
+				asOfUtcDate.AddDays (-30),
+				double.NaN,
+				maxBackSteps: 45,
+				step: TimeSpan.FromDays (1));
+
+			if (double.IsNaN (past) || double.IsInfinity (past) || past <= 0)
+				throw new InvalidOperationException ($"[indicators] DXY 'past' not found/invalid for {asOfUtcDate.AddDays (-30):O}.");
 
 			return now / past - 1.0;
+			}
+
+		public static bool TryGetDxyChange30 ( Dictionary<DateTime, double> dxySeries, DateTime asOfUtcDate, out double change30 )
+			{
+			change30 = default;
+
+			if (dxySeries == null || dxySeries.Count == 0) return false;
+			if (asOfUtcDate.Kind != DateTimeKind.Utc) return false;
+
+			double now = FindNearest (dxySeries, asOfUtcDate, double.NaN, maxBackSteps: 40, step: TimeSpan.FromDays (1));
+			if (double.IsNaN (now) || double.IsInfinity (now) || now <= 0) return false;
+
+			double past = FindNearest (dxySeries, asOfUtcDate.AddDays (-30), double.NaN, maxBackSteps: 45, step: TimeSpan.FromDays (1));
+			if (double.IsNaN (past) || double.IsInfinity (past) || past <= 0) return false;
+
+			change30 = now / past - 1.0;
+			return true;
 			}
 		}
 	}

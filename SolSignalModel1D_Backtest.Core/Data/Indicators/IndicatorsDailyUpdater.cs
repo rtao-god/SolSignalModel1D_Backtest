@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 	{
@@ -34,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 			var dxy = _dxyStore.ReadRange (rangeStartUtc, rangeEndUtc);
 			var missing = new List<string> ();
 
-			for (var d = rangeStartUtc.Causal.DateUtc; d <= rangeEndUtc.Causal.DateUtc; d = d.AddDays (1))
+			for (var d = rangeStartUtc.ToCausalDateUtc(); d <= rangeEndUtc.ToCausalDateUtc(); d = d.AddDays (1))
 				{
 				if (!fng.ContainsKey (d)) missing.Add ($"FNG@{d:yyyy-MM-dd}");
 				if (!dxy.ContainsKey (d)) missing.Add ($"DXY@{d:yyyy-MM-dd}");
@@ -57,15 +58,15 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 
 		private async Task UpdateFngAsync ( DateTime startUtc, DateTime endUtc, FillMode fillMode )
 			{
-			DateTime from = _fngStore.TryGetLastDate ()?.AddDays (1) ?? startUtc.Causal.DateUtc;
-			if (from > endUtc.Causal.DateUtc) return;
+			DateTime from = _fngStore.TryGetLastDate ()?.AddDays (1) ?? startUtc.ToCausalDateUtc();
+			if (from > endUtc.ToCausalDateUtc()) return;
 
 			var fresh = await DataLoading.GetFngHistory (_http); // Dict<Date,int>
 
 			var lines = new List<IndicatorsNdjsonStore.IndicatorLine> ();
 			var missingHard = new List<DateTime> ();
 
-			for (var d = from.Causal.DateUtc; d <= endUtc.Causal.DateUtc; d = d.AddDays (1))
+			for (var d = from.ToCausalDateUtc(); d <= endUtc.ToCausalDateUtc(); d = d.AddDays (1))
 				{
 				if (fresh.TryGetValue (d, out var fng))
 					{
@@ -91,8 +92,8 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 
 		private async Task UpdateDxyAsync ( DateTime startUtc, DateTime endUtc, FillMode fillMode )
 			{
-			DateTime from = _dxyStore.TryGetLastDate ()?.AddDays (1) ?? startUtc.Causal.DateUtc;
-			if (from > endUtc.Causal.DateUtc) return;
+			DateTime from = _dxyStore.TryGetLastDate ()?.AddDays (1) ?? startUtc.ToCausalDateUtc();
+			if (from > endUtc.ToCausalDateUtc()) return;
 
 			var fetched = await DataLoading.GetDxySeries (_http, from.AddDays (-10), endUtc);
 			var lines = new List<IndicatorsNdjsonStore.IndicatorLine> ();
@@ -102,7 +103,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 			var earliestHave = fetched.OrderBy (kv => kv.Key).FirstOrDefault ();
 			if (!double.IsNaN (earliestHave.Value)) lastKnown = earliestHave.Value;
 
-			for (var d = from.Causal.DateUtc; d <= endUtc.Causal.DateUtc; d = d.AddDays (1))
+			for (var d = from.ToCausalDateUtc(); d <= endUtc.ToCausalDateUtc(); d = d.AddDays (1))
 				{
 				if (fetched.TryGetValue (d, out double v))
 					{

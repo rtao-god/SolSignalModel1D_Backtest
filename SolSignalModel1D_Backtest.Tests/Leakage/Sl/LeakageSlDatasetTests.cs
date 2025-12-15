@@ -50,8 +50,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				strongSelector: null
 			);
 
-			Assert.All (dsA.MorningRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
-			Assert.All (dsB.MorningRows, r => Assert.True (r.Causal.DateUtc <= trainUntil));
+			Assert.All (dsA.MorningRows, r => Assert.True (r.ToCausalDateUtc() <= trainUntil));
+			Assert.All (dsB.MorningRows, r => Assert.True (r.ToCausalDateUtc() <= trainUntil));
 
 			Assert.Equal (dsA.Samples.Count, dsB.Samples.Count);
 
@@ -120,7 +120,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 			sol6hDict = dict6h;
 			sol1m = all1m;
 			return rows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 			}
 
@@ -131,7 +131,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 				{
 				res.Add (new BacktestRecord
 					{
-					Date = r.Causal.DateUtc,
+					Date = r.ToCausalDateUtc(),
 					IsMorning = r.Causal.IsMorning,
 					MinMove = r.MinMove
 					});
@@ -141,7 +141,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 
 		private static void MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntil )
 			{
-			foreach (var r in rows.Where (r => r.Causal.DateUtc > trainUntil))
+			foreach (var r in rows.Where (r => r.ToCausalDateUtc() > trainUntil))
 				{
 				r.Causal.IsMorning = !r.Causal.IsMorning;
 				r.MinMove = r.MinMove * 2.0;

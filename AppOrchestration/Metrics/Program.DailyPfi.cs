@@ -17,7 +17,7 @@ namespace SolSignalModel1D_Backtest
 		private static void RunDailyPfi ( List<BacktestRecord> allRows )
 			{
 			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
-			var split = boundary.Split (allRows, r => r.Causal.DateUtc);
+			var split = boundary.Split (allRows, r => r.ToCausalDateUtc());
 
 			var dailyTrainRows = split.Train;
 			var dailyOosRows = split.Oos;

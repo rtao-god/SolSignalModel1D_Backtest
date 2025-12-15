@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+﻿using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
@@ -11,6 +7,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 		{
 		public static void Print ( IReadOnlyList<BacktestRecord> records )
 			{
+			if (records == null) throw new ArgumentNullException (nameof (records));
+
 			int askedA = 0, usedA = 0, execA = 0, tpA = 0, slA = 0, closeA = 0;
 			double sumPctA = 0.0;
 			double sumBasePctA = 0.0;
@@ -21,55 +19,55 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 			foreach (var r in records)
 				{
+				if (r == null) continue;
+
 				if (r.DelayedSource != "A" && r.DelayedSource != "B")
 					continue;
 
-				bool wantLong = r.PredLabel == 2 || r.PredLabel == 1 && r.PredMicroUp;
-				bool wantShort = r.PredLabel == 0 || r.PredLabel == 1 && r.PredMicroDown;
+				// Для close@day направление влияет на знак результата.
+				// Для TpFirst/SlFirst знак уже зашит в Result + Tp/Sl pct.
+				var (wantLong, wantShort, hasDirection) = ResolveDirection (r);
+
+				bool tpFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst;
+				bool slFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst;
 
 				if (r.DelayedSource == "A")
 					{
-					if (r.DelayedEntryAsked) askedA++;
-					if (r.DelayedEntryUsed) usedA++;
+					if (r.DelayedEntryAsked == true) askedA++;
+					if (r.DelayedEntryUsed == true) usedA++;
 
 					if (r.DelayedEntryExecuted)
 						{
 						execA++;
 
-						bool tpFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst;
-						bool slFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst;
-
 						if (tpFirst) tpA++;
 						else if (slFirst) slA++;
 						else closeA++;
 
-						double delayedPct = CalcUnlevPnlPct (r, wantLong, wantShort);
+						double delayedPct = CalcUnlevPnlPctOrThrow (r, hasDirection, wantLong, wantShort);
 						sumPctA += delayedPct;
 
-						double basePct = CalcBaselineUnlevPnlPct (r, wantLong, wantShort);
+						double basePct = CalcBaselineUnlevPnlPctOrThrow (r, hasDirection, wantLong, wantShort);
 						sumBasePctA += basePct;
 						}
 					}
 				else
 					{
-					if (r.DelayedEntryAsked) askedB++;
-					if (r.DelayedEntryUsed) usedB++;
+					if (r.DelayedEntryAsked == true) askedB++;
+					if (r.DelayedEntryUsed == true) usedB++;
 
 					if (r.DelayedEntryExecuted)
 						{
 						execB++;
 
-						bool tpFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst;
-						bool slFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst;
-
 						if (tpFirst) tpB++;
 						else if (slFirst) slB++;
 						else closeB++;
 
-						double delayedPct = CalcUnlevPnlPct (r, wantLong, wantShort);
+						double delayedPct = CalcUnlevPnlPctOrThrow (r, hasDirection, wantLong, wantShort);
 						sumPctB += delayedPct;
 
-						double basePct = CalcBaselineUnlevPnlPct (r, wantLong, wantShort);
+						double basePct = CalcBaselineUnlevPnlPctOrThrow (r, hasDirection, wantLong, wantShort);
 						sumBasePctB += basePct;
 						}
 					}
@@ -79,35 +77,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			var t = new TextTable ();
 			t.AddHeader ("metric", "A", "B", "Total");
 
-			t.AddRow ("asked",
-				askedA.ToString (),
-				askedB.ToString (),
-				(askedA + askedB).ToString ());
-
-			t.AddRow ("used",
-				usedA.ToString (),
-				usedB.ToString (),
-				(usedA + usedB).ToString ());
-
-			t.AddRow ("executed",
-				execA.ToString (),
-				execB.ToString (),
-				(execA + execB).ToString ());
-
-			t.AddRow ("TP-first",
-				tpA.ToString (),
-				tpB.ToString (),
-				(tpA + tpB).ToString ());
-
-			t.AddRow ("SL-first",
-				slA.ToString (),
-				slB.ToString (),
-				(slA + slB).ToString ());
-
-			t.AddRow ("close@day",
-				closeA.ToString (),
-				closeB.ToString (),
-				(closeA + closeB).ToString ());
+			t.AddRow ("asked", askedA.ToString (), askedB.ToString (), (askedA + askedB).ToString ());
+			t.AddRow ("used", usedA.ToString (), usedB.ToString (), (usedA + usedB).ToString ());
+			t.AddRow ("executed", execA.ToString (), execB.ToString (), (execA + execB).ToString ());
+			t.AddRow ("TP-first", tpA.ToString (), tpB.ToString (), (tpA + tpB).ToString ());
+			t.AddRow ("SL-first", slA.ToString (), slB.ToString (), (slA + slB).ToString ());
+			t.AddRow ("close@day", closeA.ToString (), closeB.ToString (), (closeA + closeB).ToString ());
 
 			t.AddRow ("sum PnL % (no lev)",
 				(sumPctA * 100.0).ToString ("0.00"),
@@ -261,34 +236,71 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				}
 			}
 
-		private static double CalcUnlevPnlPct ( BacktestRecord r, bool wantLong, bool wantShort )
+		private static double CalcUnlevPnlPctOrThrow ( BacktestRecord r, bool hasDirection, bool wantLong, bool wantShort )
 			{
+			if (!r.DelayedEntryExecuted)
+				throw new InvalidOperationException ($"[delayed] DelayedEntryExecuted=false, но вызван CalcUnlevPnlPctOrThrow для {r.DateUtc:O}.");
+
 			bool tpFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst;
 			bool slFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst;
 
-			if (tpFirst) return r.DelayedIntradayTpPct;
-			if (slFirst) return -r.DelayedIntradaySlPct;
+			if (tpFirst)
+				{
+				if (r.DelayedIntradayTpPct is null)
+					throw new InvalidOperationException ($"[delayed] TpPct отсутствует при TpFirst для {r.DateUtc:O}.");
+				return r.DelayedIntradayTpPct.Value;
+				}
 
-			if (!r.DelayedEntryExecuted || r.DelayedEntryPrice <= 0 || r.Close24 <= 0)
-				return 0.0;
+			if (slFirst)
+				{
+				if (r.DelayedIntradaySlPct is null)
+					throw new InvalidOperationException ($"[delayed] SlPct отсутствует при SlFirst для {r.DateUtc:O}.");
+				return -r.DelayedIntradaySlPct.Value;
+				}
+
+			if (r.DelayedEntryPrice <= 0.0)
+				throw new InvalidOperationException ($"[delayed] DelayedEntryPrice <= 0 при close@day для {r.DateUtc:O}.");
+
+			if (r.Close24 <= 0.0)
+				throw new InvalidOperationException ($"[delayed] Close24 <= 0 при close@day для {r.DateUtc:O}.");
+
+			if (!hasDirection)
+				throw new InvalidOperationException ($"[delayed] Нет направления (PredLabel/Micro) для close@day расчёта на {r.DateUtc:O}.");
 
 			if (wantLong) return r.Close24 / r.DelayedEntryPrice - 1.0;
 			if (wantShort) return r.DelayedEntryPrice / r.Close24 - 1.0;
-			return 0.0;
+
+			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для {r.DateUtc:O}.");
 			}
 
-		private static double CalcBaselineUnlevPnlPct ( BacktestRecord r, bool wantLong, bool wantShort )
+		private static double CalcBaselineUnlevPnlPctOrThrow ( BacktestRecord r, bool hasDirection, bool wantLong, bool wantShort )
 			{
-			if (r.Entry <= 0.0 || r.Close24 <= 0.0)
-				return 0.0;
+			if (!hasDirection)
+				throw new InvalidOperationException ($"[delayed] Нет направления для baseline PnL на {r.DateUtc:O}.");
 
-			if (wantLong)
-				return r.Close24 / r.Entry - 1.0;
+			if (r.Entry <= 0.0)
+				throw new InvalidOperationException ($"[delayed] Entry <= 0 для baseline PnL на {r.DateUtc:O}.");
 
-			if (wantShort)
-				return r.Entry / r.Close24 - 1.0;
+			if (r.Close24 <= 0.0)
+				throw new InvalidOperationException ($"[delayed] Close24 <= 0 для baseline PnL на {r.DateUtc:O}.");
 
-			return 0.0;
+			if (wantLong) return r.Close24 / r.Entry - 1.0;
+			if (wantShort) return r.Entry / r.Close24 - 1.0;
+
+			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для baseline на {r.DateUtc:O}.");
+			}
+
+		private static (bool wantLong, bool wantShort, bool hasDirection) ResolveDirection ( BacktestRecord r )
+			{
+			bool wantLong =
+				r.PredLabel == 2 ||
+				(r.PredLabel == 1 && r.PredMicroUp);
+
+			bool wantShort =
+				r.PredLabel == 0 ||
+				(r.PredLabel == 1 && r.PredMicroDown);
+
+			return (wantLong, wantShort, wantLong || wantShort);
 			}
 
 		private static void WriteColoredLine ( ConsoleColor color, string text )

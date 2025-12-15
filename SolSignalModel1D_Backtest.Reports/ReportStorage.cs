@@ -156,19 +156,19 @@ namespace SolSignalModel1D_Backtest.Reports
 
 		/// <summary>
 		/// Загружает current_prediction-отчёт по дате прогноза (UTC).
-		/// Берётся последний по Id отчёт, у которого PredictionDateUtc.Causal.DateUtc совпадает с датой.
+		/// Берётся последний по Id отчёт, у которого PredictionDateUtc.ToCausalDateUtc() совпадает с датой.
 		/// Если отчёт не найден — возвращает null.
 		/// </summary>
 		public ReportDocument? LoadCurrentPredictionByDate ( DateTime predictionDateUtc )
 			{
-			var targetDate = predictionDateUtc.Causal.DateUtc;
+			var targetDate = predictionDateUtc.ToCausalDateUtc();
 
 			var index = ListCurrentPredictionReports ();
 			if (index.Count == 0)
 				return null;
 
 			var item = index
-				.Where (x => x.PredictionDateUtc.Causal.DateUtc == targetDate)
+				.Where (x => x.PredictionDateUtc.ToCausalDateUtc() == targetDate)
 				.OrderByDescending (x => x.Id, StringComparer.OrdinalIgnoreCase)
 				.FirstOrDefault ();
 

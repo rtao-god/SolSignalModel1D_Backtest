@@ -51,7 +51,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 						$"[BacktestRunner] records[{i}].Causal is null.");
 					}
 
-				var d = r.Causal.DateUtc;
+				var d = r.ToCausalDateUtc();
 
 				if (!recMin.HasValue || d < recMin.Value) recMin = d;
 				if (!recMax.HasValue || d > recMax.Value) recMax = d;
@@ -70,7 +70,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				Console.WriteLine ("[diag-path] records: count=0");
 				}
 
-			var splitRecords = boundary.Split (records, r => r.Causal.DateUtc);
+			var splitRecords = boundary.Split (records, r => r.ToCausalDateUtc());
 
 			Console.WriteLine (
 				$"[diag-path] boundary trainUntil={boundary.TrainUntilIsoDate}, " +
@@ -84,7 +84,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 
 			for (int i = 0; i < morningsCount; i++)
 				{
-				var d = mornings[i].Causal.DateUtc;
+				var d = mornings[i].ToCausalDateUtc();
 
 				if (!mornMin.HasValue || d < mornMin.Value) mornMin = d;
 				if (!mornMax.HasValue || d > mornMax.Value) mornMax = d;

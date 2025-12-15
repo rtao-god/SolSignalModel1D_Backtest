@@ -33,7 +33,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 			// Берём утренние точки с path-based микро-разметкой.
 			var labeled = mornings
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			if (labeled.Count < 20)
@@ -43,7 +43,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 				}
 
 			// Мапа дата → факт (FactMicroUp/Down).
-			var factByDate = labeled.ToDictionary (r => r.Causal.DateUtc, r => r);
+			var factByDate = labeled.ToDictionary (r => r.ToCausalDateUtc(), r => r);
 
 			// Собираем пары (прогноз микро-слоя + факт).
 			var pairs = new List<(DateTime DateUtc, bool PredUp, bool FactUp)> ();

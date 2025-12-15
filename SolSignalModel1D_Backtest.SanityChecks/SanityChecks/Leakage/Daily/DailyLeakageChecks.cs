@@ -33,11 +33,11 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 
 			// Стабильный порядок по entryUtc (каузальная дата).
 			var ordered = records
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.ToCausalDateUtc())
 				.ToList ();
 
 			// ЕДИНСТВЕННОЕ правило сегментации — в boundary.
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
 
 			var train = split.Train;
 			var oos = split.Oos;

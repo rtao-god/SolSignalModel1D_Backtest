@@ -4,6 +4,7 @@ using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Trading;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Utils.Backtest
 	{
@@ -454,7 +455,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Utils.Backtest
 					// между дном просадки и моментом восстановления.
 					var signalDays = r.Trades?
 						.Where (tr => tr.ExitTimeUtc > ddValleyTime && tr.ExitTimeUtc <= recoverTime.Value)
-						.Select (tr => tr.DateUtc.Causal.DateUtc)
+						.Select (tr => tr.DateUtc.ToCausalDateUtc())
 						.Distinct ()
 						.Count () ?? 0;
 

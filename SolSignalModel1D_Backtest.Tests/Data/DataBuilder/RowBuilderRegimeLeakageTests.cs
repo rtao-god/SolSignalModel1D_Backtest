@@ -175,7 +175,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			foreach (var key in fngBase.Keys.ToList ())
 				{
-				if (key.Causal.DateUtc > entryUtc.Causal.DateUtc)
+				if (key.ToCausalDateUtc() > entryUtc.ToCausalDateUtc())
 					{
 					fngB[key] = fngBase[key] + 100;
 					dxyB[key] = dxyBase[key] + 50.0;
@@ -195,8 +195,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			Assert.NotEmpty (rowsB);
 
-			var dictA = rowsA.ToDictionary (r => r.Causal.DateUtc, r => r.RegimeDown);
-			var dictB = rowsB.ToDictionary (r => r.Causal.DateUtc, r => r.RegimeDown);
+			var dictA = rowsA.ToDictionary (r => r.ToCausalDateUtc(), r => r.RegimeDown);
+			var dictB = rowsB.ToDictionary (r => r.ToCausalDateUtc(), r => r.RegimeDown);
 
 			// Для всех дат ≤ entryUtc RegimeDown должен совпасть.
 			foreach (var kv in dictA)
@@ -375,8 +375,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

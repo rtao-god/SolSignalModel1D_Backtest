@@ -106,8 +106,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			var firstDate = start.Causal.DateUtc.AddDays (-120);
-			var lastDate = start.Causal.DateUtc.AddDays (400);
+			var firstDate = start.ToCausalDateUtc().AddDays (-120);
+			var lastDate = start.ToCausalDateUtc().AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -173,8 +173,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: NyTz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

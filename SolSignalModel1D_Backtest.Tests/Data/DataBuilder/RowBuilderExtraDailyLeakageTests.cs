@@ -92,12 +92,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.Causal.DateUtc.AddDays (-120);
-			var lastDate = start.Causal.DateUtc.AddDays (400);
+			var firstDate = start.ToCausalDateUtc().AddDays (-120);
+			var lastDate = start.ToCausalDateUtc().AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// Используем Kind = Utc, чтобы совпасть с openUtc.Causal.DateUtc.
+				// Используем Kind = Utc, чтобы совпасть с openUtc.ToCausalDateUtc().
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fngBase[key] = 50.0;
 				dxyBase[key] = 100.0;
@@ -145,13 +145,13 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				});
 
 			var entryUtc = solAll6h[entryIdx].OpenTimeUtc;
-			var entryDate = entryUtc.Causal.DateUtc;
+			var entryDate = entryUtc.ToCausalDateUtc();
 
 			// B: мутируем ТОЛЬКО extraDaily для всех дат > entryDate.
 			// Это "чистое будущее" относительно дня entryUtc.
 			foreach (var key in extraDailyB.Keys.ToList ())
 				{
-				if (key.Causal.DateUtc > entryDate)
+				if (key.ToCausalDateUtc() > entryDate)
 					{
 					var ex = extraDailyB[key];
 					// Сильная мутация: funding + 0.5, OI * 10.
@@ -182,8 +182,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDailyB,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
