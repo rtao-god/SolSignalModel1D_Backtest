@@ -53,12 +53,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 
 			var daily = DailyDatasetBuilder.Build (
-				allRows: allRows,
-				trainUntilUtc: trainUntilUtc,
+				allRows: allRows as List<BacktestRecord> ?? allRows.ToList (),
+				trainUntil: trainUntilUtc,
 				balanceMove: false,
 				balanceDir: balanceDir,
 				balanceTargetFrac: balanceTargetFrac,
 				datesToExclude: datesToExclude);
+
 
 			return new DirDataset (
 				dirNormalRows: daily.DirNormalRows,

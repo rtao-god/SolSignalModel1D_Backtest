@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks

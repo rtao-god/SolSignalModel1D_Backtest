@@ -3,19 +3,18 @@
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	{
 	/// <summary>
-	/// Единственный контракт, через который обучение видит истину.
-	/// Инвариант: forward-истина передаётся отдельно от causal-части.
+	/// Контракт для обучения: каузальные фичи + forward-истина отдельно.
 	/// </summary>
 	public sealed class LabeledCausalRow
 		{
-		public CausalPredictionRecord Causal { get; }
+		public CausalDataRow Causal { get; }
 		public int TrueLabel { get; }
 		public bool FactMicroUp { get; }
 		public bool FactMicroDown { get; }
 
 		public DateTime DateUtc => Causal.DateUtc;
 
-		public LabeledCausalRow ( CausalPredictionRecord causal, int trueLabel, bool factMicroUp, bool factMicroDown )
+		public LabeledCausalRow ( CausalDataRow causal, int trueLabel, bool factMicroUp, bool factMicroDown )
 			{
 			Causal = causal ?? throw new ArgumentNullException (nameof (causal));
 

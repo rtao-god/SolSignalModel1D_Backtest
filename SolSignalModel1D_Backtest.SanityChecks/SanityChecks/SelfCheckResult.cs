@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace SolSignalModel1D_Backtest.SanityChecks
+namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 	{
 	/// <summary>
 	/// Результат одного self-check'а:

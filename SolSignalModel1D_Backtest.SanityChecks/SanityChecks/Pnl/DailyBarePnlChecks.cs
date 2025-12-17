@@ -114,7 +114,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 				{
 					if (!HasValidPrices (r)) return 0;
 
-					var y = r.Causal.TrueLabel;
+					var y = r.TrueLabel;
 					return y switch
 						{
 							2 => 1,

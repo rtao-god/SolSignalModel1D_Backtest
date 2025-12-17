@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro

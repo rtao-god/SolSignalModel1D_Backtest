@@ -41,12 +41,20 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 
 			foreach (var s in samples)
 				{
-				// Контракт: SlHitSample.EntryUtc — UTC, и не позже asOfUtc.
+				// Контракт: EntryUtc задан, UTC, и не позже asOfUtc.
+				if (s.EntryUtc == default)
+					throw new InvalidOperationException ("[sl-model] SlHitSample.EntryUtc is default.");
+
+				if (s.EntryUtc.Kind != DateTimeKind.Utc)
+					throw new InvalidOperationException ($"[sl-model] SlHitSample.EntryUtc must be UTC: {s.EntryUtc:O}.");
+
+				if (s.EntryUtc > asOfUtc)
+					throw new InvalidOperationException (
+						$"[sl-model] Sample EntryUtc is later than asOfUtc: entry={s.EntryUtc:O}, asOf={asOfUtc:O}.");
+
 				double ageDays = (asOfUtc - s.EntryUtc).TotalDays;
-				if (ageDays < 0) ageDays = 0; // защита от случайной рассинхронизации дат
 				double ageMonths = ageDays / 30.0;
 
-				// Временной вес: свежие важнее.
 				float timeWeight =
 					ageMonths <= 3.0 ? 1.0f :
 					ageMonths <= 6.0 ? 0.7f :
@@ -55,7 +63,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				trainRows.Add (new SlHitTrainRow
 					{
 					Label = s.Label,
-					Features = PadToFixed (s.Features),
+					Features = CopyFixedFeaturesOrThrow (s.Features),
 					Weight = timeWeight
 					});
 				}
@@ -63,25 +71,27 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			int slCount = trainRows.Count (r => r.Label);
 			int tpCount = trainRows.Count - slCount;
 
-			// Доп. ребаланс: обычно SL > TP → усиливаем TP, но ограничиваем множитель.
-			if (slCount > 0 && tpCount > 0)
+			// Контракт: бинарная модель требует оба класса в обучении.
+			if (slCount == 0 || tpCount == 0)
+				throw new InvalidOperationException (
+					$"[sl-model] Training set must contain both classes (SL and TP). SL={slCount}, TP={tpCount}.");
+
+			// Доп. ребаланс классов.
+			if (tpCount < slCount)
 				{
-				if (tpCount < slCount)
-					{
-					double ratio = slCount / (double) tpCount;
-					float mul = (float) Math.Min (ratio, 3.0); // максимум x3
+				double ratio = slCount / (double) tpCount;
+				float mul = (float) Math.Min (ratio, 3.0f);
 
-					foreach (var r in trainRows.Where (x => !x.Label))
-						r.Weight *= mul;
-					}
-				else if (slCount < tpCount)
-					{
-					double ratio = tpCount / (double) slCount;
-					float mul = (float) Math.Min (ratio, 1.5); // слегка, чтобы не перекосить обратно
+				foreach (var r in trainRows.Where (x => !x.Label))
+					r.Weight *= mul;
+				}
+			else if (slCount < tpCount)
+				{
+				double ratio = tpCount / (double) slCount;
+				float mul = (float) Math.Min (ratio, 1.5f);
 
-					foreach (var r in trainRows.Where (x => x.Label))
-						r.Weight *= mul;
-					}
+				foreach (var r in trainRows.Where (x => x.Label))
+					r.Weight *= mul;
 				}
 
 			var data = _ml.Data.LoadFromEnumerable (trainRows);
@@ -115,16 +125,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			return _ml.Model.CreatePredictionEngine<SlHitSample, SlHitPrediction> (model);
 			}
 
-		private static float[] PadToFixed ( float[]? src )
-			{
-			var arr = new float[MlSchema.FeatureCount];
-			if (src == null) return arr;
-
-			int len = Math.Min (src.Length, MlSchema.FeatureCount);
-			Array.Copy (src, arr, len);
-			return arr;
-			}
-
 		/// <summary>
 		/// PFI + direction для SL-модели на произвольном наборе SlHitSample (train/test/holdout).
 		/// </summary>
@@ -147,7 +147,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				.Select (s => new SlHitTrainRow
 					{
 					Label = s.Label,
-					Features = PadToFixed (s.Features),
+					Features = CopyFixedFeaturesOrThrow (s.Features),
 					Weight = 1.0f
 					})
 				.ToList ();
@@ -160,6 +160,20 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				data,
 				SlFeatureSchema.Names,
 				tag);
+			}
+
+		private static float[] CopyFixedFeaturesOrThrow ( float[]? src )
+			{
+			if (src == null)
+				throw new InvalidOperationException ("[sl-model] SlHitSample.Features is null.");
+
+			if (src.Length != MlSchema.FeatureCount)
+				throw new InvalidOperationException (
+					$"[sl-model] SlHitSample.Features length mismatch: len={src.Length}, expected={MlSchema.FeatureCount}.");
+
+			var arr = new float[MlSchema.FeatureCount];
+			Array.Copy (src, arr, MlSchema.FeatureCount);
+			return arr;
 			}
 		}
 	}

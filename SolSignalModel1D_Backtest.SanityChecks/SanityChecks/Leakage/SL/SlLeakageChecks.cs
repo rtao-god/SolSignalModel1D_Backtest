@@ -38,8 +38,11 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 				if (!goLong && !goShort)
 					continue;
 
-				double slProb = c.SlProb;
-				bool slHigh = c.SlHighDecision;
+				double slProb = c.SlProb
+					?? throw new InvalidOperationException ($"[sl] SlProb is null for {c.DateUtc:O} (SL layer not evaluated).");
+
+				bool slHigh = c.SlHighDecision
+					?? throw new InvalidOperationException ($"[sl] SlHighDecision is null for {c.DateUtc:O} (SL layer not evaluated).");
 
 				if (slProb < 0.0 || slProb > 1.0)
 					{

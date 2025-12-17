@@ -1,12 +1,17 @@
 ﻿using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Trading.Leverage;
+using SolSignalModel1D_Backtest.Core.Trading.Leverage.Policies;
+using System;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	/// <summary>
-	/// Преобразует логические PolicyConfig в реальные PolicySpec + IOmniscientLeveragePolicy,
+	/// Преобразует PolicyConfig в реальные PolicySpec + ICausalLeveragePolicy,
 	/// которые используются RollingLoop/PnL-движком.
+	///
+	/// Инвариант: фабрика НЕ создаёт политик, которым нужны forward-факты.
+	/// Любая IOmniscient-политика здесь запрещена архитектурно.
 	/// </summary>
 	public static class BacktestPolicyFactory
 		{
@@ -31,7 +36,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			return list;
 			}
 
-		private static IOmniscientLeveragePolicy CreatePolicy ( PolicyConfig cfg )
+		private static ICausalLeveragePolicy CreatePolicy ( PolicyConfig cfg )
 			{
 			if (cfg == null) throw new ArgumentNullException (nameof (cfg));
 
@@ -42,16 +47,16 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 						throw new InvalidOperationException (
 							$"Policy '{cfg.Name}': Leverage must be specified for 'const' type.");
 
-					return new LeveragePolicies.ConstPolicy (cfg.Name, cfg.Leverage.Value);
+					return new ConstLeveragePolicy (cfg.Name, cfg.Leverage.Value);
 
 				case "risk_aware":
-					return new LeveragePolicies.RiskAwarePolicy ();
+					return new RiskAwareLeveragePolicy (name: cfg.Name, normalLeverage: 10.0, highRiskLeverage: 3.0);
 
 				case "ultra_safe":
-					return new LeveragePolicies.UltraSafePolicy ();
+					// Жёстко консервативная политика: плечо фиксировано низкое, каузально.
+					return new UltraSafeLeveragePolicy (name: cfg.Name, leverage: 2.0);
 
 				default:
-					// На будущее: можно сделать регистрацию пользовательских политик.
 					throw new NotSupportedException (
 						$"Unknown policy type '{cfg.PolicyType}' for policy '{cfg.Name}'.");
 				}

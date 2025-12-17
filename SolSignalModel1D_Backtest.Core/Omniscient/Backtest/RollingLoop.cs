@@ -1,6 +1,4 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
@@ -18,10 +16,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 			public string Name { get; init; } = string.Empty;
 
 			/// <summary>
-			/// Omniscient-политика плеча: работает по BacktestRecord (может читать causal+forward часть).
+			/// Каузальная политика плеча: вычисляется только по CausalPredictionRecord.
 			/// Null допускается: такие PolicySpec считаются "disabled" и пропускаются.
 			/// </summary>
-			public IOmniscientLeveragePolicy? Policy { get; init; }
+			public ICausalLeveragePolicy? Policy { get; init; }
 
 			public MarginMode Margin { get; init; }
 			}
@@ -40,7 +38,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 			if (policies == null) throw new ArgumentNullException (nameof (policies));
 			if (config == null) throw new ArgumentNullException (nameof (config));
 
-			// 1) Базовые прогонки WITH SL / NO SL.
 			var withSlBase = SimulateAllPolicies (
 				policies,
 				records,
@@ -57,17 +54,14 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 				useAnti: false
 			);
 
-			// 2) Сравнение политик по SL.
 			PolicySlComparisonPrinter.Print (withSlBase, noSlBase);
 
-			// 3) Общие summary/ratios по WITH SL / NO SL.
 			PolicyBreakdownPrinter.PrintSummary (withSlBase, "Policy summary (WITH SL)");
 			PolicyBreakdownPrinter.PrintMonthlySkew (withSlBase, 12);
 
 			PolicyRatiosPrinter.Print (withSlBase, "Policy ratios (WITH SL)");
 			PolicyRatiosPrinter.Print (noSlBase, "Policy ratios (NO SL)");
 
-			// 4) Anti-direction overlay (base/anti × with SL / no SL).
 			var withSlAnti = SimulateAllPolicies (
 				policies,
 				records,
@@ -95,13 +89,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 		// =====================================================================
 		// Бэктест для всех политик (base/anti, with/without SL)
 		// =====================================================================
-
-		/// <summary>
-		/// Считает PnL для всех политик при заданных:
-		/// - флаге useStopLoss (дневной и intraday SL),
-		/// - флаге useAnti (base vs anti-direction overlay),
-		/// - BacktestConfig (TP/SL и прочее).
-		/// </summary>
 		public static List<BacktestPolicyResult> SimulateAllPolicies (
 			IReadOnlyList<PolicySpec> policies,
 			IReadOnlyList<BacktestRecord> records,

@@ -1,23 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 	{
 	/// <summary>
 	/// Строит omniscient BacktestRecord из:
-	/// - causal прогнозов (без доступа к будущему),
+	/// - causal прогнозов,
 	/// - truth (LabeledCausalRow),
 	/// - полного ряда 1m-свечей (forward-факты).
 	///
 	/// Инварианты:
-	/// - allMinutes должен быть строго отсортирован по OpenTimeUtc (это делается на бутстрапе один раз);
-	/// - внутри билдера повторная сортировка запрещена: если порядок нарушен — это ошибка данных/пайплайна.
+	/// - allMinutes строго отсортирован по OpenTimeUtc;
+	/// - все свечи валидны (UTC-время, finite-значения, корректный OHLC);
+	/// - отрицательные ходы (maxHigh < entry или minLow > entry) считаются ошибкой данных.
 	/// </summary>
 	public static class ForwardOutcomesBuilder
 		{
@@ -46,14 +43,14 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 					throw new InvalidOperationException ($"[forward] duplicate truth row for date {t.DateUtc:O}.");
 				}
 
-			// causalRecords могут приходить неотсортированными — сортировка дешёвая (N~1k) и безопасная.
+			// Сортировка каузальных записей по DateUtc.
 			var orderedRecords = causalRecords
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
 			var result = new List<BacktestRecord> (orderedRecords.Count);
 
-			// Скользящий индекс: окна дневных записей возрастают => линейный проход по 1m без бинарных поисков.
+			// Скользящий индекс по allMinutes.
 			int minuteIndex = 0;
 
 			foreach (var causal in orderedRecords)
@@ -71,7 +68,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 				if (dayEnd <= dayStart)
 					throw new InvalidOperationException ($"[forward] Некорректное baseline-окно: start={dayStart:O}, end={dayEnd:O}.");
 
-				// Сдвигаем minuteIndex до первой свечи окна (>= dayStart).
+				// Сдвиг до первой свечи окна (>= dayStart).
 				while (minuteIndex < allMinutes.Count && allMinutes[minuteIndex].OpenTimeUtc < dayStart)
 					minuteIndex++;
 
@@ -92,47 +89,60 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 				if (dayMinutes.Count == 0)
 					throw new InvalidOperationException ($"[forward] Не найдены 1m-свечи для окна, начинающегося {dayStart:O}.");
 
-				// Следующий день начнёт поиск с конца текущего окна.
+				// Следующий день стартует с конца текущего окна.
 				minuteIndex = j;
 
+				// Строгая валидация 1m-свечей окна.
+				for (int k = 0; k < dayMinutes.Count; k++)
+					ValidateMinuteCandle (dayMinutes[k], dayStart);
+
 				var first = dayMinutes[0];
-				if (first.Open <= 0.0)
-					throw new InvalidOperationException ($"[forward] Entry-цена должна быть положительной (день {dayStart:O}).");
+				if (!double.IsFinite (first.Open) || first.Open <= 0.0)
+					throw new InvalidOperationException ($"[forward] Entry-цена должна быть finite и > 0 (день {dayStart:O}).");
 
 				double entry = first.Open;
 
-				double maxHigh = double.MinValue;
-				double minLow = double.MaxValue;
+				double maxHigh = double.NegativeInfinity;
+				double minLow = double.PositiveInfinity;
 
-				foreach (var m in dayMinutes)
+				for (int k = 0; k < dayMinutes.Count; k++)
 					{
-					// High/Low должны быть положительными в нормальных данных.
-					// Нули/минуса — не “лечим”, это сигнал порчи/дырок в источнике.
-					if (m.High > 0.0 && m.High > maxHigh)
-						maxHigh = m.High;
+					var m = dayMinutes[k];
 
-					if (m.Low > 0.0 && m.Low < minLow)
-						minLow = m.Low;
+					if (m.High > maxHigh) maxHigh = m.High;
+					if (m.Low < minLow) minLow = m.Low;
 					}
 
-				if (maxHigh <= 0.0 || minLow <= 0.0)
-					throw new InvalidOperationException ($"[forward] Некорректные High/Low в baseline-окне {dayStart:O}.");
+				if (!double.IsFinite (maxHigh) || maxHigh <= 0.0)
+					throw new InvalidOperationException ($"[forward] Некорректный maxHigh в baseline-окне {dayStart:O}.");
+
+				if (!double.IsFinite (minLow) || minLow <= 0.0)
+					throw new InvalidOperationException ($"[forward] Некорректный minLow в baseline-окне {dayStart:O}.");
 
 				var last = dayMinutes[dayMinutes.Count - 1];
+				if (!double.IsFinite (last.Close) || last.Close <= 0.0)
+					throw new InvalidOperationException ($"[forward] Close последней 1m-свечи должен быть finite и > 0 (день {dayStart:O}).");
+
 				double close24 = last.Close;
 
-				double upMove = (maxHigh - entry) / entry;
-				double downMove = (entry - minLow) / entry;
+				double upDiff = maxHigh - entry;
+				if (upDiff < 0.0)
+					throw new InvalidOperationException (
+						$"[forward] maxHigh < entry: entry={entry:0.########}, maxHigh={maxHigh:0.########}, day={dayStart:O}.");
 
-				// Отрицательные значения возможны только из-за неконсистентных цен.
-				// Не маскируем “дефолтом”, но clamp к 0 оставляем как числовую стабилизацию метрики хода.
-				if (upMove < 0.0) upMove = 0.0;
-				if (downMove < 0.0) downMove = 0.0;
+				double downDiff = entry - minLow;
+				if (downDiff < 0.0)
+					throw new InvalidOperationException (
+						$"[forward] minLow > entry: entry={entry:0.########}, minLow={minLow:0.########}, day={dayStart:O}.");
+
+				double upMove = upDiff / entry;
+				double downMove = downDiff / entry;
+
+				if (!double.IsFinite (upMove) || !double.IsFinite (downMove))
+					throw new InvalidOperationException ($"[forward] Non-finite move computed for day {dayStart:O}.");
 
 				double forwardMinMove = Math.Max (upMove, downMove);
 
-				// Truth по архитектуре живёт в Forward (BacktestRecord читает TrueLabel/FactMicro* именно оттуда),
-				// чтобы каузальный слой физически не мог “подсмотреть” истину будущего окна.
 				var forward = new ForwardOutcomes
 					{
 					DateUtc = dayStart,
@@ -157,6 +167,33 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 				}
 
 			return result;
+			}
+
+		private static void ValidateMinuteCandle ( Candle1m m, DateTime dayStartUtc )
+			{
+			if (m.OpenTimeUtc.Kind != DateTimeKind.Utc)
+				throw new InvalidOperationException ($"[forward] Candle1m.OpenTimeUtc must be UTC (day {dayStartUtc:O}).");
+
+			ValidatePrice (m.Open, "Open", dayStartUtc);
+			ValidatePrice (m.High, "High", dayStartUtc);
+			ValidatePrice (m.Low, "Low", dayStartUtc);
+			ValidatePrice (m.Close, "Close", dayStartUtc);
+
+			if (m.High < m.Low)
+				throw new InvalidOperationException ($"[forward] Candle1m has High < Low (day {dayStartUtc:O}).");
+
+			// OHLC-ограничения: High покрывает Open/Close, Low покрывает Open/Close.
+			if (m.High < m.Open || m.High < m.Close)
+				throw new InvalidOperationException ($"[forward] Candle1m has High below Open/Close (day {dayStartUtc:O}).");
+
+			if (m.Low > m.Open || m.Low > m.Close)
+				throw new InvalidOperationException ($"[forward] Candle1m has Low above Open/Close (day {dayStartUtc:O}).");
+			}
+
+		private static void ValidatePrice ( double v, string name, DateTime dayStartUtc )
+			{
+			if (!double.IsFinite (v) || v <= 0.0)
+				throw new InvalidOperationException ($"[forward] Candle1m.{name} must be finite and > 0 (day {dayStartUtc:O}).");
 			}
 		}
 	}

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using SolSignalModel1D_Backtest.Reports.Model;
 
 namespace SolSignalModel1D_Backtest.Reports

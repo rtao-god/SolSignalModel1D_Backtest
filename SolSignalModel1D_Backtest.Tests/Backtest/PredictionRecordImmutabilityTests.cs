@@ -90,8 +90,8 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 					Conf_SlShort = null,
 
 					DelayedSource = null,
-					DelayedEntryAsked = null,
-					DelayedEntryUsed = null,
+					DelayedEntryAsked = false,
+					DelayedEntryUsed = false,
 					DelayedIntradayTpPct = null,
 					DelayedIntradaySlPct = null,
 					TargetLevelClass = null

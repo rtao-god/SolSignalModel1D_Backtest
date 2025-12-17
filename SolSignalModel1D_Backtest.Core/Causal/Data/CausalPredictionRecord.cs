@@ -107,13 +107,22 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 		public double? Conf_SlLong { get; set; }
 		public double? Conf_SlShort { get; set; }
 
-		// ===== Delayed-слой (runtime) =====
+		// ===== Delayed overlays (каузальные решения/диагностика) =====
+		// Источник delayed-решения ( например "A", "B"), null если delayed не активировался.
 		public string? DelayedSource { get; set; }
-		public bool? DelayedEntryAsked { get; set; }
-		public bool? DelayedEntryUsed { get; set; }
+
+		// Сигнал “мы рассматривали delayed-вход”.
+		public bool DelayedEntryAsked { get; set; }
+
+		// Сигнал “мы реально выбрали delayed-вход как используемый сценарий”.
+		public bool DelayedEntryUsed { get; set; }
+
+		// Причина почему delayed не сработал (гейт SL, гейт модели, нет триггера и т.д.).
+		public string? DelayedWhyNot { get; set; }
 		public double? DelayedIntradayTpPct { get; set; }
 		public double? DelayedIntradaySlPct { get; set; }
 		public int? TargetLevelClass { get; set; }
+
 
 		// ===== Явные "OrThrow" аксессоры =====
 		public double GetSlProbOrThrow ()

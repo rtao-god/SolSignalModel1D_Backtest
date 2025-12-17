@@ -36,7 +36,6 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 				Causal = new CausalPredictionRecord
 					{
 					DateUtc = dateUtc,
-					TrueLabel = trueLabel,
 					PredLabel = predLabel,
 					PredLabel_Day = predLabel,
 					PredLabel_DayMicro = predLabel,
@@ -60,13 +59,16 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 					{
 					DateUtc = dateUtc,
 					WindowEndUtc = dateUtc.AddHours (24),
-
 					Entry = 100.0,
 					MaxHigh24 = 110.0,
 					MinLow24 = 90.0,
 					Close24 = 100.0,
 					MinMove = 0.01,
-					DayMinutes = Array.Empty<Candle1m> ()
+					DayMinutes = Array.Empty<Candle1m> (),
+
+					TrueLabel = trueLabel,
+					FactMicroUp = false,
+					FactMicroDown = false
 					}
 				};
 			}

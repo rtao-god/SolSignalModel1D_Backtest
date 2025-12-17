@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.SanityChecks;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 	{

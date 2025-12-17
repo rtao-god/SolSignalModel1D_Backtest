@@ -1,14 +1,13 @@
-﻿using System;
-using Microsoft.ML.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using System;
 
 namespace SolSignalModel1D_Backtest.Core.Data
 	{
 	/// <summary>
-	/// Сэмпл для сильного отката (Model A).
-	/// Label = true → "отложка реально спасла плохой день".
+	/// Чистый ML-сэмпл для модели A (pullback continuation).
+	/// Инвариант: тип содержит ТОЛЬКО поля, которые участвуют в ML.NET schema.
+	/// Любые omniscient/diagnostics ссылки вынесены в отдельный контекстный DTO.
 	/// </summary>
 	public sealed class PullbackContinuationSample
 		{
@@ -17,15 +16,10 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 		public bool Label { get; set; }
 
-		/// <summary>Нужен для каузального среза.</summary>
-		public DateTime EntryUtc { get; set; }
-
 		/// <summary>
-		/// Связь с исходной записью бэктеста (не попадает в ML.NET schema).
-		/// Нужна тренерам/диагностике, которые ожидают .Causal/.Forward.
+		/// Каузальная метка времени сэмпла (нужна для среза train/predict).
+		/// Должна быть UTC; иначе каузальный фильтр по asOf ломается.
 		/// </summary>
-		[NoColumn] public required BacktestRecord Record { get; init; }
-		[NoColumn] public ForwardOutcomes Forward => Record.Forward;
-		[NoColumn] public CausalPredictionRecord Causal => Record.Causal;
+		public DateTime EntryUtc { get; set; }
 		}
 	}

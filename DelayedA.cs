@@ -5,14 +5,15 @@ using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
-		// Локальный enum для кодирования результата intraday-эксперимента A в int-поле PredictionRecord.
-		// Значения подобраны под стандартный enum без явных присваиваний (0,1,2,3).
 		private enum DelayedResultCode
 			{
 			None = 0,
@@ -21,24 +22,19 @@ namespace SolSignalModel1D_Backtest
 			Ambiguous = 3
 			}
 
-		/// <summary>
-		/// Модель A для отложенного входа.
-		/// Любые проблемы с исходными рядами считаются фатальными – бросаем исключение.
-		/// </summary>
 		private static void PopulateDelayedA (
 			IList<BacktestRecord> records,
 			List<BacktestRecord> allRows,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle6h> solAll6h,
 			IReadOnlyList<Candle1m> sol1m,
-			double dipFrac = 0.005,   // 0.5% откат для входа
-			double tpPct = 0.010,     // базовый 1.0% TP
-			double slPct = 0.010 )    // базовый 1.0% SL
+			double dipFrac = 0.005,
+			double tpPct = 0.010,
+			double slPct = 0.010 )
 			{
 			if (records == null)
 				throw new ArgumentNullException (nameof (records), "[PopulateDelayedA] records is null.");
 
-			// Пустой список без записей – это не ошибка данных, просто нечего обогащать delayed A.
 			if (records.Count == 0)
 				return;
 
@@ -54,10 +50,8 @@ namespace SolSignalModel1D_Backtest
 			if (solAll6h == null || solAll6h.Count == 0)
 				throw new InvalidOperationException ("[PopulateDelayedA] solAll6h is null or empty – expected non-empty 6h series.");
 
-			// Словарь 6h для оффлайн-датасета модели A
 			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
 
-			// *** Оффлайн-датасет для модели A (deep pullback) ***
 			List<PullbackContinuationSample> pullbackSamples = PullbackContinuationOfflineBuilder.Build (
 				rows: allRows,
 				sol1h: sol1h,
@@ -69,15 +63,16 @@ namespace SolSignalModel1D_Backtest
 			if (pullbackSamples.Count == 0)
 				throw new InvalidOperationException ("[PopulateDelayedA] No samples for model A – check input rows and candles consistency.");
 
-			// Обучаем модель A на всей выборке (каузально: asOf = последняя дата + 1 день)
 			var pullbackTrainer = new PullbackContinuationTrainer ();
-			DateTime asOfDate = allRows.Max (r => r.ToCausalDateUtc()).AddDays (1);
+			DateTime asOfDate = allRows.Max (r => r.ToCausalDateUtc ()).AddDays (1);
 			var pullbackModel = pullbackTrainer.Train (pullbackSamples, asOfDate);
 			var pullbackEngine = pullbackTrainer.CreateEngine (pullbackModel);
 
-			// *** Итерируем по каждому дню и решаем, использовать ли отложенный вход A. ***
 			foreach (var rec in records)
 				{
+				if (rec == null)
+					throw new InvalidOperationException ("[PopulateDelayedA] records contains null item.");
+
 				if (rec.Causal == null)
 					{
 					throw new InvalidOperationException (
@@ -86,38 +81,58 @@ namespace SolSignalModel1D_Backtest
 
 				var causal = rec.Causal;
 
-				// Направление дневной сделки
+				// Важно: PopulateDelayedA может вызываться повторно (preview/what-if).
+				// Любые "липкие" поля должны быть сброшены, иначе метрики/принтеры будут считать фантомы.
+				ResetDelayedAState (rec, causal);
+
 				bool wantLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
 				bool wantShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
 
-				if (!wantLong && !wantShort)
+				// Инвариант: направление должно быть ровно одно либо ни одного (нет сигнала).
+				if (wantLong == wantShort)
 					{
-					// Нет торгового сигнала – это нормальная ситуация, не ошибка данных.
-					causal.DelayedEntryUsed = false;
-					continue;
+					if (!wantLong)
+						{
+						// нет сигнала
+						causal.DelayedWhyNot = "no signal";
+						continue;
+						}
+
+					// оба true = неконсистентный прогноз, это pipeline-bug.
+					throw new InvalidOperationException (
+						$"[PopulateDelayedA] Ambiguous direction: wantLong && wantShort for {rec.DateUtc:O}. " +
+						$"PredLabel={causal.PredLabel}, PredMicroUp={causal.PredMicroUp}, PredMicroDown={causal.PredMicroDown}");
 					}
 
-				// 1. Гейт по SL-модели: используем A только если SL-модель считает день рискованным.
+				// Гейт по SL-модели: A включается только если SL пометил день как рискованный.
 				if (causal.SlHighDecision != true)
 					{
-					causal.DelayedEntryUsed = false;
+					causal.DelayedWhyNot = "sl gate";
 					continue;
 					}
 
-
-				// dayStart = NY-утро (через BacktestRecord.DateUtc)
 				DateTime dayStart = rec.DateUtc;
 
-				// t_exit (baseline) = следующее рабочее NY-утро 08:00 (минус 2 минуты) в UTC.
-				DateTime dayEnd = Windowing.ComputeBaselineExitUtc (dayStart);
+				DateTime dayEnd;
+				try
+					{
+					dayEnd = Windowing.ComputeBaselineExitUtc (dayStart, Windowing.NyTz);
+					}
+				catch (Exception ex)
+					{
+					throw new InvalidOperationException (
+						$"[PopulateDelayedA] Failed to compute baseline exit for dayStart={dayStart:O}.",
+						ex);
+					}
 
 				bool strongSignal = (causal.PredLabel == 2 || causal.PredLabel == 0);
+
 				if (double.IsNaN (causal.MinMove) || double.IsInfinity (causal.MinMove) || causal.MinMove <= 0.0)
 					throw new InvalidOperationException ($"[PopulateDelayedA] MinMove must be finite and positive for {dayStart:O}.");
 
 				double dayMinMove = causal.MinMove;
 
-				// 1h внутри baseline-окна — для фич модели A
+				// Санити: в baseline-окне должны быть 1h бары, иначе вход/окно данных сломаны.
 				var dayHours = sol1h
 					.Where (h => h.OpenTimeUtc >= dayStart && h.OpenTimeUtc < dayEnd)
 					.OrderBy (h => h.OpenTimeUtc)
@@ -126,14 +141,15 @@ namespace SolSignalModel1D_Backtest
 				if (dayHours.Count == 0)
 					throw new InvalidOperationException ($"[PopulateDelayedA] No 1h candles in baseline window for {dayStart:O}.");
 
-				// Фичи модели A
+				// Важно: фичи должны строиться так же, как в offline builder — на полном ряду,
+				// чтобы не было train/predict mismatch и случайного look-ahead через "обрезанный" список.
 				var features = TargetLevelFeatureBuilder.Build (
 					dayStart,
 					wantLong,
 					strongSignal,
 					dayMinMove,
 					rec.Entry,
-					dayHours
+					sol1h
 				);
 
 				var pullbackSample = new PullbackContinuationSample
@@ -145,19 +161,17 @@ namespace SolSignalModel1D_Backtest
 
 				var predA = pullbackEngine.Predict (pullbackSample);
 
-				// 2. Гейт по модели A
 				if (!predA.PredictedLabel || predA.Probability < 0.70f)
 					{
-					causal.DelayedEntryUsed = false;
+					causal.DelayedWhyNot = "model gate";
 					continue;
 					}
 
-				// 3. Если дошли сюда — A сказала "да", SL сказал "рискованно".
+				// A сказала "да"
 				causal.DelayedSource = "A";
 				causal.DelayedEntryAsked = true;
 				causal.DelayedEntryUsed = true;
 
-				// Минутки внутри baseline-окна
 				var dayMinutes = sol1m
 					.Where (m => m.OpenTimeUtc >= dayStart && m.OpenTimeUtc < dayEnd)
 					.OrderBy (m => m.OpenTimeUtc)
@@ -166,12 +180,10 @@ namespace SolSignalModel1D_Backtest
 				if (dayMinutes.Count == 0)
 					throw new InvalidOperationException ($"[PopulateDelayedA] No 1m candles in baseline window for {dayStart:O}.");
 
-				// Цена триггера (глубина отката = dipFrac от цены входа)
 				double triggerPrice = wantLong
 					? rec.Entry * (1.0 - dipFrac)
 					: rec.Entry * (1.0 + dipFrac);
 
-				// Максимальная задержка — 4 часа от dayStart
 				DateTime maxDelayTime = dayStart.AddHours (4);
 				Candle1m? fillBar = null;
 
@@ -180,33 +192,21 @@ namespace SolSignalModel1D_Backtest
 					if (m.OpenTimeUtc > maxDelayTime)
 						break;
 
-					if (wantLong && m.Low <= triggerPrice)
-						{
-						fillBar = m;
-						break;
-						}
-
-					if (wantShort && m.High >= triggerPrice)
-						{
-						fillBar = m;
-						break;
-						}
+					if (wantLong && m.Low <= triggerPrice) { fillBar = m; break; }
+					if (wantShort && m.High >= triggerPrice) { fillBar = m; break; }
 					}
 
 				if (fillBar == null)
 					{
-					// цена отката не достигнута — вход не исполнился
 					rec.DelayedEntryExecuted = false;
 					rec.DelayedWhyNot = "no trigger";
 					continue;
 					}
 
-				// Фиксируем факт исполнения
 				rec.DelayedEntryExecuted = true;
 				rec.DelayedEntryExecutedAtUtc = fillBar.OpenTimeUtc;
 				rec.DelayedEntryPrice = triggerPrice;
 
-				// Привязка TP/SL к MinMove (каузальные параметры уходят в CausalPredictionRecord).
 				double effectiveTpPct = tpPct;
 				double effectiveSlPct = slPct;
 
@@ -217,10 +217,10 @@ namespace SolSignalModel1D_Backtest
 						effectiveTpPct = linkedTp;
 					}
 
+				// Эти поля позже читает PnL/принтеры (через BacktestRecord прокси или напрямую).
 				causal.DelayedIntradayTpPct = effectiveTpPct;
 				causal.DelayedIntradaySlPct = effectiveSlPct;
 
-				// Уровни TP/SL от цены фактического исполнения
 				double tpLevel = wantLong
 					? rec.DelayedEntryPrice * (1.0 + effectiveTpPct)
 					: rec.DelayedEntryPrice * (1.0 - effectiveTpPct);
@@ -229,7 +229,6 @@ namespace SolSignalModel1D_Backtest
 					? rec.DelayedEntryPrice * (1.0 - effectiveSlPct)
 					: rec.DelayedEntryPrice * (1.0 + effectiveSlPct);
 
-				// Определяем, что сработало первым, в окне [ExecutedAt; dayEnd)
 				rec.DelayedIntradayResult = (int) DelayedIntradayResult.None;
 
 				foreach (var m in dayMinutes)
@@ -240,24 +239,29 @@ namespace SolSignalModel1D_Backtest
 					bool hitTp = wantLong ? (m.High >= tpLevel) : (m.Low <= tpLevel);
 					bool hitSl = wantLong ? (m.Low <= slLevel) : (m.High >= slLevel);
 
-					if (hitTp && hitSl)
-						{
-						rec.DelayedIntradayResult = (int) DelayedIntradayResult.Ambiguous;
-						break;
-						}
-
-					if (hitTp)
-						{
-						rec.DelayedIntradayResult = (int) DelayedIntradayResult.TpFirst;
-						break;
-						}
-
-					if (hitSl)
-						{
-						rec.DelayedIntradayResult = (int) DelayedIntradayResult.SlFirst;
-						break;
-						}
+					if (hitTp && hitSl) { rec.DelayedIntradayResult = (int) DelayedIntradayResult.Ambiguous; break; }
+					if (hitTp) { rec.DelayedIntradayResult = (int) DelayedIntradayResult.TpFirst; break; }
+					if (hitSl) { rec.DelayedIntradayResult = (int) DelayedIntradayResult.SlFirst; break; }
 					}
+				}
+
+			static void ResetDelayedAState ( BacktestRecord rec, CausalPredictionRecord causal )
+				{
+				// Решение/гейт (каузально)
+				causal.DelayedSource = null;
+				causal.DelayedEntryAsked = false;
+				causal.DelayedEntryUsed = false;
+				causal.DelayedWhyNot = null;
+
+				// Факты исполнения (omniscient)
+				rec.DelayedEntryExecuted = false;
+				rec.DelayedEntryExecutedAtUtc = null;
+				rec.DelayedEntryPrice = 0.0;
+				rec.DelayedWhyNot = null;
+				rec.DelayedIntradayResult = (int) DelayedIntradayResult.None;
+
+				causal.DelayedIntradayTpPct = null;
+				causal.DelayedIntradaySlPct = null;
 				}
 			}
 		}

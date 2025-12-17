@@ -3,25 +3,45 @@ using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Aggregation;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
+using System;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 	{
+	/// <summary>
+	/// Каузальный инференс-движок.
+	/// Инварианты архитектуры:
+	/// - вход ТОЛЬКО CausalDataRow (никаких BacktestRecord / Forward / Fact);
+	/// - отсутствие модели не маскируется: либо явный debug-флаг, либо исключение;
+	/// - вероятности обязаны быть конечными и в диапазоне [0..1], иначе это поломка пайплайна.
+	/// Потокобезопасность:
+	/// - Microsoft.ML.PredictionEngine не потокобезопасен; здесь используется общий lock.
+	/// </summary>
 	public sealed class PredictionEngine
 		{
 		private readonly ModelBundle _bundle;
 		private readonly ProbabilityAggregationConfig _aggConfig;
 
+		private readonly object _sync = new object ();
+
+		// Кешируем prediction-engine для производительности (создание на каждый вызов дорого).
+		// Важно: не потокобезопасны => защищаем lock'ом весь PredictInternal.
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _moveEng;
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirEngNormal;
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirEngDown;
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _microEng;
+
 		public static bool DebugAllowDisabledModels { get; set; } = false;
 		public static bool DebugTreatMissingMoveAsFlat { get; set; } = false;
 		public static bool DebugTreatMissingDirAsFlat { get; set; } = false;
 
-		// Порог принятия микро-сигнала по УВЕРЕННОСТИ: max(P(up), P(down)).
-		// Важно: это позволяет принимать и Up, и Down; использовать "Probability" напрямую нельзя.
+		// Порог принятия микро-сигнала по уверенности: max(P(up), P(down)).
 		private const float FlatMicroProbThresh = 0.60f;
 
+		// Небольшой ограничитель консольного дебага (опционально).
 		private const int MicroDebugMaxRows = 10;
 		private static int _microDebugPrinted;
+		public static bool DebugPrintMicro { get; set; } = false;
 
 		public readonly struct PredResult
 			{
@@ -47,13 +67,21 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			_aggConfig = aggregationConfig ?? new ProbabilityAggregationConfig ();
 			}
 
-		public CausalPredictionRecord PredictCausal ( BacktestRecord r )
+		/// <summary>
+		/// Каузальный API: результат для одного дня.
+		/// </summary>
+		public CausalPredictionRecord PredictCausal ( CausalDataRow row )
 			{
-			var res = Predict (r);
-			return ToCausalRecord (r, res);
+			if (row == null) throw new ArgumentNullException (nameof (row));
+
+			var res = PredictInternal (row);
+			return ToCausalRecord (row, res);
 			}
 
-		public List<CausalPredictionRecord> PredictManyCausal ( IReadOnlyList<BacktestRecord> rows )
+		/// <summary>
+		/// Каузальный batch API.
+		/// </summary>
+		public List<CausalPredictionRecord> PredictManyCausal ( IReadOnlyList<CausalDataRow> rows )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 
@@ -61,16 +89,165 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-				var r = rows[i] ?? throw new InvalidOperationException ("[PredictionEngine] rows contains null BacktestRecord item.");
-
-				var res = Predict (r);
+				var r = rows[i] ?? throw new InvalidOperationException ("[PredictionEngine] rows contains null CausalDataRow item.");
+				var res = PredictInternal (r);
 				result.Add (ToCausalRecord (r, res));
 				}
 
 			return result;
 			}
 
-		private static CausalPredictionRecord ToCausalRecord ( BacktestRecord r, PredResult res )
+		public PredResult Predict ( CausalDataRow row ) => PredictInternal (row);
+
+		private PredResult PredictInternal ( CausalDataRow row )
+			{
+			try
+				{
+				if (_bundle.MlCtx == null)
+					throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MlCtx == null");
+
+				var ml = _bundle.MlCtx;
+
+				var fixedFeatures = ToFloatFixedFromVectorOrThrow (row.FeaturesVector, row.DateUtc);
+
+				var sample = new MlSampleBinary { Features = fixedFeatures };
+
+				lock (_sync)
+					{
+					// ===== 1) Move =====
+					MlBinaryOutput moveOut;
+
+					if (_bundle.MoveModel == null)
+						{
+						if (!DebugAllowDisabledModels)
+							throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MoveModel == null (нет move-модели)");
+
+						if (!DebugTreatMissingMoveAsFlat)
+							{
+							throw new InvalidOperationException (
+								"[PredictionEngine] MoveModel is missing. " +
+								"Enable DebugTreatMissingMoveAsFlat explicitly if you really want flat-fallback.");
+							}
+
+						var dayFlat = BuildPureFlatDayProbabilities ();
+						var microInfoDbg = RunMicroIfAvailable (row.DateUtc, fixedFeatures, ml);
+						var microProbsDbg = ConvertMicro (microInfoDbg);
+						var dayFlatMicroDbg = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbsDbg, _aggConfig);
+
+						string reasonDbg = microInfoDbg.Predicted
+							? microInfoDbg.Up ? "day:flat+microUp(move-missing)" : "day:flat+microDown(move-missing)"
+							: "day:flat(move-missing)";
+
+						return new PredResult (1, reasonDbg, microInfoDbg, dayFlat, dayFlatMicroDbg);
+						}
+
+					var moveEng = GetOrCreateMoveEngineOrThrow (ml);
+					moveOut = moveEng.Predict (sample);
+
+					double pMove = moveOut.Probability;
+					ValidateProbabilityOrThrow (pMove, "[PredictionEngine] invalid move probability");
+
+					// ===== 2) Dir =====
+					var dirModel = row.RegimeDown && _bundle.DirModelDown != null
+						? _bundle.DirModelDown
+						: _bundle.DirModelNormal;
+
+					if (dirModel == null)
+						{
+						if (!DebugAllowDisabledModels)
+							throw new InvalidOperationException ("[PredictionEngine] DirModelNormal/DirModelDown == null (нет dir-модели)");
+
+						if (!DebugTreatMissingDirAsFlat)
+							{
+							throw new InvalidOperationException (
+								"[PredictionEngine] DirModel is missing. " +
+								"Enable DebugTreatMissingDirAsFlat explicitly if you really want flat-fallback.");
+							}
+
+						var dayFlat = BuildPureFlatDayProbabilities ();
+						var microInfoDbg = RunMicroIfAvailable (row.DateUtc, fixedFeatures, ml);
+						var microProbsDbg = ConvertMicro (microInfoDbg);
+						var dayFlatMicroDbg = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbsDbg, _aggConfig);
+
+						string reasonDbg = microInfoDbg.Predicted
+							? microInfoDbg.Up ? "day:flat+microUp(dir-missing)" : "day:flat+microDown(dir-missing)"
+							: "day:flat(dir-missing)";
+
+						return new PredResult (1, reasonDbg, microInfoDbg, dayFlat, dayFlatMicroDbg);
+						}
+
+					var dirEng = GetOrCreateDirEngineOrThrow (ml, row.RegimeDown);
+					var dirOut = dirEng.Predict (sample);
+
+					double pUpGivenMove = dirOut.Probability;
+					ValidateProbabilityOrThrow (pUpGivenMove, "[PredictionEngine] invalid dir probability");
+
+					bool wantsUp = dirOut.PredictedLabel;
+
+					// ===== 3) BTC-фильтр (каузальный) =====
+					bool btcBlocksUp = false;
+					if (wantsUp)
+						{
+						bool btcEmaDown = row.BtcEma50vs200 < -0.002;
+						bool btcShortRed = row.BtcRet1 < 0 && row.BtcRet30 < 0;
+
+						if (btcEmaDown && btcShortRed)
+							btcBlocksUp = true;
+						}
+
+					// ===== 4) Day distribution через P(move) и P(up|move) =====
+					var rawDir = new DailyRawOutput
+						{
+						PMove = pMove,
+						PUpGivenMove = pUpGivenMove,
+						BtcFilterBlocksUp = btcBlocksUp,
+						BtcFilterBlocksFlat = false,
+						BtcFilterBlocksDown = false
+						};
+
+					var dayProbs = DayProbabilityBuilder.BuildDayProbabilities (rawDir);
+
+					// ===== 5) Flat-ветка: микро допускается только если move сказал "no-move" =====
+					if (!moveOut.PredictedLabel)
+						{
+						var microInfo = RunMicroIfAvailable (row.DateUtc, fixedFeatures, ml);
+						var microProbs = ConvertMicro (microInfo);
+						var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayProbs, microProbs, _aggConfig);
+
+						string reason = microInfo.Predicted
+							? microInfo.Up ? "day:flat+microUp" : "day:flat+microDown"
+							: "day:flat";
+
+						// Важно: итоговый класс для ветки no-move остаётся 1 (flat).
+						// Распределение Day+Micro сохраняется для аналитики/оверлеев.
+						return new PredResult (1, reason, microInfo, dayProbs, dayFlatMicro);
+						}
+
+					// ===== 6) Move=true: микро не применяется =====
+					var microEmpty = new MicroInfo ();
+					var microProbsEmpty = ConvertMicro (microEmpty);
+					var dayWithMicro = ProbabilityAggregator.ApplyMicroOverlay (dayProbs, microProbsEmpty, _aggConfig);
+
+					if (wantsUp)
+						{
+						if (btcBlocksUp)
+							return new PredResult (1, "day:move-up-blocked-by-btc", microEmpty, dayProbs, dayWithMicro);
+
+						return new PredResult (2, "day:move-up", microEmpty, dayProbs, dayWithMicro);
+						}
+
+					return new PredResult (0, "day:move-down", microEmpty, dayProbs, dayWithMicro);
+					}
+				}
+			catch (Exception ex)
+				{
+				Console.WriteLine ($"[PredictionEngine][ERROR] {ex.GetType ().Name}: {ex.Message}");
+				Console.WriteLine (ex.StackTrace);
+				throw;
+				}
+			}
+
+		private static CausalPredictionRecord ToCausalRecord ( CausalDataRow row, PredResult res )
 			{
 			var day = res.Day;
 			var dayMicro = res.DayWithMicro;
@@ -79,29 +256,27 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			int predDay = ArgmaxClass (day);
 			int predDayMicro = ArgmaxClass (dayMicro);
 
-			double confDay = Math.Max (day.PUp, Math.Max (day.PFlat, day.PDown));
-
-			// Конфиденс микро должен быть симметричным: уверенный DOWN == высокая уверенность.
-			// micro.Prob хранит P(up); уверенность = max(P(up), 1-P(up)).
-			double confMicro = micro.Predicted ? Math.Max (micro.Prob, 1.0 - micro.Prob) : 0.0;
+			double confMicro = 0.0;
+			if (micro.Predicted)
+				confMicro = Math.Max (micro.Prob, 1.0 - micro.Prob);
 
 			return new CausalPredictionRecord
 				{
-				DateUtc = r.ToCausalDateUtc (),
+				DateUtc = row.DateUtc,
 
-				// Важно сохранять фичи/контекст, иначе downstream-диагностика теряет входные данные.
-				Features = r.Causal.Features,
-
-				RegimeDown = r.RegimeDown,
-				MinMove = r.MinMove,
+				RegimeDown = row.RegimeDown,
+				MinMove = row.MinMove,
 				Reason = res.Reason,
 
 				PredLabel = res.Class,
 				PredLabel_Day = predDay,
 				PredLabel_DayMicro = predDayMicro,
 
-				// Total на этом этапе = Day+Micro (SL/Delayed могут обновить позже).
-				PredLabel_Total = predDayMicro,
+				// Total на этом шаге равен DayWithMicro (runtime-оверлеи могут изменить позже).
+				PredLabel_Total = res.Class,
+				ProbUp_Total = dayMicro.PUp,
+				ProbFlat_Total = dayMicro.PFlat,
+				ProbDown_Total = dayMicro.PDown,
 
 				ProbUp_Day = day.PUp,
 				ProbFlat_Day = day.PFlat,
@@ -111,30 +286,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				ProbFlat_DayMicro = dayMicro.PFlat,
 				ProbDown_DayMicro = dayMicro.PDown,
 
-				ProbUp_Total = dayMicro.PUp,
-				ProbFlat_Total = dayMicro.PFlat,
-				ProbDown_Total = dayMicro.PDown,
-
-				Conf_Day = confDay,
+				Conf_Day = Math.Max (day.PUp, Math.Max (day.PFlat, day.PDown)),
 				Conf_Micro = confMicro,
 
 				MicroPredicted = micro.Predicted,
 				PredMicroUp = micro.Predicted && micro.Up,
-				PredMicroDown = micro.Predicted && !micro.Up,
-
-				// SL-слой не выставляется заглушками: null = не считали/не применимо.
-				SlProb = null,
-				SlHighDecision = null,
-				Conf_SlLong = null,
-				Conf_SlShort = null,
-
-				// Delayed-слой: null = не считали/не применимо.
-				DelayedSource = null,
-				DelayedEntryAsked = null,
-				DelayedEntryUsed = null,
-				DelayedIntradayTpPct = null,
-				DelayedIntradaySlPct = null,
-				TargetLevelClass = null
+				PredMicroDown = micro.Predicted && !micro.Up
 				};
 			}
 
@@ -149,216 +306,32 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			return label;
 			}
 
-		public PredResult Predict ( BacktestRecord r )
-			{
-			try
-				{
-				if (r == null)
-					throw new ArgumentNullException (nameof (r));
-
-				if (r.Causal.Features == null)
-					{
-					throw new InvalidOperationException (
-						"[PredictionEngine] BacktestRecord.Causal.Features == null. Нет фич для дня " +
-						r.ToCausalDateUtc ().ToString ("O"));
-					}
-
-				var fixedFeatures = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector);
-
-				if (_bundle.MlCtx == null)
-					throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MlCtx == null");
-
-				var ml = _bundle.MlCtx;
-
-				var sample = new MlSampleBinary { Features = fixedFeatures };
-
-				// ===== 1) Move =====
-				MlBinaryOutput moveOut;
-
-				if (_bundle.MoveModel == null)
-					{
-					if (!DebugAllowDisabledModels)
-						throw new InvalidOperationException ("[PredictionEngine] ModelBundle.MoveModel == null (нет move-модели)");
-
-					if (!DebugTreatMissingMoveAsFlat)
-						{
-						// Запрещено “додумывать” поведение молча. Если разрешён дебаг-режим,
-						// то fallback должен быть явным флагом.
-						throw new InvalidOperationException (
-							"[PredictionEngine] MoveModel is missing. " +
-							"Enable DebugTreatMissingMoveAsFlat explicitly if you really want flat-fallback.");
-						}
-
-					var dayFlat = BuildPureFlatDayProbabilities ();
-					var microInfo = RunMicroIfAvailable (r, fixedFeatures, ml);
-					var microProbs = ConvertMicro (microInfo);
-					var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbs, _aggConfig);
-
-					string reason = microInfo.Predicted
-						? microInfo.Up ? "day:flat+microUp(move-missing)" : "day:flat+microDown(move-missing)"
-						: "day:flat(move-missing)";
-
-					return new PredResult (1, reason, microInfo, dayFlat, dayFlatMicro);
-					}
-				else
-					{
-					var moveEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MoveModel);
-					moveOut = moveEng.Predict (sample);
-					}
-
-				// В ML.NET Probability обычно означает P(positive-class). Здесь positive = "move".
-				double pMove = moveOut.Probability;
-
-				if (!double.IsFinite (pMove) || pMove < 0.0 || pMove > 1.0)
-					{
-					throw new InvalidOperationException (
-						$"[PredictionEngine] invalid move probability: {pMove}. Expected finite value in [0..1].");
-					}
-
-				// ===== 2) Dir (считаем ВСЕГДА при наличии модели) =====
-				var dirModel = r.RegimeDown && _bundle.DirModelDown != null
-					? _bundle.DirModelDown
-					: _bundle.DirModelNormal;
-
-				if (dirModel == null)
-					{
-					if (!DebugAllowDisabledModels)
-						throw new InvalidOperationException ("[PredictionEngine] DirModelNormal/DirModelDown == null (нет dir-модели)");
-
-					if (!DebugTreatMissingDirAsFlat)
-						{
-						throw new InvalidOperationException (
-							"[PredictionEngine] DirModel is missing. " +
-							"Enable DebugTreatMissingDirAsFlat explicitly if you really want flat-fallback.");
-						}
-
-					// Явный fallback: без dir-модели нельзя получить P(up|move), поэтому день считаем flat.
-					var dayFlat = BuildPureFlatDayProbabilities ();
-					var microInfo = RunMicroIfAvailable (r, fixedFeatures, ml);
-					var microProbs = ConvertMicro (microInfo);
-					var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayFlat, microProbs, _aggConfig);
-
-					string reason = microInfo.Predicted
-						? microInfo.Up ? "day:flat+microUp(dir-missing)" : "day:flat+microDown(dir-missing)"
-						: "day:flat(dir-missing)";
-
-					return new PredResult (1, reason, microInfo, dayFlat, dayFlatMicro);
-					}
-
-				var dirEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (dirModel);
-				var dirOut = dirEng.Predict (sample);
-
-				// В ML.NET Probability обычно означает P(positive-class). Здесь positive = "up".
-				double pUpGivenMove = dirOut.Probability;
-
-				if (!double.IsFinite (pUpGivenMove) || pUpGivenMove < 0.0 || pUpGivenMove > 1.0)
-					{
-					throw new InvalidOperationException (
-						$"[PredictionEngine] invalid dir probability: {pUpGivenMove}. Expected finite value in [0..1].");
-					}
-
-				bool wantsUp = dirOut.PredictedLabel;
-
-				// ===== 3) BTC-фильтр (как было) =====
-				bool btcBlocksUp = false;
-				if (wantsUp)
-					{
-					bool btcEmaDown = r.Causal.BtcEma50vs200 < -0.002;
-					bool btcShortRed = r.Causal.BtcRet1 < 0 && r.Causal.BtcRet30 < 0;
-
-					if (btcEmaDown && btcShortRed)
-						btcBlocksUp = true;
-					}
-
-				// ===== 4) Day distribution без заглушек: P(move) + P(up|move) =====
-				var rawDir = new DailyRawOutput
-					{
-					PMove = pMove,
-					PUpGivenMove = pUpGivenMove,
-					BtcFilterBlocksUp = btcBlocksUp,
-					BtcFilterBlocksFlat = false,
-					BtcFilterBlocksDown = false
-					};
-
-				var dayProbs = DayProbabilityBuilder.BuildDayProbabilities (rawDir);
-
-				// ===== 5) Flat-ветка: микро допускается только если move сказал "flat" =====
-				if (!moveOut.PredictedLabel)
-					{
-					var microInfo = RunMicroIfAvailable (r, fixedFeatures, ml);
-					var microProbs = ConvertMicro (microInfo);
-					var dayFlatMicro = ProbabilityAggregator.ApplyMicroOverlay (dayProbs, microProbs, _aggConfig);
-
-					string reason = microInfo.Predicted
-						? microInfo.Up ? "day:flat+microUp" : "day:flat+microDown"
-						: "day:flat";
-
-					// Важно: поведение сохраняется как раньше — итоговый класс для flat-ветки = 1,
-					// а Day+Micro живёт отдельно для аналитики/оверлеев.
-					return new PredResult (1, reason, microInfo, dayProbs, dayFlatMicro);
-					}
-
-				// ===== 6) Move=true: микро не применяется =====
-				var microEmpty = new MicroInfo ();
-				var microProbsEmpty = ConvertMicro (microEmpty);
-				var dayWithMicro = ProbabilityAggregator.ApplyMicroOverlay (dayProbs, microProbsEmpty, _aggConfig);
-
-				if (wantsUp)
-					{
-					if (btcBlocksUp)
-						return new PredResult (1, "day:move-up-blocked-by-btc", microEmpty, dayProbs, dayWithMicro);
-
-					return new PredResult (2, "day:move-up", microEmpty, dayProbs, dayWithMicro);
-					}
-
-				return new PredResult (0, "day:move-down", microEmpty, dayProbs, dayWithMicro);
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[PredictionEngine][ERROR] {ex.GetType ().Name}: {ex.Message}");
-				Console.WriteLine (ex.StackTrace);
-				throw;
-				}
-			}
-
-		private MicroInfo RunMicroIfAvailable ( BacktestRecord r, float[] fixedFeatures, MLContext ml )
+		private MicroInfo RunMicroIfAvailable ( DateTime dateUtc, float[] fixedFeatures, MLContext ml )
 			{
 			var microInfo = new MicroInfo ();
 
 			if (_bundle.MicroFlatModel == null)
 				return microInfo;
 
-			var microEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
+			var microEng = GetOrCreateMicroEngineOrThrow (ml);
 
 			var microSample = new MlSampleBinary { Features = fixedFeatures };
-
 			var microOut = microEng.Predict (microSample);
 
-			// В ML.NET Probability = P(positive-class). Здесь positive = "up".
 			double pUp = microOut.Probability;
-
-			if (!double.IsFinite (pUp) || pUp < 0.0 || pUp > 1.0)
-				{
-				throw new InvalidOperationException (
-					$"[micro] invalid probability from model: Prob={pUp}. Expected finite value in [0..1].");
-				}
+			ValidateProbabilityOrThrow (pUp, "[micro] invalid probability from model");
 
 			double pDown = 1.0 - pUp;
 			double confidence = Math.Max (pUp, pDown);
 			bool accepted = confidence >= FlatMicroProbThresh;
 
-			// Для удобства дебага печатаем направление и уверенность, а не сырую "Probability" как критерий принятия.
-			if (_microDebugPrinted < MicroDebugMaxRows && (r.FactMicroUp || r.FactMicroDown))
+			if (DebugPrintMicro && _microDebugPrinted < MicroDebugMaxRows)
 				{
-				bool up = pUp >= 0.5;
-
 				Console.WriteLine (
-					"[debug-micro] {0:yyyy-MM-dd} factUp={1}, factDown={2}, dir={3}, pUp={4:0.000}, conf={5:0.000}, accepted={6}",
-					r.ToCausalDateUtc (),
-					r.FactMicroUp,
-					r.FactMicroDown,
-					up ? "UP" : "DOWN",
+					"[debug-micro] {0:yyyy-MM-dd} pUp={1:0.000} pDown={2:0.000} conf={3:0.000} accepted={4}",
+					dateUtc,
 					pUp,
+					pDown,
 					confidence,
 					accepted
 				);
@@ -366,44 +339,24 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				_microDebugPrinted++;
 				}
 
-			if (!accepted)
-				{
-				// Модель запускалась, но сигнал не принят: это НЕ прогноз.
-				// Prob сохраняем как P(up) для диагностики.
-				microInfo.Predicted = false;
-				microInfo.Prob = (float) pUp;
-				return microInfo;
-				}
+			// Модель запускалась, но сигнал не принят: это НЕ прогноз.
+			microInfo.Predicted = accepted;
+			microInfo.Up = accepted ? (pUp >= 0.5) : false;
 
-			bool microUp = pUp >= 0.5;
+			microInfo.ConsiderUp = accepted && (pUp >= 0.5);
+			microInfo.ConsiderDown = accepted && (pUp < 0.5);
 
-			microInfo.Predicted = true;
-			microInfo.Up = microUp;
-			microInfo.ConsiderUp = microUp;
-			microInfo.ConsiderDown = !microUp;
-
-			// Контракт: Prob хранит P(up). Down-вариант = 1-Prob.
+			// Контракт: Prob хранит P(up); для down используем (1-Prob).
 			microInfo.Prob = (float) pUp;
-
-			if (r.FactMicroUp || r.FactMicroDown)
-				{
-				microInfo.Correct = microUp ? r.FactMicroUp : r.FactMicroDown;
-				}
 
 			return microInfo;
 			}
 
 		private static MicroProbabilities ConvertMicro ( MicroInfo micro )
 			{
-			// Инвариант: даже “непринятый” результат модели обязан быть валидным числом [0..1],
-			// иначе это поломка ML-пайплайна, которую нельзя маскировать clamp'ами.
 			double pUp = micro.Prob;
 
-			if (!double.IsFinite (pUp) || pUp < 0.0 || pUp > 1.0)
-				{
-				throw new InvalidOperationException (
-					$"[micro] invalid probability value: Prob={pUp}. Expected finite value in [0..1].");
-				}
+			ValidateProbabilityOrThrow (pUp, "[micro] invalid probability value");
 
 			if (!micro.Predicted)
 				{
@@ -426,18 +379,15 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				HasPrediction = true,
 				PUpGivenFlat = pUp,
 				PDownGivenFlat = pDown,
-
-				// Уверенность микро должна быть симметричной (up/down).
 				Confidence = Math.Max (pUp, pDown),
-
 				PredLabel = micro.Up ? 2 : 0
 				};
 			}
 
 		private static DailyProbabilities BuildPureFlatDayProbabilities ()
 			{
-			// Явная константа “flat=1.0” — это не заглушка, а корректное распределение,
-			// используемое только в ситуациях, когда модель отсутствует и выбран явный debug-fallback.
+			// Это не “заглушка”, а корректное распределение “flat=1.0”,
+			// используемое ТОЛЬКО при выбранном явном debug-fallback.
 			return new DailyProbabilities
 				{
 				PUp = 0.0,
@@ -450,70 +400,75 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				};
 			}
 
-		public bool EvalMicroAware ( BacktestRecord r, int predClass, MicroInfo micro )
+		private static float[] ToFloatFixedFromVectorOrThrow ( ReadOnlyMemory<double> vec, DateTime dateUtc )
 			{
-			bool baseCorrect = predClass == r.Forward.TrueLabel;
-			if (baseCorrect) return true;
+			if (vec.IsEmpty)
+				throw new InvalidOperationException ($"[PredictionEngine] empty FeaturesVector for date={dateUtc:O}.");
 
-			if (r.Forward.TrueLabel == 2 && predClass == 1 && micro.ConsiderUp) return true;
-			if (r.Forward.TrueLabel == 0 && predClass == 1 && micro.ConsiderDown) return true;
-			if (r.Forward.TrueLabel == 1 && r.FactMicroUp && predClass == 2) return true;
-			if (r.Forward.TrueLabel == 1 && r.FactMicroDown && predClass == 0) return true;
-			if (r.Forward.TrueLabel == 1 && r.FactMicroUp && predClass == 1 && micro.ConsiderUp) return true;
-			if (r.Forward.TrueLabel == 1 && r.FactMicroDown && predClass == 1 && micro.ConsiderDown) return true;
+			if (vec.Length != MlSchema.FeatureCount)
+				throw new InvalidOperationException (
+					$"[PredictionEngine] FeaturesVector length mismatch for date={dateUtc:O}: got {vec.Length}, expected {MlSchema.FeatureCount}.");
 
-			return false;
+			var span = vec.Span;
+			var dst = new float[span.Length];
+
+			for (int i = 0; i < span.Length; i++)
+				{
+				double x = span[i];
+
+				if (!double.IsFinite (x))
+					throw new InvalidOperationException ($"[PredictionEngine] non-finite feature at index={i} for date={dateUtc:O}: {x}.");
+
+				dst[i] = (float) x;
+				}
+
+			return dst;
 			}
 
-		public double EvalWeighted ( BacktestRecord r, int predClass, MicroInfo micro )
+		private static void ValidateProbabilityOrThrow ( double p, string prefix )
 			{
-			int fact = r.Forward.TrueLabel;
+			if (!double.IsFinite (p) || p < 0.0 || p > 1.0)
+				throw new InvalidOperationException ($"{prefix}: {p}. Expected finite value in [0..1].");
+			}
 
-			bool predMicroUp = micro.ConsiderUp;
-			bool predMicroDown = micro.ConsiderDown;
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateMoveEngineOrThrow ( MLContext ml )
+			{
+			if (_bundle.MoveModel == null)
+				throw new InvalidOperationException ("[PredictionEngine] MoveModel is null");
 
-			bool factMicroUp = r.FactMicroUp;
-			bool factMicroDown = r.FactMicroDown;
+			if (_moveEng != null) return _moveEng;
 
-			if (fact == 2)
+			_moveEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MoveModel);
+			return _moveEng;
+			}
+
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateDirEngineOrThrow ( MLContext ml, bool regimeDown )
+			{
+			if (regimeDown && _bundle.DirModelDown != null)
 				{
-				if (predClass == 2) return 1.0;
-				if (predClass == 1 && predMicroUp) return 1.0;
-				if (predClass == 1) return 0.25;
-				return 0.0;
+				if (_dirEngDown != null) return _dirEngDown;
+				_dirEngDown = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.DirModelDown);
+				return _dirEngDown;
 				}
 
-			if (fact == 0)
-				{
-				if (predClass == 0) return 1.0;
-				if (predClass == 1 && predMicroDown) return 1.0;
-				if (predClass == 1) return 0.25;
-				return 0.0;
-				}
+			if (_bundle.DirModelNormal == null)
+				throw new InvalidOperationException ("[PredictionEngine] DirModelNormal is null");
 
-			if (fact == 1 && factMicroUp)
-				{
-				if (predClass == 1 && predMicroUp) return 1.0;
-				if (predClass == 2) return 0.8;
-				if (predClass == 1) return 0.2;
-				return 0.0;
-				}
+			if (_dirEngNormal != null) return _dirEngNormal;
 
-			if (fact == 1 && factMicroDown)
-				{
-				if (predClass == 1 && predMicroDown) return 1.0;
-				if (predClass == 0) return 0.8;
-				if (predClass == 1) return 0.2;
-				return 0.0;
-				}
+			_dirEngNormal = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.DirModelNormal);
+			return _dirEngNormal;
+			}
 
-			if (fact == 1)
-				{
-				if (predClass == 1) return 1.0;
-				return 0.3;
-				}
+		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateMicroEngineOrThrow ( MLContext ml )
+			{
+			if (_bundle.MicroFlatModel == null)
+				throw new InvalidOperationException ("[PredictionEngine] MicroFlatModel is null");
 
-			return 0.0;
+			if (_microEng != null) return _microEng;
+
+			_microEng = ml.Model.CreatePredictionEngine<MlSampleBinary, MlBinaryOutput> (_bundle.MicroFlatModel);
+			return _microEng;
 			}
 		}
 	}

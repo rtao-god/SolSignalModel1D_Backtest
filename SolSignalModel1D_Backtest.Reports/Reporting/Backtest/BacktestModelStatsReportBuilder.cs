@@ -153,16 +153,9 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				Value = meta.HasOos.ToString ()
 				});
 
-			if (meta.TrainUntilUtc.HasValue)
-				{
-				section.Items.Add (new KeyValueItem
-					{
-					Key = "TrainUntilUtc",
-					Value = meta.TrainUntilUtc.Value.ToString ("O")
-					});
-				}
+			if (meta.TrainUntilUtc != default)
 
-			section.Items.Add (new KeyValueItem
+				section.Items.Add (new KeyValueItem
 				{
 				Key = "TrainRecordsCount",
 				Value = meta.TrainRecordsCount.ToString ()
@@ -208,12 +201,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				{
 				Key = "SegmentKind",
 				Value = segment.Kind.ToString ()
-				});
-
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "Label",
-				Value = segment.Forward.TrueLabel ?? string.Empty
 				});
 
 			section.Items.Add (new KeyValueItem
