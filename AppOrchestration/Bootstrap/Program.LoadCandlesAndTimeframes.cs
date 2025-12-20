@@ -2,6 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System.Diagnostics;
 
 namespace SolSignalModel1D_Backtest

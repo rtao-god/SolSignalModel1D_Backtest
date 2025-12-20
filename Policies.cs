@@ -1,5 +1,7 @@
-﻿using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+﻿using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using LeveragePolicies = SolSignalModel1D_Backtest.Core.Trading.Leverage.Policies;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -12,7 +14,8 @@ namespace SolSignalModel1D_Backtest
 			void AddConst ( double lev )
 				{
 				var name = $"const_{lev:0.#}x";
-				var policy = new LeveragePolicies.ConstPolicy (name, lev);
+				var policy = new LeveragePolicies.ConstLeveragePolicy (name, lev);
+
 				list.Add (new RollingLoop.PolicySpec { Name = $"{name} Cross", Policy = policy, Margin = MarginMode.Cross });
 				list.Add (new RollingLoop.PolicySpec { Name = $"{name} Isolated", Policy = policy, Margin = MarginMode.Isolated });
 				}
@@ -25,13 +28,23 @@ namespace SolSignalModel1D_Backtest
 			AddConst (15.0);
 			AddConst (50.0);
 
-			// риск-осознанная
-			var riskAware = new LeveragePolicies.RiskAwarePolicy ();
+			// Risk-aware / Ultra-safe: значения плеча нужно задать явно.
+			const double RiskAwareNormalLev = 10.0;
+			const double RiskAwareHighRiskLev = 3.0;
+			const double UltraSafeLev = 2.0;
+
+			var riskAware = new LeveragePolicies.RiskAwareLeveragePolicy (
+				name: "risk_aware",
+				normalLeverage: RiskAwareNormalLev,
+				highRiskLeverage: RiskAwareHighRiskLev);
+
 			list.Add (new RollingLoop.PolicySpec { Name = $"{riskAware.Name} Cross", Policy = riskAware, Margin = MarginMode.Cross });
 			list.Add (new RollingLoop.PolicySpec { Name = $"{riskAware.Name} Isolated", Policy = riskAware, Margin = MarginMode.Isolated });
 
-			// ультра-безопасная
-			var ultraSafe = new LeveragePolicies.UltraSafePolicy ();
+			var ultraSafe = new LeveragePolicies.UltraSafeLeveragePolicy (
+				name: "ultra_safe",
+				leverage: UltraSafeLev);
+
 			list.Add (new RollingLoop.PolicySpec { Name = $"{ultraSafe.Name} Cross", Policy = ultraSafe, Margin = MarginMode.Cross });
 			list.Add (new RollingLoop.PolicySpec { Name = $"{ultraSafe.Name} Isolated", Policy = ultraSafe, Margin = MarginMode.Isolated });
 

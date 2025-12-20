@@ -111,24 +111,44 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
 
 			return new TrainOosSplit<T> (train, oos, excluded);
 			}
+
+		public TrainOosSplitStrict<T> SplitStrict<T> (
+			IReadOnlyList<T> items,
+			Func<T, DateTime> entryUtcSelector,
+			string tag )
+			{
+			if (items == null) throw new ArgumentNullException (nameof (items));
+			if (entryUtcSelector == null) throw new ArgumentNullException (nameof (entryUtcSelector));
+			if (string.IsNullOrWhiteSpace (tag))
+				throw new ArgumentException ("tag must be non-empty.", nameof (tag));
+
+			var split = Split (items, entryUtcSelector);
+
+			if (split.Excluded.Count > 0)
+				{
+				var sample = split.Excluded
+					.Take (Math.Min (10, split.Excluded.Count))
+					.Select (x => entryUtcSelector (x).ToString ("O", CultureInfo.InvariantCulture));
+
+				throw new InvalidOperationException (
+					$"[train-boundary:{tag}] Found excluded items (baseline-exit undefined). " +
+					$"count={split.Excluded.Count}. sample=[{string.Join (", ", sample)}].");
+				}
+
+			var trainOnly = new TrainOnly<T> (split.Train, _trainUntilUtc, tag);
+			return new TrainOosSplitStrict<T> (trainOnly, split.Oos);
+			}
 		}
 
-	public sealed class TrainOosSplit<T>
+	public sealed class TrainOosSplit<T> ( List<T> train, List<T> oos, List<T> excluded )
 		{
 		/// <summary>
 		/// Списки отдаются как IReadOnlyList, но без AsReadOnly(),
 		/// чтобы вызывающий код мог избежать лишних копий (например, через "as List&lt;T&gt;").
 		/// Инвариант: Split() возвращает свежие списки, которые не шарятся между компонентами.
 		/// </summary>
-		public IReadOnlyList<T> Train { get; }
-		public IReadOnlyList<T> Oos { get; }
-		public IReadOnlyList<T> Excluded { get; }
-
-		public TrainOosSplit ( List<T> train, List<T> oos, List<T> excluded )
-			{
-			Train = train ?? throw new ArgumentNullException (nameof (train));
-			Oos = oos ?? throw new ArgumentNullException (nameof (oos));
-			Excluded = excluded ?? throw new ArgumentNullException (nameof (excluded));
-			}
+		public IReadOnlyList<T> Train { get; } = train ?? throw new ArgumentNullException (nameof (train));
+		public IReadOnlyList<T> Oos { get; } = oos ?? throw new ArgumentNullException (nameof (oos));
+		public IReadOnlyList<T> Excluded { get; } = excluded ?? throw new ArgumentNullException (nameof (excluded));
 		}
 	}

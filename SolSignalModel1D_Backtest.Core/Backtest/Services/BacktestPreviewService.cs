@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -34,8 +35,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest.Services
 		/// Конфигурация бэктеста (SL/TP + политики плеча/маржи).
 		/// </param>
 		/// <returns>BacktestSummary, из которого потом строится ReportDocument/DTO.</returns>
-		public BacktestSummary RunPreview(
-			IReadOnlyList<BacktestRecord> mornings,
+		public BacktestSummary RunPreview (
+			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			BacktestConfig config)

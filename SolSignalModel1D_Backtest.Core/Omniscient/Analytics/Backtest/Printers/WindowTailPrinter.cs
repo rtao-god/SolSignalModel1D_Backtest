@@ -1,23 +1,22 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
 	/// <summary>
 	/// Печатает “последний день каждого окна” по схеме блоков: берём takeDays дней, затем пропускаем skipDays.
-	/// Для каждого такого окна печатает:
-	/// - заголовок блока (№ и даты);
-	/// - шапку дня (pred/fact/micro/entry/maxH/minL/close/minMove/причина + Path-based поля);
-	/// - построчно сделки всех политик в этот день.
 	/// </summary>
 	public static class WindowTailPrinter
 		{
 		public static void PrintBlockTails (
-			IReadOnlyList<BacktestRecord> mornings,
+			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IEnumerable<BacktestPolicyResult> policyResults,
 			int takeDays = 20,
@@ -30,8 +29,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			if (takeDays <= 0) return;
 			if (mornings == null || mornings.Count == 0) return;
 
-			// быстрая мапа дата → BacktestRecord
-			var byDate = mornings.ToDictionary (r => r.ToCausalDateUtc(), r => r);
+			// Быстрая мапа: дата → BacktestRecord (а не truth-строка).
+			var byDate = recs.ToDictionary (r => r.ToCausalDateUtc (), r => r);
 
 			ConsoleStyler.WriteHeader ($"=== {title}: {takeDays} → {skipDays} ===");
 
@@ -45,32 +44,25 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				if (start >= endTake) break;
 
 				var block = recs.GetRange (start, endTake - start);
-				var lastRec = block[^1]; // последний день окна = последний из взятых записей
+				var lastRec = block[^1];
 
 				blockIdx++;
-				var blockStartDate = block.First ().DateUtc.ToCausalDateUtc();
-				var blockEndDate = lastRec.DateUtc.ToCausalDateUtc();
+				var blockStartDate = block.First ().DateUtc.ToCausalDateUtc ();
+				var blockEndDate = lastRec.DateUtc.ToCausalDateUtc ();
 
-				// ищем соответствующий BacktestRecord
-				byDate.TryGetValue (lastRec.DateUtc, out var dayRow);
+				byDate.TryGetValue (lastRec.ToCausalDateUtc (), out var dayRec);
 
-				// Заголовок блока
-				ConsoleStyler.WriteHeader ($"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {lastRec.DateUtc:yyyy-MM-dd} ---");
+				ConsoleStyler.WriteHeader (
+					$"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {lastRec.DateUtc:yyyy-MM-dd} ---");
 
-				// Шапка дня (включая Path-based поля, если есть BacktestRecord)
-				PrintDayHead (dayRow, lastRec);
-
-				// Сделки всех политик за этот день
+				PrintDayHead (dayRec, lastRec);
 				PrintPolicyTradesForDay (lastRec.DateUtc, pol);
 
-				// Шаг к следующему окну: пропускаем skipDays
 				i = endTake + skipDays;
 				}
 
 			Console.WriteLine ();
 			}
-
-		// ===== helpers =====
 
 		private static void PrintDayHead ( BacktestRecord? row, BacktestRecord r )
 			{
@@ -85,7 +77,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			t.AddRow ("close24", r.Close24.ToString ("0.0000"));
 			t.AddRow ("minMove", (r.MinMove * 100.0).ToString ("0.00") + "%");
 
-			// Path-based блок: если BacktestRecord найден
 			if (row != null)
 				{
 				t.AddRow ("path dir", PathDirToStr (row.Forward.PathFirstPassDir));
@@ -114,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			foreach (var pr in policyResults.OrderBy (x => x.PolicyName))
 				{
 				var dayTrades = pr.Trades?
-					.Where (tr => tr.DateUtc.ToCausalDateUtc() == dayUtc.ToCausalDateUtc())
+					.Where (tr => tr.DateUtc.ToCausalDateUtc () == dayUtc.ToCausalDateUtc ())
 					.OrderBy (tr => tr.EntryTimeUtc)
 					.ToList () ?? new List<PnLTrade> ();
 

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 using SolSignalModel1D_Backtest.Core.Utils;
 using System;
@@ -10,62 +10,61 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 	public static class DailyTrainingDataBuilder
 		{
 		public static void Build (
-			List<BacktestRecord> trainRows,
+			IReadOnlyList<LabeledCausalRow> trainRows,
 			bool balanceMove,
 			bool balanceDir,
 			double balanceTargetFrac,
-			out List<BacktestRecord> moveTrainRows,
-			out List<BacktestRecord> dirNormalRows,
-			out List<BacktestRecord> dirDownRows )
+			out List<LabeledCausalRow> moveTrainRows,
+			out List<LabeledCausalRow> dirNormalRows,
+			out List<LabeledCausalRow> dirDownRows )
 			{
 			if (trainRows == null) throw new ArgumentNullException (nameof (trainRows));
 			if (trainRows.Count == 0)
 				throw new InvalidOperationException ("[daily-train] trainRows is empty.");
 
-			// Контракт: trainRows уже отсортирован по Date и в UTC.
-			SeriesGuards.EnsureStrictlyAscendingUtc (trainRows, r => r.ToCausalDateUtc (), "daily-train.trainRows");
+			// Инвариант: вход отсортирован по UTC-дате строго по возрастанию.
+			SeriesGuards.EnsureStrictlyAscendingUtc (trainRows, r => r.Causal.DateUtc, "daily-train.trainRows");
 
-			// ===== 1. Move-датасет: все дни =====
+			// ===== 1) Move: все дни =====
 			if (balanceMove)
 				{
 				moveTrainRows = MlTrainingUtils.OversampleBinary (
 					src: trainRows,
-					isPositive: r => r.Forward.TrueLabel != 1,
-					dateSelector: r => r.ToCausalDateUtc (),
+					isPositive: r => r.TrueLabel != 1,
+					dateSelector: r => r.Causal.DateUtc,
 					targetFrac: balanceTargetFrac);
 				}
 			else
 				{
-				// Без копии: дальше всё равно будет "freeze" в DailyDatasetBuilder.
-				moveTrainRows = trainRows;
+				// Контракт метода требует List<T>. Без лишней копии только если вход уже List<T>.
+				moveTrainRows = trainRows as List<LabeledCausalRow> ?? trainRows.ToList ();
 				}
 
-			// ===== 2. Dir-датасеты: только дни с фактическим ходом =====
-			// Порядок сохраняется фильтрацией (trainRows уже отсортирован).
+			// ===== 2) Dir: только не-flat дни (up/down) =====
 			var moveRows = trainRows
-				.Where (r => r.Forward.TrueLabel == 0 || r.Forward.TrueLabel == 2)
+				.Where (r => r.TrueLabel == 0 || r.TrueLabel == 2)
 				.ToList ();
 
 			dirNormalRows = moveRows
-				.Where (r => !r.RegimeDown)
+				.Where (r => !r.Causal.RegimeDown)
 				.ToList ();
 
 			dirDownRows = moveRows
-				.Where (r => r.RegimeDown)
+				.Where (r => r.Causal.RegimeDown)
 				.ToList ();
 
 			if (balanceDir)
 				{
 				dirNormalRows = MlTrainingUtils.OversampleBinary (
 					src: dirNormalRows,
-					isPositive: r => r.Forward.TrueLabel == 2,
-					dateSelector: r => r.ToCausalDateUtc (),
+					isPositive: r => r.TrueLabel == 2,
+					dateSelector: r => r.Causal.DateUtc,
 					targetFrac: balanceTargetFrac);
 
 				dirDownRows = MlTrainingUtils.OversampleBinary (
 					src: dirDownRows,
-					isPositive: r => r.Forward.TrueLabel == 2,
-					dateSelector: r => r.ToCausalDateUtc (),
+					isPositive: r => r.TrueLabel == 2,
+					dateSelector: r => r.Causal.DateUtc,
 					targetFrac: balanceTargetFrac);
 				}
 			}

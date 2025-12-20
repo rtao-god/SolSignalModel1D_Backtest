@@ -311,17 +311,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 				if (globalDead) break;
 
 				// ===== DELAYED =====
-				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedEntryExecuted == true)
+				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedExecution is { } exec)
 					{
 					bool dLong = goLong;
 
-					double dEntry = rec.DelayedEntryPrice;
-					if (dEntry <= 0.0)
-						throw new InvalidOperationException ($"[pnl] DelayedEntryPrice must be > 0 for {dayStart:yyyy-MM-dd}.");
+					double dEntry = exec.EntryPrice;
 
-					DateTime delayedEntryTime = rec.DelayedEntryExecutedAtUtc ?? dayStart;
+					DateTime delayedEntryTime = exec.ExecutedAtUtc;
 					if (delayedEntryTime < dayStart || delayedEntryTime >= dayEnd)
-						throw new InvalidOperationException ($"[pnl] DelayedEntryExecutedAtUtc={delayedEntryTime:O} is outside window {dayStart:O}..{dayEnd:O}.");
+						throw new InvalidOperationException ($"[pnl] Delayed executedAtUtc={delayedEntryTime:O} is outside window {dayStart:O}..{dayEnd:O}.");
 
 					int delayedStartIndex = FindFirstMinuteIndexAtOrAfter (dayMinutes, delayedEntryTime);
 					if (delayedStartIndex < 0)
@@ -332,7 +330,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					double dExit;
 					DateTime delayedExitTime;
 
-					var delayedRes = (DelayedIntradayResult) rec.DelayedIntradayResult;
+					var delayedRes = exec.IntradayResult;
 
 					// Если слой сказал TpFirst/SlFirst — обязаны найти реальное пересечение в 1m.
 					if (delayedRes == DelayedIntradayResult.TpFirst)

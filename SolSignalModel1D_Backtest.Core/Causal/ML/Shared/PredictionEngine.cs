@@ -26,10 +26,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
 		// Кешируем prediction-engine для производительности (создание на каждый вызов дорого).
 		// Важно: не потокобезопасны => защищаем lock'ом весь PredictInternal.
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _moveEng;
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirEngNormal;
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirEngDown;
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput>? _microEng;
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput>? _moveEng;
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirEngNormal;
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput>? _dirEngDown;
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput>? _microEng;
 
 		public static bool DebugAllowDisabledModels { get; set; } = false;
 		public static bool DebugTreatMissingMoveAsFlat { get; set; } = false;
@@ -431,7 +431,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 				throw new InvalidOperationException ($"{prefix}: {p}. Expected finite value in [0..1].");
 			}
 
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateMoveEngineOrThrow ( MLContext ml )
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateMoveEngineOrThrow ( MLContext ml )
 			{
 			if (_bundle.MoveModel == null)
 				throw new InvalidOperationException ("[PredictionEngine] MoveModel is null");
@@ -442,7 +442,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			return _moveEng;
 			}
 
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateDirEngineOrThrow ( MLContext ml, bool regimeDown )
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateDirEngineOrThrow ( MLContext ml, bool regimeDown )
 			{
 			if (regimeDown && _bundle.DirModelDown != null)
 				{
@@ -460,7 +460,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 			return _dirEngNormal;
 			}
 
-		private Microsoft.ML.PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateMicroEngineOrThrow ( MLContext ml )
+		private PredictionEngine<MlSampleBinary, MlBinaryOutput> GetOrCreateMicroEngineOrThrow ( MLContext ml )
 			{
 			if (_bundle.MicroFlatModel == null)
 				throw new InvalidOperationException ("[PredictionEngine] MicroFlatModel is null");

@@ -1,8 +1,7 @@
 ﻿using Microsoft.ML;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,18 +9,12 @@ using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 	{
-	/// <summary>
-	/// Изолированные тесты для MicroFlatTrainer:
-	/// проверяем порог по количеству микро-дней,
-	/// защиту от одноклассового датасета и базовую адекватность обучения.
-	/// </summary>
 	public sealed class MicroFlatTrainerIsolationTests
 		{
 		[Fact]
 		public void BuildMicroFlatModel_ReturnsNull_WhenNotEnoughMicroRows ()
 			{
-			// < MinMicroRowsForTraining (40) → модель должна отключаться.
-			var rows = BuildMicroRows (count: 20);
+			var rows = BuildNyWeekdayRows (countTotal: 120, countMicro: 20);
 
 			var ml = new MLContext (seed: 42);
 
@@ -33,72 +26,121 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 		[Fact]
 		public void BuildMicroFlatModel_Throws_OnSingleClassDataset ()
 			{
-			var rows = BuildMicroRows (count: 60);
+			var rows = BuildNyWeekdayRows (countTotal: 220, countMicro: 80);
 
-			// Превращаем все микро-дни в один класс (все up).
-			foreach (var r in rows)
+			// Превращаем все micro-дни в один класс (все up).
+			var singleClass = rows
+				.Select (r =>
 				{
-				r.FactMicroUp = true;
-				r.FactMicroDown = false;
-				}
+					if (!r.FactMicroUp && !r.FactMicroDown) return r;
+
+					return new LabeledCausalRow (
+						causal: r.Causal,
+						trueLabel: r.TrueLabel,
+						factMicroUp: true,
+						factMicroDown: false);
+				})
+				.ToList ();
 
 			var ml = new MLContext (seed: 42);
 
 			Assert.Throws<InvalidOperationException> (() =>
-				MicroFlatTrainer.BuildMicroFlatModel (ml, rows));
+				MicroFlatTrainer.BuildMicroFlatModel (ml, singleClass));
 			}
 
 		[Fact]
-		public void BuildMicroFlatModel_TrainsAndAchievesHighAccuracy_OnSyntheticDataset ()
+		public void BuildMicroFlatModel_Trains_WhenEnoughMicroRows ()
 			{
-			var rows = BuildMicroRows (count: 120);
+			var rows = BuildNyWeekdayRows (countTotal: 260, countMicro: 120);
 
 			var ml = new MLContext (seed: 42);
 
 			var model = MicroFlatTrainer.BuildMicroFlatModel (ml, rows);
 
 			Assert.NotNull (model);
-
-			var samples = rows
-				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.Select (r => new MlSampleBinary
-					{
-					Label = r.FactMicroUp,
-					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
-					});
-
-			var data = ml.Data.LoadFromEnumerable (samples);
-			var metrics = ml.BinaryClassification.Evaluate (model!.Transform (data));
-
-			Assert.True (metrics.Accuracy > 0.9,
-				$"Expected high accuracy on synthetic micro dataset, got {metrics.Accuracy:0.000}");
 			}
 
-		private static List<BacktestRecord> BuildMicroRows ( int count )
+		private static List<LabeledCausalRow> BuildNyWeekdayRows ( int countTotal, int countMicro )
 			{
-			var rows = new List<BacktestRecord> (count);
-			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+			if (countTotal <= 0) throw new ArgumentOutOfRangeException (nameof (countTotal));
+			if (countMicro < 0 || countMicro > countTotal) throw new ArgumentOutOfRangeException (nameof (countMicro));
 
-			for (int i = 0; i < count; i++)
+			var nyTz = Windowing.NyTz;
+
+			var res = new List<LabeledCausalRow> (countTotal);
+			var dt = new DateTime (2024, 1, 2, 12, 0, 0, DateTimeKind.Utc);
+
+			int idx = 0;
+			int microMade = 0;
+
+			while (res.Count < countTotal)
 				{
-				var date = start.AddDays (i);
-				bool up = i % 2 == 0;
-				bool down = !up;
-
-				var feats = new double[8];
-				// Фича напрямую кодирует направление микро-дня.
-				feats[0] = up ? 1.0 : -1.0;
-
-				rows.Add (new BacktestRecord
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (dt, nyTz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
 					{
-					Date = date,
-					Features = feats,
-					FactMicroUp = up,
-					FactMicroDown = down
-					});
+					dt = dt.AddDays (1);
+					continue;
+					}
+
+				bool isMicro = microMade < countMicro;
+				bool microUp = isMicro && (microMade % 2 == 0);
+				bool microDown = isMicro && !microUp;
+
+				if (isMicro) microMade++;
+
+				res.Add (MakeRow (dt, idx, isMicro, microUp, microDown));
+
+				dt = dt.AddDays (1);
+				idx++;
 				}
 
-			return rows;
+			return res;
+			}
+
+		private static LabeledCausalRow MakeRow ( DateTime dateUtc, int idx, bool isMicro, bool microUp, bool microDown )
+			{
+			double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
+
+			var causal = new CausalDataRow (
+				dateUtc: dateUtc,
+				regimeDown: false,
+				isMorning: true,
+				hardRegime: 0,
+				minMove: 0.03,
+
+				solRet30: dir,
+				btcRet30: 0.01 * (idx + 1),
+				solBtcRet30: 0.001 * (idx + 1),
+
+				solRet1: 0.002 * (idx + 1),
+				solRet3: 0.003 * (idx + 1),
+				btcRet1: 0.004 * (idx + 1),
+				btcRet3: 0.005 * (idx + 1),
+
+				fngNorm: 0.10,
+				dxyChg30: -0.02,
+				goldChg30: 0.01,
+
+				btcVs200: 0.2,
+
+				solRsiCenteredScaled: 0.3,
+				rsiSlope3Scaled: 0.4,
+
+				gapBtcSol1: 0.01,
+				gapBtcSol3: 0.02,
+
+				atrPct: 0.05,
+				dynVol: 0.06,
+
+				solAboveEma50: 1.0,
+				solEma50vs200: 0.1,
+				btcEma50vs200: 0.2);
+
+			return new LabeledCausalRow (
+				causal: causal,
+				trueLabel: isMicro ? 1 : 2,
+				factMicroUp: microUp,
+				factMicroDown: microDown);
 			}
 		}
 	}

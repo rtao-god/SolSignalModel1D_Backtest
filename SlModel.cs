@@ -13,23 +13,22 @@ namespace SolSignalModel1D_Backtest
 	public partial class Program
 		{
 		/// <summary>
-		/// Тренируем SL-модель на каузальном оффлайн-датасете (SlOfflineBuilder)
-		/// и проставляем SlProb / SlHighDecision / Prob*_Total в CausalPredictionRecord.
-		/// Любые проблемы с данными считаем фатальными и пробрасываем исключения.
-		/// Дополнительно в одном прогоне считаем train-метрики SL-модели
-		/// для нескольких порогов MinMove (0.025/0.030/0.035), чтобы видеть,
-		/// как выбор порога "сильного" дня влияет на качество.
+		/// Тренируем SL-модель на train-only наборе (TrainOnly&lt;BacktestRecord&gt;)
+		/// и применяем её ко всем records (runtime overlay).
+		/// Инвариант: TrainOnly создан через TrainBoundary.SplitStrict, значит:
+		/// - weekend/excluded невозможны;
+		/// - OOS физически не может попасть в обучение.
 		/// </summary>
 		private static void TrainAndApplySlModelOffline (
-			IReadOnlyList<BacktestRecord> allRows,
+			TrainOnly<BacktestRecord> trainRecords,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1h> sol1h,
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<Candle6h> solAll6h )
 			{
-			// ===== базовые проверки входа =====
-			if (allRows == null || allRows.Count == 0)
-				throw new InvalidOperationException ("[sl-offline] allRows is null or empty – SL-model cannot be trained.");
+			if (trainRecords == null) throw new ArgumentNullException (nameof (trainRecords));
+			if (trainRecords.Count == 0)
+				throw new InvalidOperationException ("[sl-offline] trainRecords is empty – SL-model cannot be trained.");
 
 			if (records == null)
 				throw new ArgumentNullException (nameof (records), "[sl-offline] records is null.");
@@ -43,92 +42,46 @@ namespace SolSignalModel1D_Backtest
 			if (sol1h == null || sol1h.Count == 0)
 				throw new InvalidOperationException ("[sl-offline] sol1h is null or empty – 1h candles are required for SL-model.");
 
-			if (_trainUntilUtc == default)
-				{
-				throw new InvalidOperationException (
-					"[sl-offline] _trainUntilUtc is not initialized. " +
-					"CreatePredictionEngineOrFallback must be called before TrainAndApplySlModelOffline.");
-				}
-
-			// Кандидаты порогов MinMove для разделения strong/weak-сигналов.
-			// Все значения в долях (0.03 = 3%).
 			double[] strongMinMoveThresholds = { 0.025, 0.030, 0.035 };
-
-			// Основной порог, который будет использоваться в runtime (SlProb / SlHighDecision).
 			const double MainStrongMinMoveThreshold = 0.030;
 
-			// ===== 1. Каузальный train-сабсет для SL-модели =====
-			// Берём только те BacktestRecord, которые лежат в train-периоде дневной модели.
-			// Это убирает утечку: OOS-даты не попадают в обучающий датасет SL.
-			// _trainUntilUtc по контракту задан в терминах baseline-exit, поэтому сравнение entry-даты (r.ToCausalDateUtc() <= _trainUntilUtc)
-			// некорректно и может вернуть boundary leakage. Здесь режем строго через TrainBoundary.
-			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
-
-			// Стабилизируем порядок до сплита: одинаковый вход => одинаковый результат.
-			var orderedAllRows = allRows
-				.OrderBy (r => r.ToCausalDateUtc())
-				.ToList ();
-
-			var split = boundary.Split (orderedAllRows, r => r.ToCausalDateUtc());
-
-			// По требованию: ничего не игнорировать.
-			if (split.Excluded.Count > 0)
-				{
-				throw new InvalidOperationException (
-					$"[sl-offline] Found excluded rows (baseline-exit undefined). count={split.Excluded.Count}.");
-				}
-
-			// В эту функцию ожидается приход train-only rows (caller уже режет через TrainBoundary).
-			// Если сюда попал OOS-хвост — это нарушение пайплайна, лучше падать, чем обучить SL на OOS.
-			if (split.Oos.Count > 0)
-				{
-				throw new InvalidOperationException (
-					$"[sl-offline] OOS rows passed into SL training. oos={split.Oos.Count}. " +
-					"SL training must be strictly train-only by baseline-exit contract.");
-				}
-
-			var slTrainRows = split.Train;
-
-			if (slTrainRows.Count < 50)
-				{
-				// Если train-сабсет слишком маленький — логируем предупреждение
-				// и осознанно используем всю историю (train==test для SL).
-				Console.WriteLine (
-					$"[sl-offline] WARNING: slTrainRows too small ({slTrainRows.Count}), " +
-					"training SL-model on full allRows (train==test for SL).");
-
-				slTrainRows = allRows
-					.OrderBy (r => r.ToCausalDateUtc())
-					.ToList ();
-				}
-
-			// Логируем период train-части для SL.
-			var slTrainMin = slTrainRows.Min (r => r.ToCausalDateUtc());
-			var slTrainMax = slTrainRows.Max (r => r.ToCausalDateUtc());
 			Console.WriteLine (
-				$"[sl-offline] train rows = {slTrainRows.Count}, " +
-				$"period = {slTrainMin:yyyy-MM-dd}..{slTrainMax:yyyy-MM-dd}, " +
-				$"trainUntilUtc = {_trainUntilUtc:yyyy-MM-dd}");
+				$"[sl-offline] trainRecords={trainRecords.Count}, tag='{trainRecords.Tag}', trainUntilUtc={trainRecords.TrainUntilUtc:O}");
 
-			// Словарь 6h для оффлайн-лейблов (кто первый: SL/TP)
+			if (records.Count > 0)
+				{
+				var inMin = records.Min (r => r.DateUtc);
+				var inMax = records.Max (r => r.DateUtc);
+				Console.WriteLine ($"[sl-offline] input records period = {inMin:yyyy-MM-dd}..{inMax:yyyy-MM-dd}, count={records.Count}");
+				}
+
+			var slTrainMin = trainRecords.Min (r => r.DateUtc);
+			var slTrainMax = trainRecords.Max (r => r.DateUtc);
+			Console.WriteLine (
+				$"[sl-offline] train period = {slTrainMin:yyyy-MM-dd}..{slTrainMax:yyyy-MM-dd}");
+
+			// Словарь 6h для оффлайн-лейблов.
 			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
 
-			// ===== 2. Построение SL-датасетов для разных порогов MinMove =====
 			var samplesByThreshold = new Dictionary<double, List<SlHitSample>> ();
 
 			foreach (var thr in strongMinMoveThresholds)
 				{
-				// Селектор "сильный/слабый" для данного порога:
-				//   - мягкий пол 0.02;
-				//   - логика strong/weak в SlStrongUtils.
 				Func<BacktestRecord, bool> strongSelector = r =>
 				{
-					double mm = r.MinMove > 0 ? r.MinMove : 0.02;
+					var mm = r.MinMove;
+
+					if (double.IsNaN (mm) || double.IsInfinity (mm) || mm <= 0)
+						{
+						throw new InvalidOperationException (
+							$"[sl-offline] Invalid MinMove in record: date={r.DateUtc:O}, MinMove={mm}.");
+						}
+
 					return SlStrongUtils.IsStrongByMinMove (mm, r.RegimeDown, thr);
 				};
 
 				var samples = SlOfflineBuilder.Build (
-					rows: slTrainRows,
+					rows: trainRecords,
 					sol1h: sol1h,
 					sol1m: sol1m,
 					sol6hDict: sol6hDict,
@@ -139,7 +92,7 @@ namespace SolSignalModel1D_Backtest
 
 				samplesByThreshold[thr] = samples;
 
-				int slCountThr = samples.Count (s => s.Forward.TrueLabel);
+				int slCountThr = samples.Count (s => s.Label);
 				int tpCountThr = samples.Count - slCountThr;
 
 				Console.WriteLine (
@@ -155,23 +108,19 @@ namespace SolSignalModel1D_Backtest
 			if (slSamples.Count < 20)
 				throw new InvalidOperationException ($"[sl-offline] too few samples for SL-model: {slSamples.Count} < 20.");
 
-			// ===== 3. Оффлайн-тренировка основной SL-модели (для runtime) =====
 			var trainer = new SlFirstTrainer ();
-			var asOf = slTrainRows.Max (r => r.ToCausalDateUtc());
+			var asOf = trainRecords.Max (r => r.DateUtc);
 			var slModel = trainer.Train (slSamples, asOf);
 			var slEngine = trainer.CreateEngine (slModel);
 
-			// ===== 3a. Диагностика SL-модели (PFI + direction) на train-сабсете =====
 			SlModelDiagnostics.LogFeatureImportanceOnSlModel (
 				samples: slSamples,
 				datasetTag: $"sl-train thr={MainStrongMinMoveThreshold:0.000}",
 				modelOverride: slModel,
 				featureNames: null);
 
-			// Порог "HIGH" риска (positive класс = SL-first)
 			const float SlRiskThreshold = 0.55f;
 
-			// ===== 3.1. Санити-чек: train-метрики SL-модели для разных порогов MinMove =====
 			foreach (var kv in samplesByThreshold.OrderBy (kv => kv.Key))
 				{
 				double thr = kv.Key;
@@ -183,8 +132,6 @@ namespace SolSignalModel1D_Backtest
 					continue;
 					}
 
-				// Для основного порога используем уже обученную модель,
-				// для остальных — обучаем временные модели на том же asOf.
 				PredictionEngine<SlHitSample, SlHitPrediction> engineForThisThr;
 
 				if (Math.Abs (thr - MainStrongMinMoveThreshold) < 1e-9)
@@ -203,8 +150,6 @@ namespace SolSignalModel1D_Backtest
 					SlRiskThreshold,
 					tag: $"thr={thr:0.000}");
 				}
-
-			// ===== 4. Runtime-применение SL к CausalPredictionRecord через BacktestRecord =====
 
 			int scored = 0;
 			int predHighDays = 0;
@@ -225,19 +170,20 @@ namespace SolSignalModel1D_Backtest
 
 				var causal = rec.Causal;
 
-				// Направление по дневной модели (с учётом микро-слоя).
 				bool goLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
 				bool goShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
 
 				if (!goLong && !goShort)
-					{
-					// Нет торгового сигнала – SL не считаем и Prob*_Total не трогаем.
 					continue;
+
+				var dayMinMove = causal.MinMove;
+
+				if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0)
+					{
+					throw new InvalidOperationException (
+						$"[sl-runtime] Invalid MinMove in causal record: date={rec.DateUtc:O}, MinMove={dayMinMove}.");
 					}
 
-				// Сильный/слабый сигнал определяется по MinMove,
-				// и используется и в оффлайн-датасете, и в runtime.
-				double dayMinMove = causal.MinMove > 0 ? causal.MinMove : 0.02;
 				bool strong = SlStrongUtils.IsStrongByMinMove (dayMinMove, causal.RegimeDown, MainStrongMinMoveThreshold);
 
 				double entryPrice = rec.Entry;
@@ -247,7 +193,6 @@ namespace SolSignalModel1D_Backtest
 						$"[sl-runtime] Non-positive entry price {entryPrice} for date {rec.DateUtc:O}.");
 					}
 
-				// Фичи для SL-модели строятся из 1h-контекста вокруг entryUtc.
 				var slFeats = SlFeatureBuilder.Build (
 					entryUtc: rec.DateUtc,
 					goLong: goLong,
@@ -259,7 +204,7 @@ namespace SolSignalModel1D_Backtest
 
 				var slPred = slEngine.Predict (new SlHitSample
 					{
-					Label = false,          // в рантайме не используется
+					Label = false,
 					Features = slFeats,
 					EntryUtc = rec.DateUtc
 					});
@@ -271,7 +216,6 @@ namespace SolSignalModel1D_Backtest
 				causal.SlHighDecision = predHigh;
 				scored++;
 
-				// Применяем SL-оверлей к Day+Micro-вероятностям → Total.
 				SlOverlayApplier.Apply (
 					causal,
 					slProb: p,
@@ -281,7 +225,6 @@ namespace SolSignalModel1D_Backtest
 
 				overlayApplied++;
 
-				// Агрегация статистики по вероятностям.
 				sumProb += p;
 				probCount++;
 				if (p < minProb) minProb = p;
@@ -289,14 +232,12 @@ namespace SolSignalModel1D_Backtest
 				if (predHigh) predHighDays++;
 				}
 
-			// Логируем период records, чтобы понимать, какие даты реально проверяются.
 			if (records.Count > 0)
 				{
 				var recMin = records.Min (r => r.DateUtc);
 				var recMax = records.Max (r => r.DateUtc);
 				Console.WriteLine (
-					$"[sl-runtime] records period = {recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}, " +
-					$"count = {records.Count}");
+					$"[sl-runtime] records period = {recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}, count = {records.Count}");
 				}
 			else
 				{
@@ -308,8 +249,7 @@ namespace SolSignalModel1D_Backtest
 				double avgProb = sumProb / probCount;
 				Console.WriteLine (
 					$"[sl-runtime] scored days = {scored}/{records.Count}, " +
-					$"overlayApplied={overlayApplied}, " +
-					$"predHigh={predHighDays}, " +
+					$"overlayApplied={overlayApplied}, predHigh={predHighDays}, " +
 					$"prob range = [{minProb:0.000}..{maxProb:0.000}], avg={avgProb:0.000}, " +
 					$"thr={SlRiskThreshold:0.00}, strongMinMove={MainStrongMinMoveThreshold:P1}");
 				}
@@ -321,25 +261,21 @@ namespace SolSignalModel1D_Backtest
 				}
 			}
 
-		/// <summary>
-		/// Подробный лог train-метрик SL-модели для заданного порога MinMove.
-		/// Используется только для диагностики, не влияет на runtime.
-		/// </summary>
 		private static void DebugSlTrainMetrics (
 			List<SlHitSample> samples,
 			PredictionEngine<SlHitSample, SlHitPrediction> engine,
 			float riskThreshold,
 			string tag )
 			{
-			int trainPos = 0;      // реальных SL-дней в оффлайн-семплах
-			int trainNeg = 0;      // TP-дней
-			int trainPredHigh = 0; // сколько раз модель сказала "HIGH"
-			int trainTp = 0;       // HIGH & реально SL
-			int trainFp = 0;       // HIGH & реально TP
+			int trainPos = 0;
+			int trainNeg = 0;
+			int trainPredHigh = 0;
+			int trainTp = 0;
+			int trainFp = 0;
 
 			foreach (var s in samples)
 				{
-				if (s.Forward.TrueLabel) trainPos++;
+				if (s.Label) trainPos++;
 				else trainNeg++;
 
 				var pred = engine.Predict (s);
@@ -348,7 +284,7 @@ namespace SolSignalModel1D_Backtest
 				if (!high) continue;
 
 				trainPredHigh++;
-				if (s.Forward.TrueLabel) trainTp++;
+				if (s.Label) trainTp++;
 				else trainFp++;
 				}
 

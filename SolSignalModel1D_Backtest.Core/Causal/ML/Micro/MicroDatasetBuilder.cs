@@ -1,7 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,13 +10,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 	{
 	public sealed class MicroDataset
 		{
-		public IReadOnlyList<BacktestRecord> TrainRows { get; }
-		public IReadOnlyList<BacktestRecord> MicroRows { get; }
+		public IReadOnlyList<LabeledCausalRow> TrainRows { get; }
+		public IReadOnlyList<LabeledCausalRow> MicroRows { get; }
 		public DateTime TrainUntilUtc { get; }
 
 		public MicroDataset (
-			IReadOnlyList<BacktestRecord> trainRows,
-			IReadOnlyList<BacktestRecord> microRows,
+			IReadOnlyList<LabeledCausalRow> trainRows,
+			IReadOnlyList<LabeledCausalRow> microRows,
 			DateTime trainUntilUtc )
 			{
 			TrainRows = trainRows ?? throw new ArgumentNullException (nameof (trainRows));
@@ -34,7 +34,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 	public static class MicroDatasetBuilder
 		{
 		public static MicroDataset Build (
-			IReadOnlyList<BacktestRecord> allRows,
+			IReadOnlyList<LabeledCausalRow> allRows,
 			DateTime trainUntilUtc )
 			{
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
@@ -46,18 +46,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
 
 			// Контракт: порядок уже стабилен (бутстрап/RowBuilder).
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.ToCausalDateUtc(), "micro-dataset.allRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.ToCausalDateUtc (), "micro-dataset.allRows");
 
-			var ordered = allRows as List<BacktestRecord> ?? allRows.ToList ();
+			var ordered = allRows as List<LabeledCausalRow> ?? allRows.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
-			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
+			var split = boundary.Split (ordered, r => r.ToCausalDateUtc ());
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.ToCausalDateUtc().ToString ("O"));
+					.Select (r => r.ToCausalDateUtc ().ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[micro-dataset] Found excluded days (baseline-exit undefined). " +
@@ -71,7 +71,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
 				.ToList ();
 
-			var trainFrozen = (trainRows as List<BacktestRecord> ?? trainRows.ToList ()).ToArray ();
+			// Замораживаем, чтобы дальше по пайплайну никто не мог "случайно" мутировать выборку.
+			var trainFrozen = (trainRows as List<LabeledCausalRow> ?? trainRows.ToList ()).ToArray ();
 			var microFrozen = microRowsList.ToArray ();
 
 			return new MicroDataset (trainFrozen, microFrozen, trainUntilUtc);

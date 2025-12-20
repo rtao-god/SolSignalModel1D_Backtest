@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using SolSignalModel1D_Backtest.Reports;
 
 namespace SolSignalModel1D_Backtest.Api.Endpoints

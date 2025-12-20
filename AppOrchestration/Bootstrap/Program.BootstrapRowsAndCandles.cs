@@ -1,13 +1,16 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Utils;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
-		private static async Task<(List<BacktestRecord> AllRows,
-				List<BacktestRecord> Mornings,
+		private static async Task<(List<LabeledCausalRow> AllRows,
+				List<LabeledCausalRow> Mornings,
 				List<Candle6h> SolAll6h,
 				List<Candle1h> SolAll1h,
 				List<Candle1m> Sol1m)> BootstrapRowsAndCandlesAsync ()
@@ -22,13 +25,13 @@ namespace SolSignalModel1D_Backtest
 			var allRows = rowsBundle.AllRows;
 			var mornings = rowsBundle.Mornings;
 
-			// Контракт: на бутстрапе все временные ряды уже отсортированы и уникальны.
 			SeriesGuards.EnsureStrictlyAscendingUtc (solAll6h, c => c.OpenTimeUtc, "bootstrap.solAll6h");
 			SeriesGuards.EnsureStrictlyAscendingUtc (solAll1h, c => c.OpenTimeUtc, "bootstrap.solAll1h");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "bootstrap.sol1m");
 
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.ToCausalDateUtc(), "bootstrap.allRows");
-			SeriesGuards.EnsureStrictlyAscendingUtc (mornings, r => r.ToCausalDateUtc(), "bootstrap.mornings");
+			// Для дневных строк ключ — их каузальная дата/время.
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Causal.DateUtc, "bootstrap.allRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (mornings, r => r.Causal.DateUtc, "bootstrap.mornings");
 
 			Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
 			if (mornings.Count == 0)

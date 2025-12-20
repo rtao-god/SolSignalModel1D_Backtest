@@ -20,7 +20,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
 		public void Run (
-			IReadOnlyList<BacktestRecord> mornings,
+			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,

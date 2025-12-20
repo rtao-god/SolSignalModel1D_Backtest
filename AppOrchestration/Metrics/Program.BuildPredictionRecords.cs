@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
@@ -12,8 +13,8 @@ namespace SolSignalModel1D_Backtest
 		/// Здесь инкапсулируется выбор PredictionEngine и вычисление forward-метрик.
 		/// </summary>
 		private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsync (
-			List<BacktestRecord> allRows,
-			List<BacktestRecord> mornings,
+			List<LabeledCausalRow> allRows,
+			List<LabeledCausalRow> mornings,
 			List<Candle6h> solAll6h
 		)
 			{

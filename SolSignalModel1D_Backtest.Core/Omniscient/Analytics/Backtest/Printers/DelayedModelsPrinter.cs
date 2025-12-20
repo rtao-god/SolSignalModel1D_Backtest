@@ -32,15 +32,19 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 		private static void AddRow ( TextTable t, string name, List<BacktestRecord> list )
 			{
 			int asked = list.Count;
-			int executed = list.Count (r => r.DelayedEntryExecuted);
-			int tp = list.Count (r => r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst);
-			int sl = list.Count (r => r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst);
+
+			int executed = list.Count (r => r.DelayedExecution is not null);
+
+			int tp = list.Count (r => r.DelayedExecution?.IntradayResult == DelayedIntradayResult.TpFirst);
+			int sl = list.Count (r => r.DelayedExecution?.IntradayResult == DelayedIntradayResult.SlFirst);
 
 			double avgImprov = 0.0;
 			int improvCnt = 0;
+
 			foreach (var r in list)
 				{
-				if (!r.DelayedEntryExecuted)
+				var exec = r.DelayedExecution;
+				if (exec is null)
 					continue;
 
 				bool goLong = r.PredLabel == 2 || r.PredLabel == 1 && r.PredMicroUp;
@@ -49,16 +53,16 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 					continue;
 
 				double baseEntry = r.Entry;
-				double delayedEntry = r.DelayedEntryPrice;
-				double improv;
-				if (goLong)
-					improv = (baseEntry - delayedEntry) / baseEntry;
-				else
-					improv = (delayedEntry - baseEntry) / baseEntry;
+				double delayedEntry = exec.EntryPrice;
+
+				double improv = goLong
+					? (baseEntry - delayedEntry) / baseEntry
+					: (delayedEntry - baseEntry) / baseEntry;
 
 				avgImprov += improv;
 				improvCnt++;
 				}
+
 			if (improvCnt > 0)
 				avgImprov /= improvCnt;
 

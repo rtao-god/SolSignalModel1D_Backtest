@@ -53,7 +53,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
 			// В текущей архитектуре “строки” для проверки — это BacktestRecord:
 			// внутри есть Causal (вектор фич) и Forward (будущие факты).
-			var allRows = ctx.AllRows;
+			var allRows = ctx.Records;
 			var sol1m = ctx.Sol1m;
 			var nyTz = ctx.NyTz;
 

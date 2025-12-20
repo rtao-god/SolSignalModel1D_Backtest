@@ -4,6 +4,7 @@ using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
 using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
@@ -78,7 +79,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 		/// - policy_ratios (Sharpe/Sortino/Calmar по политикам baseline).
 		/// </summary>
 		public static void SaveBacktestReports (
-			IReadOnlyList<BacktestRecord> mornings,
+			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> sol1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,

@@ -1,9 +1,10 @@
-﻿
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Utils;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -14,10 +15,10 @@ namespace SolSignalModel1D_Backtest
 		/// - train-окно до _trainUntilUtc;
 		/// - при наличии OOS-хвоста — PFI по нему с отдельным тегом.
 		/// </summary>
-		private static void RunDailyPfi ( List<BacktestRecord> allRows )
+		private static void RunDailyPfi ( List<LabeledCausalRow> allRows )
 			{
 			var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
-			var split = boundary.Split (allRows, r => r.ToCausalDateUtc());
+			var split = boundary.Split (allRows, r => r.Causal.DateUtc.ToCausalDateUtc ());
 
 			var dailyTrainRows = split.Train;
 			var dailyOosRows = split.Oos;

@@ -1,32 +1,25 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
 	/// <summary>
 	/// Снимок подготовленных данных для бэктеста / превью.
-	/// Этот объект должен собираться тем же пайплайном, что и baseline-бэктест
-	/// (код сейчас живёт в Program.Main + её partial-файлах).
 	/// </summary>
 	public sealed class BacktestDataSnapshot
 		{
 		/// <summary>
 		/// Утренние точки (NY-окна), по которым считаются сигналы и PnL.
-		/// Это тот же набор, который используется в baseline-бэктесте.
 		/// </summary>
-		public IReadOnlyList<BacktestRecord> Mornings { get; init; } = Array.Empty<BacktestRecord> ();
+		public IReadOnlyList<LabeledCausalRow> Mornings { get; init; } = Array.Empty<LabeledCausalRow> ();
 
-		/// <summary>
-		/// PredictionRecord со всеми нужными полями (dir/micro/SL/Delayed и т.п.),
-		/// построенный на основе дневных строк и моделей.
-		/// </summary>
+		/// <summary>Омнисциентные записи (каузал + forward-факты).</summary>
 		public IReadOnlyList<BacktestRecord> Records { get; init; } = Array.Empty<BacktestRecord> ();
 
-		/// <summary>
-		/// 1m-свечи SOL/USDT, которые используются PnL-движком.
-		/// Должны покрывать весь период сигналов в Records/Mornings.
-		/// </summary>
+		/// <summary>1m-свечи, используемые PnL-движком.</summary>
 		public IReadOnlyList<Candle1m> Candles1m { get; init; } = Array.Empty<Candle1m> ();
 		}
 	}

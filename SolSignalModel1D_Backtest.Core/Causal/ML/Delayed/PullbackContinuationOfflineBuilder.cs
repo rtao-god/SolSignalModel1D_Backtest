@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 		/// Для диагностики используйте BuildContexts(...).
 		/// </summary>
 		public static List<PullbackContinuationSample> Build (
-			List<BacktestRecord> rows,
+			IReadOnlyList<BacktestRecord> rows,
 			IReadOnlyList<Candle1h> sol1h,
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
@@ -37,7 +37,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 		/// - какие факторы (DeepFactors) дали label=true/false.
 		/// </summary>
 		public static List<PullbackContinuationContext> BuildContexts (
-			List<BacktestRecord> rows,
+			IReadOnlyList<BacktestRecord> rows,
 			IReadOnlyList<Candle1h> sol1h,
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{

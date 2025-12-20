@@ -1,45 +1,42 @@
 ﻿using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
 	/// <summary>
 	/// Диагностика дневных моделей (move / dir-normal / dir-down / micro-flat):
-	/// считает PFI + direction на произвольном срезе BacktestRecord (train / OOS / holdout)
-	/// и печатает таблички в консоль.
+	/// считает PFI и печатает таблички в консоль.
 	/// </summary>
 	public static class DailyModelDiagnostics
 		{
-		/// <summary>
-		/// PFI + direction по всем дневным моделям на заданном наборе BacktestRecord.
-		/// Ничего не обучает, кроме использования уже готового ModelBundle.
-		/// </summary>
 		public static void LogFeatureImportanceOnDailyModels (
 			ModelBundle bundle,
-			IEnumerable<BacktestRecord> evalRows,
+			IReadOnlyList<LabeledCausalRow> evalRows,
 			string datasetTag = "oos" )
 			{
 			if (bundle == null) throw new ArgumentNullException (nameof (bundle));
 			if (evalRows == null) throw new ArgumentNullException (nameof (evalRows));
 
-			var rows = evalRows.ToList ();
-			if (rows.Count == 0)
+			if (evalRows.Count == 0)
 				{
 				Console.WriteLine ($"[pfi:daily: {datasetTag}] empty dataset, nothing to analyze.");
 				return;
 				}
 
-			var minDate = rows.Min (r => r.ToCausalDateUtc());
-			var maxDate = rows.Max (r => r.ToCausalDateUtc());
-			Console.WriteLine ($"[pfi:daily: {datasetTag}] rows={rows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
+			// Печать сводки по срезу.
+			var minDate = evalRows.Min (r => r.ToCausalDateUtc ());
+			var maxDate = evalRows.Max (r => r.ToCausalDateUtc ());
+			Console.WriteLine ($"[pfi:daily: {datasetTag}] rows={evalRows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
 
-			// Для PFI на eval-сете балансировку отключаем,
-			// чтобы не искажать реальное распределение.
+			// Единая логика разбиения на датасеты как в обучении (move/dir-normal/dir-down).
 			DailyTrainingDataBuilder.Build (
-				trainRows: rows,
+				trainRows: evalRows,
 				balanceMove: false,
 				balanceDir: false,
 				balanceTargetFrac: 0.5,
@@ -47,86 +44,70 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 				dirNormalRows: out var dirNormalRows,
 				dirDownRows: out var dirDownRows);
 
-			// MLContext берём из бандла, а если там null (на всякий случай) — создаём свой.
 			var ml = bundle.MlCtx ?? new MLContext (seed: 42);
 
-			// ===== PFI: move-модель =====
+			// ===== PFI: move (non-flat vs flat) =====
 			if (bundle.MoveModel != null && moveRows.Count > 0)
 				{
 				var moveData = ml.Data.LoadFromEnumerable (
 					moveRows.Select (r => new MlSampleBinary
 						{
-						// Позитив: день НЕ flat (Label != 1)
-						Label = r.Forward.TrueLabel != 1,
+						Label = r.TrueLabel != 1,
 						Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 						})
 				);
 
 				FeatureImportanceAnalyzer.LogBinaryFeatureImportance (
-					ml,
-					bundle.MoveModel,
-					moveData,
-					DailyFeatureSchema.Names,
-					tag: $"{datasetTag}: move");
+					ml, bundle.MoveModel, moveData, DailyFeatureSchema.Names, tag: $"{datasetTag}: move");
 				}
 			else
 				{
 				Console.WriteLine ($"[pfi:daily: {datasetTag}] move-model or data is empty, skip.");
 				}
 
-			// ===== PFI: dir-normal =====
+			// ===== PFI: dir-normal (up vs down) вне down-regime =====
 			if (bundle.DirModelNormal != null && dirNormalRows.Count > 0)
 				{
 				var dirNormalData = ml.Data.LoadFromEnumerable (
 					dirNormalRows.Select (r => new MlSampleBinary
 						{
-						// Позитив: up (Label=2), негатив: down (Label=0)
-						Label = r.Forward.TrueLabel == 2,
+						Label = r.TrueLabel == 2,
 						Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 						})
 				);
 
 				FeatureImportanceAnalyzer.LogBinaryFeatureImportance (
-					ml,
-					bundle.DirModelNormal,
-					dirNormalData,
-					DailyFeatureSchema.Names,
-					tag: $"{datasetTag}: dir-normal");
+					ml, bundle.DirModelNormal, dirNormalData, DailyFeatureSchema.Names, tag: $"{datasetTag}: dir-normal");
 				}
 			else
 				{
 				Console.WriteLine ($"[pfi:daily: {datasetTag}] dir-normal: no model or no eval-rows, skip.");
 				}
 
-			// ===== PFI: dir-down =====
+			// ===== PFI: dir-down (up vs down) внутри down-regime =====
 			if (bundle.DirModelDown != null && dirDownRows.Count > 0)
 				{
 				var dirDownData = ml.Data.LoadFromEnumerable (
 					dirDownRows.Select (r => new MlSampleBinary
 						{
-						Label = r.Forward.TrueLabel == 2,
+						Label = r.TrueLabel == 2,
 						Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 						})
 				);
 
 				FeatureImportanceAnalyzer.LogBinaryFeatureImportance (
-					ml,
-					bundle.DirModelDown,
-					dirDownData,
-					DailyFeatureSchema.Names,
-					tag: $"{datasetTag}: dir-down");
+					ml, bundle.DirModelDown, dirDownData, DailyFeatureSchema.Names, tag: $"{datasetTag}: dir-down");
 				}
 			else
 				{
 				Console.WriteLine ($"[pfi:daily: {datasetTag}] dir-down: no model or no eval-rows, skip.");
 				}
 
-			// ===== PFI: micro-flat =====
+			// ===== PFI: micro-flat (microUp vs microDown) =====
 			if (bundle.MicroFlatModel != null)
 				{
-				var microRows = rows
+				var microRows = evalRows
 					.Where (r => r.FactMicroUp || r.FactMicroDown)
-					.OrderBy (r => r.ToCausalDateUtc())
 					.ToList ();
 
 				if (microRows.Count >= 10)
@@ -134,27 +115,22 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 					var microData = ml.Data.LoadFromEnumerable (
 						microRows.Select (r => new MlSampleBinary
 							{
-							// Позитив: microUp, негатив: microDown
 							Label = r.FactMicroUp,
 							Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 							})
 					);
 
 					FeatureImportanceAnalyzer.LogBinaryFeatureImportance (
-						ml,
-						bundle.MicroFlatModel,
-						microData,
-						MicroFeatureSchema.Names,
-						tag: $"{datasetTag}: micro-flat");
+						ml, bundle.MicroFlatModel, microData, MicroFeatureSchema.Names, tag: $"{datasetTag}: micro-flat");
 					}
 				else
 					{
-					Console.WriteLine ($"[pfi: daily: {datasetTag}] micro: too few micro-rows ({microRows.Count}), skip.");
+					Console.WriteLine ($"[pfi:daily: {datasetTag}] micro: too few micro-rows ({microRows.Count}), skip.");
 					}
 				}
 			else
 				{
-				Console.WriteLine ($"[pfi: daily: {datasetTag}] MicroFlatModel == null, skip micro layer PFI.");
+				Console.WriteLine ($"[pfi:daily: {datasetTag}] MicroFlatModel == null, skip micro layer PFI.");
 				}
 			}
 		}

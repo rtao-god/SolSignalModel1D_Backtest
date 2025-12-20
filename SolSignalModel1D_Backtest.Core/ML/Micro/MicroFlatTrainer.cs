@@ -3,7 +3,6 @@ using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 using System;
@@ -16,15 +15,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 		{
 		private const int MinMicroRowsForTraining = 40;
 
-		public static ITransformer? BuildMicroFlatModel ( MLContext ml, IReadOnlyList<BacktestRecord> rows )
+		public static ITransformer? BuildMicroFlatModel ( MLContext ml, IReadOnlyList<LabeledCausalRow> rows )
 			{
 			if (ml == null) throw new ArgumentNullException (nameof (ml));
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (rows.Count == 0)
 				throw new ArgumentException ("rows must be non-empty.", nameof (rows));
 
-			// В проекте BacktestRecord хранит дату как DateUtc (UTC-инвариант).
-			// Проверяем Kind именно у DateUtc, т.к. свойства Date у BacktestRecord нет.
+			// Инвариант: даты входа хранятся в UTC.
 			for (int i = 0; i < rows.Count; i++)
 				{
 				if (rows[i].DateUtc.Kind != DateTimeKind.Utc)
@@ -67,14 +65,13 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				{
 				throw new InvalidOperationException (
 					$"[2stage-micro] датасет микро-дней одноклассовый (up={upCount}, down={dnCount}) " +
-					$"при flats={flatsRaw.Count}. Проверь path-based разметку FactMicroUp/FactMicroDown.");
+					$"при flats={flatsRaw.Count}. Проверь разметку FactMicroUp/FactMicroDown.");
 				}
 
 			int take = Math.Min (upCount, dnCount);
 
-			// Берём первые take элементов каждого класса, сохраняя хронологию без сортировок.
-			var upBalanced = new List<BacktestRecord> (take);
-			var dnBalanced = new List<BacktestRecord> (take);
+			var upBalanced = new List<LabeledCausalRow> (take);
+			var dnBalanced = new List<LabeledCausalRow> (take);
 
 			int upNeed = take;
 			int dnNeed = take;
@@ -104,13 +101,12 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 					$"[2stage-micro] failed to build balanced micro set: take={take}, up={upBalanced.Count}, down={dnBalanced.Count}.");
 				}
 
-			// Слияние двух отсортированных (по времени) списков без OrderBy.
-			var flats = new List<BacktestRecord> (take * 2);
+			// Слияние двух отсортированных по времени списков без OrderBy.
+			var flats = new List<LabeledCausalRow> (take * 2);
 			int iu = 0, id = 0;
 
 			while (iu < upBalanced.Count && id < dnBalanced.Count)
 				{
-				// У BacktestRecord дата — DateUtc.
 				if (upBalanced[iu].DateUtc <= dnBalanced[id].DateUtc)
 					flats.Add (upBalanced[iu++]);
 				else
@@ -130,10 +126,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				var feats = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector);
 
 				if (feats == null)
-					{
-					throw new InvalidOperationException (
-						"[2stage-micro] ToFloatFixed вернул null для вектора признаков микро-слоя.");
-					}
+					throw new InvalidOperationException ("[2stage-micro] ToFloatFixed вернул null для вектора признаков микро-слоя.");
 
 				if (featureDim == null)
 					{
@@ -198,7 +191,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 				}
 			}
 
-		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<BacktestRecord> rows, TimeZoneInfo nyTz )
+		private static DateTime DeriveMaxBaselineExitUtc ( IReadOnlyList<LabeledCausalRow> rows, TimeZoneInfo nyTz )
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (rows.Count == 0) throw new ArgumentException ("rows must be non-empty.", nameof (rows));
@@ -209,7 +202,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-				// У BacktestRecord дата входа — DateUtc.
 				var entryUtc = rows[i].DateUtc;
 
 				if (entryUtc.Kind != DateTimeKind.Utc)

@@ -1,24 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 	{
 	public sealed class DailyDataset
 		{
-		public List<BacktestRecord> TrainRows { get; }
-		public List<BacktestRecord> MoveTrainRows { get; }
-		public List<BacktestRecord> DirNormalRows { get; }
-		public List<BacktestRecord> DirDownRows { get; }
+		public List<LabeledCausalRow> TrainRows { get; }
+		public List<LabeledCausalRow> MoveTrainRows { get; }
+		public List<LabeledCausalRow> DirNormalRows { get; }
+		public List<LabeledCausalRow> DirDownRows { get; }
 		public DateTime TrainUntilUtc { get; }
 
 		public DailyDataset (
-			List<BacktestRecord> trainRows,
-			List<BacktestRecord> moveTrainRows,
-			List<BacktestRecord> dirNormalRows,
-			List<BacktestRecord> dirDownRows,
+			List<LabeledCausalRow> trainRows,
+			List<LabeledCausalRow> moveTrainRows,
+			List<LabeledCausalRow> dirNormalRows,
+			List<LabeledCausalRow> dirDownRows,
 			DateTime trainUntilUtc )
 			{
 			TrainRows = trainRows ?? throw new ArgumentNullException (nameof (trainRows));
@@ -34,7 +34,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 		private static readonly TimeZoneInfo NyTz = Windowing.NyTz;
 
 		public static DailyDataset Build (
-			List<BacktestRecord> allRows,
+			List<LabeledCausalRow> allRows,
 			DateTime trainUntil,
 			bool balanceMove,
 			bool balanceDir,
@@ -77,9 +77,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 				trainUntilUtc: trainUntil);
 			}
 
-		private static List<BacktestRecord> FilterByBaselineExit ( List<BacktestRecord> rows, DateTime trainUntil )
+		private static List<LabeledCausalRow> FilterByBaselineExit ( List<LabeledCausalRow> rows, DateTime trainUntil )
 			{
-			var result = new List<BacktestRecord> (rows.Count);
+			var result = new List<LabeledCausalRow> (rows.Count);
 
 			foreach (var r in rows)
 				{

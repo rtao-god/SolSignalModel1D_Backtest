@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -32,7 +33,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 		/// - набором параметров StrategyParameters.
 		/// </summary>
 		public static StrategyStats Run (
-			IReadOnlyList<BacktestRecord> mornings,
+			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			StrategyParameters parameters )

@@ -1,8 +1,8 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 	{
@@ -12,13 +12,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 	/// </summary>
 	public sealed class DirDataset
 		{
-		public IReadOnlyList<BacktestRecord> DirNormalRows { get; }
-		public IReadOnlyList<BacktestRecord> DirDownRows { get; }
+		public IReadOnlyList<LabeledCausalRow> DirNormalRows { get; }
+		public IReadOnlyList<LabeledCausalRow> DirDownRows { get; }
 		public DateTime TrainUntilUtc { get; }
 
 		public DirDataset (
-			IReadOnlyList<BacktestRecord> dirNormalRows,
-			IReadOnlyList<BacktestRecord> dirDownRows,
+			IReadOnlyList<LabeledCausalRow> dirNormalRows,
+			IReadOnlyList<LabeledCausalRow> dirDownRows,
 			DateTime trainUntilUtc )
 			{
 			if (dirNormalRows == null) throw new ArgumentNullException (nameof (dirNormalRows));
@@ -44,7 +44,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 	public static class DirDatasetBuilder
 		{
 		public static DirDataset Build (
-			IReadOnlyList<BacktestRecord> allRows,
+			IReadOnlyList<LabeledCausalRow> allRows,
 			DateTime trainUntilUtc,
 			bool balanceDir,
 			double balanceTargetFrac,
@@ -53,13 +53,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 
 			var daily = DailyDatasetBuilder.Build (
-				allRows: allRows as List<BacktestRecord> ?? allRows.ToList (),
+				allRows: allRows as List<LabeledCausalRow> ?? allRows.ToList (),
 				trainUntil: trainUntilUtc,
 				balanceMove: false,
 				balanceDir: balanceDir,
 				balanceTargetFrac: balanceTargetFrac,
 				datesToExclude: datesToExclude);
-
 
 			return new DirDataset (
 				dirNormalRows: daily.DirNormalRows,

@@ -204,15 +204,15 @@ namespace SolSignalModel1D_Backtest
 			}
 
 		private static void DumpDailyAccuracyWithDatasetSplit (
-			List<BacktestRecord> allRows,
+			List<LabeledCausalRow> allRows,
 			List<BacktestRecord> records,
 			DateTime trainUntilUtc )
 			{
 			// Собираем датасет так же, как внутри ModelTrainer.
 			// Важно: эта метрика отвечает на вопрос "как модель выглядит на том train, на котором она реально училась".
 			var dataset = DailyDatasetBuilder.Build (
-				allRows: allRows,
-				trainUntilUtc: trainUntilUtc,
+				allRows,
+				trainUntilUtc,
 				balanceMove: false,
 				balanceDir: true,
 				balanceTargetFrac: 0.70,

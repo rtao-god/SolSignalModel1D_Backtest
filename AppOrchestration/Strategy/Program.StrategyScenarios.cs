@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
@@ -21,7 +22,7 @@ namespace SolSignalModel1D_Backtest
 		/// 3) sweep по пресетам.
 		/// </summary>
 		private static void RunStrategyScenarios (
-			List<BacktestRecord> mornings,
+			List<LabeledCausalRow> mornings,
 			List<BacktestRecord> records,
 			IReadOnlyList<Candle1m> sol1m
 		)

@@ -1,5 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
@@ -27,7 +28,7 @@ namespace SolSignalModel1D_Backtest
 			}
 
 		private static void RunBacktestAndReports (
-			List<BacktestRecord> mornings,
+			List<LabeledCausalRow> mornings,
 			List<BacktestRecord> records,
 			IReadOnlyList<Candle1m> dayMinutes )
 			{

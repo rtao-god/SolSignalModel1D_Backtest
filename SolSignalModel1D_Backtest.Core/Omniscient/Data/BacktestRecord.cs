@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 	{
@@ -70,7 +71,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 		public double? Conf_SlLong => Causal.Conf_SlLong;
 		public double? Conf_SlShort => Causal.Conf_SlShort;
 
-		// ===== Delayed runtime =====
+		// ===== Delayed runtime (каузальная часть: решения/гейты/параметры) =====
 		public string? DelayedSource => Causal.DelayedSource;
 		public bool? DelayedEntryAsked => Causal.DelayedEntryAsked;
 		public bool? DelayedEntryUsed => Causal.DelayedEntryUsed;
@@ -79,12 +80,17 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 		public int? TargetLevelClass => Causal.TargetLevelClass;
 
 		// ===== Omniscient execution facts =====
-		// Это уже не “данные”, а состояние симуляции/исполнения, поэтому set допустим.
+		// Null = "не исполнено".
+		public DelayedExecutionFacts? DelayedExecution { get; set; }
+
+		// Удобные прокси для читателей: все значения nullable, чтобы невозможно было
+		// "случайно" использовать их без проверки наличия исполнения.
+		public bool DelayedEntryExecuted => DelayedExecution is not null;
+		public double? DelayedEntryPrice => DelayedExecution?.EntryPrice;
+		public DateTime? DelayedEntryExecutedAtUtc => DelayedExecution?.ExecutedAtUtc;
+		public DelayedIntradayResult? DelayedIntradayResult => DelayedExecution?.IntradayResult;
+
+		// ===== Прочее состояние симуляции =====
 		public bool AntiDirectionApplied { get; set; }
-		public bool DelayedEntryExecuted { get; set; }
-		public double DelayedEntryPrice { get; set; }
-		public DateTime? DelayedEntryExecutedAtUtc { get; set; }
-		public int DelayedIntradayResult { get; set; }
-		public string? DelayedWhyNot { get; set; }
 		}
 	}

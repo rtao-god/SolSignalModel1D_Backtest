@@ -1,9 +1,14 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 	{
@@ -20,7 +25,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		/// Данные (mornings/records/candles1m/policies) ожидаются уже подготовленными.
 		/// </summary>
 		public static BacktestSummary RunBacktest (
-			IReadOnlyList<BacktestRecord> mornings,
+			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1m> candles1m,
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
@@ -37,40 +42,14 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (config == null)
 				throw new ArgumentNullException (nameof (config));
 
-			var fromDate = mornings.Min (r => r.ToCausalDateUtc());
-			var toDate = mornings.Max (r => r.ToCausalDateUtc());
+			var fromDate = mornings.Min (r => r.ToCausalDateUtc ());
+			var toDate = mornings.Max (r => r.ToCausalDateUtc ());
 
-			// Тот же набор веток, что и в RollingLoop:
-			// BASE/ANTI-D × WITH SL / NO SL.
-			var withSlBase = SimulateAllPolicies (
-				policies, records, candles1m,
-				useStopLoss: true,
-				config: config,
-				useAnti: false
-			);
+			var withSlBase = SimulateAllPolicies (policies, records, candles1m, useStopLoss: true, config: config, useAnti: false);
+			var noSlBase = SimulateAllPolicies (policies, records, candles1m, useStopLoss: false, config: config, useAnti: false);
+			var withSlAnti = SimulateAllPolicies (policies, records, candles1m, useStopLoss: true, config: config, useAnti: true);
+			var noSlAnti = SimulateAllPolicies (policies, records, candles1m, useStopLoss: false, config: config, useAnti: true);
 
-			var noSlBase = SimulateAllPolicies (
-				policies, records, candles1m,
-				useStopLoss: false,
-				config: config,
-				useAnti: false
-			);
-
-			var withSlAnti = SimulateAllPolicies (
-				policies, records, candles1m,
-				useStopLoss: true,
-				config: config,
-				useAnti: true
-			);
-
-			var noSlAnti = SimulateAllPolicies (
-				policies, records, candles1m,
-				useStopLoss: false,
-				config: config,
-				useAnti: true
-			);
-
-			// Агрегаты по всем веткам и политикам.
 			double bestTotalPnl = double.NegativeInfinity;
 			double worstMaxDd = double.NegativeInfinity;
 			int policiesWithLiq = 0;
@@ -121,11 +100,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				};
 			}
 
-		/// <summary>
-		/// Локальный helper: прогоняет набор политик через PnL-движок
-		/// для заданного режима (useStopLoss / useAnti).
-		/// Логика полностью идентична RollingLoop.SimulateAllPolicies из рантайма.
-		/// </summary>
 		private static List<BacktestPolicyResult> SimulateAllPolicies (
 			IReadOnlyList<RollingLoop.PolicySpec> policies,
 			IReadOnlyList<BacktestRecord> records,

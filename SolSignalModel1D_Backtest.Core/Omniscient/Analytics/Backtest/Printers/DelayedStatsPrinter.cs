@@ -1,4 +1,8 @@
-﻿using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
@@ -19,24 +23,26 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 			foreach (var r in records)
 				{
+				// Принтер — диагностический слой: null-элементы можно пропустить,
+				// но неконсистентные состояния данных должны выявляться исключением в расчётах ниже.
 				if (r == null) continue;
 
 				if (r.DelayedSource != "A" && r.DelayedSource != "B")
 					continue;
 
-				// Для close@day направление влияет на знак результата.
-				// Для TpFirst/SlFirst знак уже зашит в Result + Tp/Sl pct.
 				var (wantLong, wantShort, hasDirection) = ResolveDirection (r);
 
-				bool tpFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst;
-				bool slFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst;
+				// DelayedIntradayResult у тебя nullable enum => сравниваем enum с enum (без int).
+				var res = r.DelayedIntradayResult;
+				bool tpFirst = res == DelayedIntradayResult.TpFirst;
+				bool slFirst = res == DelayedIntradayResult.SlFirst;
 
 				if (r.DelayedSource == "A")
 					{
 					if (r.DelayedEntryAsked == true) askedA++;
 					if (r.DelayedEntryUsed == true) usedA++;
 
-					if (r.DelayedEntryExecuted)
+					if (r.DelayedEntryExecuted == true)
 						{
 						execA++;
 
@@ -56,7 +62,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 					if (r.DelayedEntryAsked == true) askedB++;
 					if (r.DelayedEntryUsed == true) usedB++;
 
-					if (r.DelayedEntryExecuted)
+					if (r.DelayedEntryExecuted == true)
 						{
 						execB++;
 
@@ -238,37 +244,43 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 		private static double CalcUnlevPnlPctOrThrow ( BacktestRecord r, bool hasDirection, bool wantLong, bool wantShort )
 			{
-			if (!r.DelayedEntryExecuted)
-				throw new InvalidOperationException ($"[delayed] DelayedEntryExecuted=false, но вызван CalcUnlevPnlPctOrThrow для {r.DateUtc:O}.");
+			// Метод вызывается только для исполненных сделок; иначе статистика будет считать фантомные результаты.
+			if (r.DelayedEntryExecuted != true)
+				throw new InvalidOperationException ($"[delayed] DelayedEntryExecuted!=true, но вызван CalcUnlevPnlPctOrThrow для {r.DateUtc:O}.");
 
-			bool tpFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.TpFirst;
-			bool slFirst = r.DelayedIntradayResult == (int) DelayedIntradayResult.SlFirst;
+			// executed=true => результат должен быть проставлен. null здесь означает рассинхрон состояния симуляции.
+			var res = r.DelayedIntradayResult
+				?? throw new InvalidOperationException ($"[delayed] DelayedIntradayResult is null при executed=true для {r.DateUtc:O}.");
 
-			if (tpFirst)
+			if (res == DelayedIntradayResult.TpFirst)
 				{
-				if (r.DelayedIntradayTpPct is null)
-					throw new InvalidOperationException ($"[delayed] TpPct отсутствует при TpFirst для {r.DateUtc:O}.");
-				return r.DelayedIntradayTpPct.Value;
+				var tpPct = r.DelayedIntradayTpPct
+					?? throw new InvalidOperationException ($"[delayed] DelayedIntradayTpPct is null при TpFirst для {r.DateUtc:O}.");
+				return tpPct;
 				}
 
-			if (slFirst)
+			if (res == DelayedIntradayResult.SlFirst)
 				{
-				if (r.DelayedIntradaySlPct is null)
-					throw new InvalidOperationException ($"[delayed] SlPct отсутствует при SlFirst для {r.DateUtc:O}.");
-				return -r.DelayedIntradaySlPct.Value;
+				var slPct = r.DelayedIntradaySlPct
+					?? throw new InvalidOperationException ($"[delayed] DelayedIntradaySlPct is null при SlFirst для {r.DateUtc:O}.");
+				return -slPct;
 				}
 
-			if (r.DelayedEntryPrice <= 0.0)
-				throw new InvalidOperationException ($"[delayed] DelayedEntryPrice <= 0 при close@day для {r.DateUtc:O}.");
+			// Close@day / None / Ambiguous: нужен реальный delayed-entry.
+			var dEntry = r.DelayedEntryPrice
+				?? throw new InvalidOperationException ($"[delayed] DelayedEntryPrice is null при close@day для {r.DateUtc:O}.");
+
+			if (dEntry <= 0.0)
+				throw new InvalidOperationException ($"[delayed] DelayedEntryPrice<=0 при close@day для {r.DateUtc:O}.");
 
 			if (r.Close24 <= 0.0)
-				throw new InvalidOperationException ($"[delayed] Close24 <= 0 при close@day для {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Close24<=0 при close@day для {r.DateUtc:O}.");
 
 			if (!hasDirection)
 				throw new InvalidOperationException ($"[delayed] Нет направления (PredLabel/Micro) для close@day расчёта на {r.DateUtc:O}.");
 
-			if (wantLong) return r.Close24 / r.DelayedEntryPrice - 1.0;
-			if (wantShort) return r.DelayedEntryPrice / r.Close24 - 1.0;
+			if (wantLong) return r.Close24 / dEntry - 1.0;
+			if (wantShort) return dEntry / r.Close24 - 1.0;
 
 			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для {r.DateUtc:O}.");
 			}
@@ -279,10 +291,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 				throw new InvalidOperationException ($"[delayed] Нет направления для baseline PnL на {r.DateUtc:O}.");
 
 			if (r.Entry <= 0.0)
-				throw new InvalidOperationException ($"[delayed] Entry <= 0 для baseline PnL на {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Entry<=0 для baseline PnL на {r.DateUtc:O}.");
 
 			if (r.Close24 <= 0.0)
-				throw new InvalidOperationException ($"[delayed] Close24 <= 0 для baseline PnL на {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Close24<=0 для baseline PnL на {r.DateUtc:O}.");
 
 			if (wantLong) return r.Close24 / r.Entry - 1.0;
 			if (wantShort) return r.Entry / r.Close24 - 1.0;
@@ -299,6 +311,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			bool wantShort =
 				r.PredLabel == 0 ||
 				(r.PredLabel == 1 && r.PredMicroDown);
+
+			// Инвариант: одновременно long/short — это баг upstream.
+			if (wantLong && wantShort)
+				throw new InvalidOperationException (
+					$"[delayed] ambiguous direction: wantLong && wantShort at {r.DateUtc:O}. " +
+					$"PredLabel={r.PredLabel}, PredMicroUp={r.PredMicroUp}, PredMicroDown={r.PredMicroDown}");
 
 			return (wantLong, wantShort, wantLong || wantShort);
 			}

@@ -31,8 +31,6 @@ namespace SolSignalModel1D_Backtest
 		public static async Task<BacktestDataSnapshot> BuildBacktestDataAsync ()
 			{
 			// 1. Общий бутстрап данных (свечи + индикаторы + дневные строки).
-			// Методы, которые дергает BootstrapDataAsync (UpdateCandlesAsync, LoadAllCandlesAndWindow,
-			// BuildIndicatorsAsync, BuildDailyRowsBundleAsync), остаются инкапсулированы внутри Program.
 			var bootstrap = await BootstrapDataAsync ();
 
 			var rowsBundle = bootstrap.RowsBundle;
@@ -44,10 +42,6 @@ namespace SolSignalModel1D_Backtest
 				throw new InvalidOperationException ("[rows] После фильтров нет утренних точек.");
 
 			// 2. Основная дневная модель: строим prediction-записи по утренним точкам.
-			// Здесь переиспользуются уже существующие утилиты Program:
-			// - CreatePredictionEngineOrFallback;
-			// - LoadPredictionRecordsAsync.
-			// Это позволяет менять реализацию модели без влияния на API-контракт.
 			List<BacktestRecord> records;
 				{
 				var engine = CreatePredictionEngineOrFallback (allRows);
@@ -61,22 +55,37 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine ($"[records] built = {records.Count}");
 				}
 
-			// 3. SL-модель: оффлайн-обучение и применение на основе дневных предсказаний.
-			// Обучение ограничивается train-окном (_trainUntilUtc), чтобы не ловить "look-ahead bias".
+			// 3. SL-модель: обучаемся строго на TrainOnly<BacktestRecord> по baseline-exit контракту.
 				{
 				var boundary = new TrainBoundary (_trainUntilUtc, NyTz);
-				var split = boundary.Split (allRows, r => r.ToCausalDateUtc());
 
-				var slTrainRows = split.Train;
+				// Важно: сплит делаем по records, потому что SL-оффлайн-лейблы/фичи привязаны к BacktestRecord.
+				var orderedRecords = records
+					.OrderBy (r => r.DateUtc)
+					.ToList ();
 
-				if (split.Excluded.Count > 0)
+				var recSplit = boundary.SplitStrict (
+					items: orderedRecords,
+					entryUtcSelector: r => r.DateUtc,
+					tag: "sl.records");
+
+				Console.WriteLine (
+					$"[sl] records split: train={recSplit.Train.Count}, oos={recSplit.Oos.Count}, trainUntilUtc={_trainUntilUtc:O}");
+
+				// Жёсткое требование: не допускаем "почти пустой" train.
+				if (recSplit.Train.Count < 50)
 					{
-					Console.WriteLine (
-						$"[sl] WARNING: excluded={split.Excluded.Count} rows (baseline-exit undefined). Они не участвуют в обучении SL.");
+					var trMin = recSplit.Train.Count > 0 ? recSplit.Train.Min (r => r.DateUtc) : default;
+					var trMax = recSplit.Train.Count > 0 ? recSplit.Train.Max (r => r.DateUtc) : default;
+
+					throw new InvalidOperationException (
+						$"[sl] SL train subset too small (count={recSplit.Train.Count}). " +
+						$"period={(recSplit.Train.Count > 0 ? $"{trMin:yyyy-MM-dd}..{trMax:yyyy-MM-dd}" : "n/a")}. " +
+						"Adjust trainUntilUtc / history coverage so SL has enough train records.");
 					}
 
 				TrainAndApplySlModelOffline (
-					allRows: slTrainRows,
+					trainRecords: recSplit.Train,
 					records: records,
 					sol1h: bootstrap.SolAll1h,
 					sol1m: bootstrap.Sol1m,
@@ -85,8 +94,6 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			// 4. Delayed A: расчёт отложенной доходности по минутным свечам.
-			// Параметры dipFrac/tpPct/slPct зашиты здесь, чтобы контракт снапшота оставался простым,
-			// а детали risk-профиля были локализованы.
 				{
 				PopulateDelayedA (
 					records: records,
@@ -100,8 +107,7 @@ namespace SolSignalModel1D_Backtest
 				);
 				}
 
-			// 5. Финальный снэпшот:
-			// минимально необходимый набор данных для бэктеста и превью.
+			// 5. Финальный снэпшот.
 			return new BacktestDataSnapshot
 				{
 				Mornings = mornings,

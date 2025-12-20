@@ -8,6 +8,11 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 		{
 		public static void PrintTestDay ( BacktestRecord r, BacktestRecord rec )
 			{
+			if (r == null) throw new ArgumentNullException (nameof (r));
+			if (rec == null) throw new ArgumentNullException (nameof (rec));
+
+			// Delayed-флаги могут быть nullable (слой мог не применяться / быть не рассчитан).
+			// Сравнение с true — строгая проверка “точно включено”.
 			bool delayedExec = rec.DelayedEntryExecuted == true;
 			bool delayedAsked = rec.DelayedEntryAsked == true;
 
@@ -27,15 +32,17 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 				$"btc200={r.Causal.BtcVs200:+0.00%;-0.00%}  solE50v200={r.Causal.SolEma50vs200:+0.00%;-0.00%}  " +
 				$"btcE50v200={r.Causal.BtcEma50vs200:+0.00%;-0.00%}  minMove={r.MinMove:0.00%}");
 
+			// Причина “почему не исполнилось” — это результат решений/гейтов слоя,
+			// поэтому хранится в causal-части, а не как “факт рынка”.
 			if (rec.DelayedSource == "A" && !delayedExec && delayedAsked)
 				{
-				var why = rec.DelayedWhyNot ?? "unknown";
+				var why = rec.Causal.DelayedWhyNot ?? "unknown";
 				Console.WriteLine ($"      [A] asked but not executed: {why}");
 				}
 
 			if (rec.DelayedSource == "B" && !delayedExec && delayedAsked)
 				{
-				var why = rec.DelayedWhyNot ?? "unknown";
+				var why = rec.Causal.DelayedWhyNot ?? "unknown";
 				Console.WriteLine ($"      [B] asked but not executed: {why}");
 				}
 			}

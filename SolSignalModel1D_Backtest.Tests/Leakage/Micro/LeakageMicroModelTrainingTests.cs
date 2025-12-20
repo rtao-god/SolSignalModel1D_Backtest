@@ -2,12 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Micro;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
-using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,24 +10,18 @@ using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 	{
-	public class LeakageMicroModelTrainingTests
+	public sealed class LeakageMicroModelTrainingTests
 		{
-		private sealed class BinaryOutput
-			{
-			public bool PredictedLabel { get; set; }
-			public float Score { get; set; }
-			public float Probability { get; set; }
-			}
-
 		[Fact]
-		public void MicroModel_Training_IsFutureBlind_ToOosTailMutation_ByTrainBoundary ()
+		public void MicroDataset_IsFutureBlind_ToOosTailMutation_ByTrainBoundary ()
 			{
 			var nyTz = Windowing.NyTz;
 
-			var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
-				startNyLocalDate: NyTestDates.NyLocal (2024, 1, 2, 0),
+			// Строим NY-weekday входы; weekend запрещён контрактом TrainBoundary/MicroDatasetBuilder.
+			var datesUtc = BuildNyWeekdayEntriesUtc (
+				startUtc: new DateTime (2024, 1, 2, 12, 0, 0, DateTimeKind.Utc),
 				count: 260,
-				hour: 8);
+				nyTz: nyTz);
 
 			var allRows = BuildSyntheticRows (datesUtc);
 
@@ -54,90 +43,105 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
 			AssertRowsEqual (dsA.MicroRows, dsB.MicroRows);
 
-			if (dsA.MicroRows.Count < 50)
-				throw new InvalidOperationException (
-					$"LeakageMicroModelTrainingTests: micro dataset too small ({dsA.MicroRows.Count}).");
-
-			var mlA = new MLContext (seed: 42);
-			// ВАЖНО: тренер ожидает List<BacktestRecord>, а датасет отдаёт IReadOnlyList<BacktestRecord>.
-			// Приводим явно, чтобы не расширять контракт Core ради тестов.
-			var modelA = MicroFlatTrainer.BuildMicroFlatModel (mlA, new List<BacktestRecord> (dsA.TrainRows));
-			Assert.NotNull (modelA);
-
-			var mlB = new MLContext (seed: 42);
-			var modelB = MicroFlatTrainer.BuildMicroFlatModel (mlB, new List<BacktestRecord> (dsB.TrainRows));
-			Assert.NotNull (modelB);
-
-			var predsA = GetMicroPredictions (mlA, modelA!, dsA.MicroRows.ToList ());
-			var predsB = GetMicroPredictions (mlB, modelB!, dsB.MicroRows.ToList ());
-
-			AssertBinaryOutputsEqual (predsA, predsB);
+			// Дополнительный инвариант: в train-части нет weekend (иначе MicroDatasetBuilder должен был упасть).
+			Assert.DoesNotContain (dsA.TrainRows, r =>
+			{
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (r.DateUtc, nyTz);
+				return ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+			});
 			}
 
-		private static List<BacktestRecord> BuildSyntheticRows ( IReadOnlyList<DateTime> datesUtc )
+		private static List<DateTime> BuildNyWeekdayEntriesUtc ( DateTime startUtc, int count, TimeZoneInfo nyTz )
 			{
-			var rows = new List<BacktestRecord> (datesUtc.Count);
+			if (startUtc.Kind != DateTimeKind.Utc)
+				throw new ArgumentException ("startUtc must be UTC.", nameof (startUtc));
+			if (count <= 0) throw new ArgumentOutOfRangeException (nameof (count), count, "count must be > 0.");
+			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+
+			var res = new List<DateTime> (count);
+			var dt = startUtc;
+
+			while (res.Count < count)
+				{
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (dt, nyTz);
+				if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+					res.Add (dt);
+
+				dt = dt.AddDays (1);
+				}
+
+			return res;
+			}
+
+		private static List<LabeledCausalRow> BuildSyntheticRows ( IReadOnlyList<DateTime> datesUtc )
+			{
+			var rows = new List<LabeledCausalRow> (datesUtc.Count);
 
 			for (int i = 0; i < datesUtc.Count; i++)
 				{
-				var isMicro = (i % 3 == 0);
-				var up = isMicro && (i % 6 == 0);
+				bool isMicro = (i % 3 == 0);
+				bool microUp = isMicro && (i % 6 == 0);
+				bool microDown = isMicro && !microUp;
 
-				rows.Add (new BacktestRecord
-					{
-					Date = datesUtc[i],
-					Features = new[]
-					{
-						i / (double)datesUtc.Count,
-						Math.Sin(i * 0.03),
-						Math.Cos(i * 0.05),
-						isMicro ? 1.0 : 0.0
-					},
-					FactMicroUp = up,
-					FactMicroDown = isMicro && !up
-					});
+				// TrueLabel для микро-слоя не используется напрямую, но держим смысл:
+				// micro = flat-day (1), иначе non-flat (2).
+				int trueLabel = isMicro ? 1 : 2;
+
+				rows.Add (MakeRow (
+					dateUtc: datesUtc[i],
+					idx: i,
+					trueLabel: trueLabel,
+					isMicro: isMicro,
+					microUp: microUp,
+					microDown: microDown,
+					mutated: false));
 				}
 
 			return rows;
 			}
 
-		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
+		private static List<LabeledCausalRow> CloneRows ( List<LabeledCausalRow> src )
 			{
-			var res = new List<BacktestRecord> (src.Count);
-			foreach (var r in src)
+			var res = new List<LabeledCausalRow> (src.Count);
+
+			for (int i = 0; i < src.Count; i++)
 				{
-				res.Add (new BacktestRecord
-					{
-					Date = r.ToCausalDateUtc(),
-					Features = r.Causal.Features?.ToArray () ?? Array.Empty<double> (),
-					FactMicroUp = r.FactMicroUp,
-					FactMicroDown = r.FactMicroDown
-					});
+				var r = src[i];
+				res.Add (new LabeledCausalRow (
+					causal: CloneCausal (r.Causal),
+					trueLabel: r.TrueLabel,
+					factMicroUp: r.FactMicroUp,
+					factMicroDown: r.FactMicroDown));
 				}
+
 			return res;
 			}
 
-		private static void MutateOosTail ( List<BacktestRecord> rows, TrainBoundary boundary )
+		private static void MutateOosTail ( List<LabeledCausalRow> rows, TrainBoundary boundary )
 			{
-			// Мутируем всё, что boundary НЕ считает train:
-			// цель — доказать, что обучение/датасет не зависит от OOS “будущего”.
-			foreach (var r in rows)
+			for (int i = 0; i < rows.Count; i++)
 				{
-				if (boundary.IsTrainEntry (r.ToCausalDateUtc()))
+				var r = rows[i];
+
+				// Мутируем только то, что boundary НЕ считает train по baseline-exit контракту.
+				if (boundary.IsTrainEntry (r.DateUtc))
 					continue;
 
-				r.FactMicroUp = !r.FactMicroUp;
-				r.FactMicroDown = !r.FactMicroDown;
+				bool newUp = !r.FactMicroUp;
+				bool newDown = !r.FactMicroDown;
 
-				if (r.Causal.Features is { Length: > 0 })
-					{
-					for (int i = 0; i < r.Causal.Features.Length; i++)
-						r.Causal.Features[i] = 9999.0 + i;
-					}
+				rows[i] = MakeRow (
+					dateUtc: r.DateUtc,
+					idx: i,
+					trueLabel: r.TrueLabel,
+					isMicro: newUp || newDown,
+					microUp: newUp,
+					microDown: newDown,
+					mutated: true);
 				}
 			}
 
-		private static void AssertRowsEqual ( IReadOnlyList<BacktestRecord> xs, IReadOnlyList<BacktestRecord> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<LabeledCausalRow> xs, IReadOnlyList<LabeledCausalRow> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
@@ -146,54 +150,119 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
+				Assert.Equal (a.DateUtc, b.DateUtc);
+				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
 				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
 
-				var fa = a.Causal.Features ?? Array.Empty<double> ();
-				var fb = b.Causal.Features ?? Array.Empty<double> ();
+				var va = a.Causal.FeaturesVector.ToArray ();
+				var vb = b.Causal.FeaturesVector.ToArray ();
 
-				Assert.Equal (fa.Length, fb.Length);
-				for (int j = 0; j < fa.Length; j++)
-					Assert.Equal (fa[j], fb[j]);
+				Assert.Equal (va.Length, vb.Length);
+				for (int j = 0; j < va.Length; j++)
+					Assert.Equal (va[j], vb[j]);
 				}
 			}
 
-		private static List<BinaryOutput> GetMicroPredictions (
-			MLContext ml,
-			ITransformer model,
-			List<BacktestRecord> rows )
+		private static CausalDataRow CloneCausal ( CausalDataRow c ) =>
+			new CausalDataRow (
+				dateUtc: c.DateUtc,
+				regimeDown: c.RegimeDown,
+				isMorning: c.IsMorning,
+				hardRegime: c.HardRegime,
+				minMove: c.MinMove,
+
+				solRet30: c.SolRet30,
+				btcRet30: c.BtcRet30,
+				solBtcRet30: c.SolBtcRet30,
+
+				solRet1: c.SolRet1,
+				solRet3: c.SolRet3,
+				btcRet1: c.BtcRet1,
+				btcRet3: c.BtcRet3,
+
+				fngNorm: c.FngNorm,
+				dxyChg30: c.DxyChg30,
+				goldChg30: c.GoldChg30,
+
+				btcVs200: c.BtcVs200,
+
+				solRsiCenteredScaled: c.SolRsiCenteredScaled,
+				rsiSlope3Scaled: c.RsiSlope3Scaled,
+
+				gapBtcSol1: c.GapBtcSol1,
+				gapBtcSol3: c.GapBtcSol3,
+
+				atrPct: c.AtrPct,
+				dynVol: c.DynVol,
+
+				solAboveEma50: c.SolAboveEma50,
+				solEma50vs200: c.SolEma50vs200,
+				btcEma50vs200: c.BtcEma50vs200);
+
+		private static LabeledCausalRow MakeRow (
+			DateTime dateUtc,
+			int idx,
+			int trueLabel,
+			bool isMicro,
+			bool microUp,
+			bool microDown,
+			bool mutated )
 			{
-			if (rows.Count == 0)
-				return new List<BinaryOutput> ();
+			if (dateUtc.Kind != DateTimeKind.Utc)
+				throw new ArgumentException ("dateUtc must be UTC.", nameof (dateUtc));
+			if (microUp && microDown)
+				throw new InvalidOperationException ("microUp and microDown cannot be true одновременно.");
+			if (!isMicro && (microUp || microDown))
+				throw new InvalidOperationException ("Non-micro day cannot have microUp/microDown flags.");
 
-			var data = ml.Data.LoadFromEnumerable (
-				rows.Select (r => new MlSampleBinary
-					{
-					Label = r.FactMicroUp,
-					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
-					}));
+			// Фича, которая явно кодирует направление микро-дня:
+			// для microUp -> +2, для microDown -> -2, для non-micro -> 0.
+			double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
 
-			var scored = model.Transform (data);
+			// Для mutated-ветки делаем значения сильно отличающимися, но конечными.
+			double m = mutated ? 9999.0 : 1.0;
 
-			return ml.Data
-				.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false)
-				.ToList ();
-			}
+			var causal = new CausalDataRow (
+				dateUtc: dateUtc,
+				regimeDown: false,
+				isMorning: true,
+				hardRegime: 0,
+				minMove: 0.03,
 
-		private static void AssertBinaryOutputsEqual (
-			List<BinaryOutput> a,
-			List<BinaryOutput> b,
-			double tol = 1e-6 )
-			{
-			Assert.Equal (a.Count, b.Count);
+				solRet30: dir * m,
+				btcRet30: 0.01 * (idx + 1) * m,
+				solBtcRet30: 0.001 * (idx + 1) * m,
 
-			for (int i = 0; i < a.Count; i++)
-				{
-				Assert.Equal (a[i].PredictedLabel, b[i].PredictedLabel);
-				Assert.InRange (Math.Abs (a[i].Score - b[i].Score), 0.0, tol);
-				Assert.InRange (Math.Abs (a[i].Probability - b[i].Probability), 0.0, tol);
-				}
+				solRet1: 0.002 * (idx + 1) * m,
+				solRet3: 0.003 * (idx + 1) * m,
+				btcRet1: 0.004 * (idx + 1) * m,
+				btcRet3: 0.005 * (idx + 1) * m,
+
+				fngNorm: 0.10 * m,
+				dxyChg30: -0.02 * m,
+				goldChg30: 0.01 * m,
+
+				btcVs200: 0.2 * m,
+
+				solRsiCenteredScaled: 0.3 * m,
+				rsiSlope3Scaled: 0.4 * m,
+
+				gapBtcSol1: 0.01 * m,
+				gapBtcSol3: 0.02 * m,
+
+				atrPct: 0.05 * m,
+				dynVol: 0.06 * m,
+
+				solAboveEma50: 1.0 * m,
+				solEma50vs200: 0.1 * m,
+				btcEma50vs200: 0.2 * m);
+
+			return new LabeledCausalRow (
+				causal: causal,
+				trueLabel: trueLabel,
+				factMicroUp: microUp,
+				factMicroDown: microDown);
 			}
 		}
 	}

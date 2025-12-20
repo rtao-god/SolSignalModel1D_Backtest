@@ -1,6 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Diagnostics
 	{
@@ -42,11 +46,11 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 
 			// Упорядочиваем по entryUtc (Causal.DateUtc), чтобы корректно выделять последний train и первый OOS.
 			var ordered = records
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
 
 			var train = split.Train;
 			var oos = split.Oos;
@@ -58,7 +62,8 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 					"Эти дни не учитываются ни в train, ни в OOS.");
 				}
 
-			// Локальная функция для расчёта accuracy по (TrueLabel, PredLabel).
+			// Локальная функция для расчёта accuracy:
+			// TrueLabel берём из Forward (это факт), PredLabel — из Causal (это прогноз).
 			(int total, int correct, double acc) Acc ( IReadOnlyList<BacktestRecord> xs )
 				{
 				if (xs == null) throw new ArgumentNullException (nameof (xs));
@@ -69,8 +74,10 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 
 				for (int i = 0; i < xs.Count; i++)
 					{
-					var c = xs[i].Causal;
-					if (c.TrueLabel == c.PredLabel)
+					var r = xs[i];
+
+					// Инвариант: label — омнисциентный факт (Forward), предикт — каузальный результат (Causal).
+					if (r.Forward.TrueLabel == r.Causal.PredLabel)
 						correct++;
 					}
 
@@ -103,19 +110,19 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 
 				Console.WriteLine (
 					$"[leak-probe] {kind} {c.DateUtc:yyyy-MM-dd} " +
-					$"true={c.TrueLabel} pred={c.PredLabel} " +
+					$"true={r.Forward.TrueLabel} pred={c.PredLabel} " +
 					$"microUp={c.PredMicroUp} microDown={c.PredMicroDown} " +
 					$"minMove={c.MinMove:0.000}");
 				}
 
 			var trainSample = train
-				.OrderByDescending (r => r.ToCausalDateUtc())
+				.OrderByDescending (r => r.Causal.DateUtc)
 				.Take (boundarySampleCount)
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => r.Causal.DateUtc)
 				.ToList ();
 
 			var oosSample = oos
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => r.Causal.DateUtc)
 				.Take (boundarySampleCount)
 				.ToList ();
 
@@ -128,9 +135,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 			else
 				{
 				foreach (var r in trainSample)
-					{
 					PrintRow ("T  ", r);
-					}
 				}
 
 			if (oosSample.Count == 0)
@@ -140,9 +145,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 			else
 				{
 				foreach (var r in oosSample)
-					{
 					PrintRow ("OOS", r);
-					}
 				}
 			}
 		}

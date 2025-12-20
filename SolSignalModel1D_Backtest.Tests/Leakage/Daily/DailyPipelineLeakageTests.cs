@@ -76,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			}
 
 		private static async Task<DailyRunResult> RunDailyPipelineAsync (
-			List<BacktestRecord> allRows,
+			List<LabeledCausalRow> allRows,
 			Action<List<BacktestRecord>, DateTime>? mutateTrain )
 			{
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
