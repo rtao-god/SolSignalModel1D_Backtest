@@ -10,7 +10,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 	/// ВАЖНО (каузальность):
 	/// используем только 1h-свечи, которые ЗАКРЫЛИСЬ на момент entryUtc.
 	/// То есть candle.OpenTimeUtc + 1h <= entryUtc.
-	/// Это защищает от "мелкой" утечки, когда entryUtc не на границе часа.
 	/// </summary>
 	public static class SlFeatureBuilder
 		{
@@ -34,38 +33,28 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			if (candles1h == null || candles1h.Count == 0)
 				throw new InvalidOperationException ("[sl-feats] candles1h is null/empty: SL features require 1h history.");
 
-			var feats = new float[MlSchema.FeatureCount];
+			// SL-вектор строго 11-мерный. Никакого паддинга до 64.
+			var feats = new float[SlSchema.FeatureCount];
 
 			// 0-2: базовая инфа по сигналу
 			feats[0] = goLong ? 1f : 0f;
 			feats[1] = strongSignal ? 1f : 0f;
 			feats[2] = (float) dayMinMove;
 
-			// Берём последние 6 часов ДО входа, но только "закрытые" свечи.
-			// Если entryUtc не на границе часа (например 06:30), свеча 06:00–07:00 НЕ должна попадать.
-			var knownUntilOpenUtc = entryUtc - Tf1h;               // последний часовой бар, который точно закрыт на entryUtc
-			var windowFromUtc = entryUtc.AddHours (-6);            // нижняя граница окна по open-time
+			var knownUntilOpenUtc = entryUtc - Tf1h;
+			var windowFromUtc = entryUtc.AddHours (-6);
 
 			int endExclusive = UpperBoundOpenTimeUtc (candles1h, knownUntilOpenUtc);
 			int startInclusive = LowerBoundOpenTimeUtc (candles1h, windowFromUtc);
 
 			if (endExclusive <= startInclusive)
-				{
-				// Нормальная ситуация на краю истории/при дырках: фичи останутся базовыми.
-				// Это лучше, чем тихо использовать незакрытые данные.
 				return feats;
-				}
 
-			// Копируем только маленький хвост (обычно <= 6 свечей).
-			// Не используем LINQ, чтобы не плодить аллокации на каждый сэмпл.
 			var lastClosedHours = new List<Candle1h> (Math.Min (endExclusive - startInclusive, 8));
 			for (int i = startInclusive; i < endExclusive; i++)
 				{
 				var c = candles1h[i];
 
-				// Защита от мусора/дублей: порядок должен быть неубывающим.
-				// Дубликаты по OpenTimeUtc допускаем только если upstream уже их почистил,
-				// иначе это ломает детерминизм фичей.
 				if (lastClosedHours.Count > 0 && c.OpenTimeUtc < lastClosedHours[lastClosedHours.Count - 1].OpenTimeUtc)
 					{
 					throw new InvalidOperationException (
@@ -73,8 +62,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 						$"Found inversion at idx={i}: {c.OpenTimeUtc:O} < prev {lastClosedHours[lastClosedHours.Count - 1].OpenTimeUtc:O}.");
 					}
 
-				// Дополнительная каузальная гарантия:
-				// свеча должна быть закрыта на entryUtc.
 				if (c.OpenTimeUtc + Tf1h > entryUtc)
 					continue;
 
@@ -84,10 +71,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			if (lastClosedHours.Count == 0)
 				return feats;
 
-			// Сгруппируем в 2h-блоки: [h0,h1], [h2,h3], [h4,h5]
 			var blocks2h = Build2hBlocks (lastClosedHours);
 
-			// ===== 2h-агрегаты =====
 			if (blocks2h.Count > 0)
 				{
 				double totalHigh = blocks2h[0].High;
@@ -100,36 +85,31 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 					if (b.Low < totalLow) totalLow = b.Low;
 					}
 
-				feats[3] = (float) ((totalHigh - totalLow) / entryPrice);    // общий 2h range
-				feats[6] = (float) ((totalHigh - entryPrice) / entryPrice);  // насколько мы под хай 2h
-				feats[7] = (float) ((entryPrice - totalLow) / entryPrice);   // насколько мы над лоу 2h
+				feats[3] = (float) ((totalHigh - totalLow) / entryPrice);
+				feats[6] = (float) ((totalHigh - entryPrice) / entryPrice);
+				feats[7] = (float) ((entryPrice - totalLow) / entryPrice);
 				}
 
-			// первый 2h-блок (самый “старый” из последних 6h)
 			if (blocks2h.Count >= 1)
 				{
 				var b0 = blocks2h[0];
 				feats[4] = (float) ((b0.High - b0.Low) / entryPrice);
 				}
 
-			// последний 2h-блок (как выглядел рынок прямо перед входом)
 			if (blocks2h.Count >= 2)
 				{
 				var bLast = blocks2h[blocks2h.Count - 1];
 				feats[5] = (float) ((bLast.High - bLast.Low) / entryPrice);
 				}
 
-			// ===== 1h-хвост (последняя ЗАКРЫТАЯ 1h свеча перед entry) =====
 			var last1h = lastClosedHours[lastClosedHours.Count - 1];
 			double lastRange = last1h.High - last1h.Low;
 			double lastBody = Math.Abs (last1h.Close - last1h.Open);
 			double wickiness = lastRange > 0 ? 1.0 - (lastBody / lastRange) : 0.0;
 			feats[8] = (float) wickiness;
 
-			// час дня (UTC)
 			feats[9] = entryUtc.Hour / 23f;
 
-			// день вообще волатильный?
 			feats[10] = (float) (dayMinMove > 0.025 ? 1f : 0f);
 
 			return feats;
@@ -141,9 +121,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			public double Low { get; set; }
 			}
 
-		/// <summary>
-		/// Группируем по 2 часа подряд. Порядок сохраняем (от старых к новым).
-		/// </summary>
 		private static List<Block2h> Build2hBlocks ( List<Candle1h> hours )
 			{
 			var res = new List<Block2h> ();
@@ -169,10 +146,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			return res;
 			}
 
-		/// <summary>
-		/// LowerBound по OpenTimeUtc: первый индекс i, где all[i].OpenTimeUtc >= t.
-		/// Требование: список отсортирован по OpenTimeUtc.
-		/// </summary>
 		private static int LowerBoundOpenTimeUtc ( IReadOnlyList<Candle1h> all, DateTime t )
 			{
 			int lo = 0;
@@ -190,9 +163,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			return lo;
 			}
 
-		/// <summary>
-		/// UpperBound по OpenTimeUtc: первый индекс i, где all[i].OpenTimeUtc > t.
-		/// </summary>
 		private static int UpperBoundOpenTimeUtc ( IReadOnlyList<Candle1h> all, DateTime t )
 			{
 			int lo = 0;

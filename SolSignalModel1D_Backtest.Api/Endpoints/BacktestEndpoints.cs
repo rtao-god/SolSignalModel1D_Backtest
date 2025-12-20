@@ -10,6 +10,10 @@ using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Model;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 
 namespace SolSignalModel1D_Backtest.Api.Endpoints
 	{
@@ -188,7 +192,19 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 						});
 					}
 
-				var config = MapConfigDtoToDomain (dto.Config);
+				BacktestConfig config;
+				try
+					{
+					config = MapConfigDtoToDomain (dto.Config);
+					}
+				catch (ArgumentException ex)
+					{
+					return Results.BadRequest (new
+						{
+						error = "invalid_profile_config",
+						message = ex.Message
+						});
+					}
 
 				var category = string.IsNullOrWhiteSpace (dto.Category)
 					? "user"
@@ -317,21 +333,57 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 				CancellationToken cancellationToken ) =>
 			{
 				BacktestConfig config;
-				if (request.Config == null)
+
+				// В превью допустим пустой body/config: используем baseline.
+				if (request?.Config == null)
 					{
 					config = BacktestConfigFactory.CreateBaseline ();
 					}
 				else
 					{
-					config = MapConfigDtoToDomain (request.Config);
+					try
+						{
+						config = MapConfigDtoToDomain (request.Config);
+						}
+					catch (ArgumentException ex)
+						{
+						return Results.BadRequest (new
+							{
+							error = "invalid_preview_config",
+							message = ex.Message
+							});
+						}
 					}
 
-				// Фильтрация по SelectedPolicies.
-				if (request.SelectedPolicies != null && request.SelectedPolicies.Count > 0)
+				// Фильтрация по SelectedPolicies (если передали список имен).
+				if (request?.SelectedPolicies != null && request.SelectedPolicies.Count > 0)
 					{
-					var selected = new HashSet<string> (request.SelectedPolicies, StringComparer.OrdinalIgnoreCase);
+					var selected = new HashSet<string> (
+						request.SelectedPolicies
+							.Where (x => !string.IsNullOrWhiteSpace (x))
+							.Select (x => x.Trim ()),
+						StringComparer.OrdinalIgnoreCase);
 
-					var filtered = (config.Policies ?? new List<PolicyConfig> ())
+					if (selected.Count == 0)
+						{
+						return Results.BadRequest (new
+							{
+							error = "selected_policies_empty",
+							message = "SelectedPolicies содержит только пустые значения."
+							});
+						}
+
+					var srcPolicies = config.Policies;
+					if (srcPolicies == null)
+						{
+						// Это не “нормальная ситуация”: конфиг невалиден.
+						return Results.Problem (
+							title: "invalid_backtest_config",
+							detail: "BacktestConfig.Policies is null.",
+							statusCode: StatusCodes.Status500InternalServerError);
+						}
+
+					var filtered = srcPolicies
 						.Where (p => selected.Contains (p.Name))
 						.ToList ();
 
@@ -344,11 +396,14 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 							});
 						}
 
-					config.Policies.Clear ();
-					foreach (var p in filtered)
+					// Превью должно быть детерминированным и не зависеть от мутаций исходного конфига.
+					// Поэтому создаём новый BacktestConfig вместо Clear()/Add().
+					config = new BacktestConfig
 						{
-						config.Policies.Add (p);
-						}
+						DailyStopPct = config.DailyStopPct,
+						DailyTpPct = config.DailyTpPct,
+						Policies = filtered
+						};
 					}
 
 				BacktestDataSnapshot snapshot;
@@ -406,6 +461,8 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 
 		private static BacktestConfig MapConfigDtoToDomain ( BacktestConfigDto dto )
 			{
+			if (dto == null) throw new ArgumentNullException (nameof (dto));
+
 			var cfg = new BacktestConfig
 				{
 				DailyStopPct = dto.DailyStopPct,
@@ -413,20 +470,37 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 				Policies = new List<PolicyConfig> ()
 				};
 
-			if (dto.Policies != null)
+			if (dto.Policies == null)
+				return cfg;
+
+			for (int i = 0; i < dto.Policies.Count; i++)
 				{
-				foreach (var p in dto.Policies)
+				var p = dto.Policies[i];
+				if (p == null)
+					throw new ArgumentException ($"Policies[{i}] is null.", nameof (dto));
+
+				var name = p.Name?.Trim ();
+				if (string.IsNullOrWhiteSpace (name))
+					throw new ArgumentException ($"Policies[{i}].Name is required.", nameof (dto));
+
+				var policyType = p.PolicyType?.Trim ();
+				if (string.IsNullOrWhiteSpace (policyType))
+					throw new ArgumentException ($"Policy '{name}': PolicyType is required.", nameof (dto));
+
+				var marginModeText = p.MarginMode?.Trim ();
+				if (string.IsNullOrWhiteSpace (marginModeText))
+					throw new ArgumentException ($"Policy '{name}': MarginMode is required.", nameof (dto));
+
+				if (!Enum.TryParse<MarginMode> (marginModeText, ignoreCase: true, out var mm))
+					throw new ArgumentException ($"Policy '{name}': invalid MarginMode '{marginModeText}'.", nameof (dto));
+
+				cfg.Policies.Add (new PolicyConfig
 					{
-					cfg.Policies.Add (new PolicyConfig
-						{
-						Name = p.Name ?? string.Empty,
-						PolicyType = p.PolicyType ?? string.Empty,
-						Leverage = p.Leverage,
-						MarginMode = Enum.TryParse<MarginMode> (p.MarginMode, out var mm)
-							? mm
-							: MarginMode.Cross
-						});
-					}
+					Name = name,
+					PolicyType = policyType,
+					Leverage = p.Leverage,
+					MarginMode = mm
+					});
 				}
 
 			return cfg;

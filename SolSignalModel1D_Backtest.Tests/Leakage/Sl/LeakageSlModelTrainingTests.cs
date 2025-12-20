@@ -1,11 +1,11 @@
 ﻿using Microsoft.ML;
 using Microsoft.ML.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
-using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,12 +14,10 @@ using Xunit;
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
 	/// <summary>
-	/// Тесты утечки на уровне обучения SL-модели (SlFirstTrainer).
-	/// Предполагается, что SlDatasetBuilder уже future-blind.
-	/// Здесь проверяется, что изменение будущего хвоста не меняет
-	/// предсказания модели на train-сэмплах SL.
+	/// Утечка на уровне обучения SL-модели (SlFirstTrainer):
+	/// изменение хвоста (DateUtc > trainUntil) не должно влиять на train-часть.
 	/// </summary>
-	public class LeakageSlModelTrainingTests
+	public sealed class LeakageSlModelTrainingTests
 		{
 		private sealed class BinaryOutput
 			{
@@ -39,21 +37,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 		[Fact]
 		public void SlModel_Training_IsFutureBlind_ToTailMutation ()
 			{
-			// 1. Синтетические BacktestRecord + свечи для SL-датасета.
 			var allRows = BuildSyntheticRows (
 				count: 40,
 				out var sol6hDict,
 				out var sol1m);
 
-			var maxDate = allRows.Last ().Date;
-			var trainUntil = maxDate.AddDays (-10);
+			var maxDateUtc = allRows.Last ().DateUtc;
+			var trainUntil = maxDateUtc.AddDays (-10);
 
 			var rowsA = CloneRows (allRows);
-			var rowsB = CloneRows (allRows);
+			var rowsB = MutateFutureTail (CloneRows (allRows), trainUntil);
 
-			MutateFutureTail (rowsB, trainUntil);
-
-			// 2. Датасеты SL A/B.
 			var dsA = SlDatasetBuilder.Build (
 				rows: rowsA,
 				sol1h: null,
@@ -76,28 +70,19 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			AssertRowsEqual (dsA.MorningRows, dsB.MorningRows);
 			Assert.Equal (dsA.Samples.Count, dsB.Samples.Count);
-
 			Assert.True (dsA.Samples.Count > 0, "Synthetic SL dataset is empty in leakage test.");
 
-			// 3. Обучаем SL-модели на sample-ах A/B.
 			var trainerA = new SlFirstTrainer ();
-			var modelA = trainerA.Train (
-				samples: dsA.Samples,
-				asOfUtc: trainUntil);
+			var modelA = trainerA.Train (dsA.Samples, asOfUtc: trainUntil);
 
 			var trainerB = new SlFirstTrainer ();
-			var modelB = trainerB.Train (
-				samples: dsB.Samples,
-				asOfUtc: trainUntil);
+			var modelB = trainerB.Train (dsB.Samples, asOfUtc: trainUntil);
 
-			// 4. Сравниваем предсказания на одних и тех же SL-сэмплах.
 			var predsA = GetSlPredictions (modelA, dsA.Samples);
 			var predsB = GetSlPredictions (modelB, dsB.Samples);
 
 			AssertBinaryOutputsEqual (predsA, predsB);
 			}
-
-		// === helpers ===
 
 		private static List<BacktestRecord> BuildSyntheticRows (
 			int count,
@@ -112,32 +97,27 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			for (var i = 0; i < count; i++)
 				{
-				var date = start.AddDays (i);
+				var dateUtc = start.AddDays (i);
 				var price = 100 + i;
 
-				var row = new BacktestRecord
-					{
-					Date = date,
-					IsMorning = true,
-					MinMove = 0.03
-					};
+				rows.Add (CreateBacktestRecord (
+					dateUtc: dateUtc,
+					isMorning: true,
+					minMove: 0.03));
 
-				rows.Add (row);
-
-				dict6h[date] = new Candle6h
+				dict6h[dateUtc] = new Candle6h
 					{
-					OpenTimeUtc = date,
+					OpenTimeUtc = dateUtc,
 					Close = price,
 					High = price * 1.02,
 					Low = price * 0.98
 					};
 
-				// 20 минут будущего: и TP, и SL потенциально достижимы.
 				for (var k = 0; k < 20; k++)
 					{
 					all1m.Add (new Candle1m
 						{
-						OpenTimeUtc = date.AddMinutes (k),
+						OpenTimeUtc = dateUtc.AddMinutes (k),
 						Open = price,
 						Close = price,
 						High = price * 1.05,
@@ -148,7 +128,75 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			sol6hDict = dict6h;
 			sol1m = all1m;
-			return rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
+
+			return rows.OrderBy (r => r.DateUtc).ToList ();
+			}
+
+		private static BacktestRecord CreateBacktestRecord ( DateTime dateUtc, bool isMorning, double minMove )
+			{
+			var vec = BuildVector64Deterministic (dateUtc);
+
+			var causal = new CausalPredictionRecord
+				{
+				DateUtc = dateUtc,
+				FeaturesVector = vec,
+				Features = new CausalFeatures { IsMorning = isMorning },
+				PredLabel = 1,
+				PredLabel_Day = 1,
+				PredLabel_DayMicro = 1,
+				PredLabel_Total = 1,
+				ProbUp_Day = 0.0,
+				ProbFlat_Day = 1.0,
+				ProbDown_Day = 0.0,
+				ProbUp_DayMicro = 0.0,
+				ProbFlat_DayMicro = 1.0,
+				ProbDown_DayMicro = 0.0,
+				ProbUp_Total = 0.0,
+				ProbFlat_Total = 1.0,
+				ProbDown_Total = 0.0,
+				Conf_Day = 1.0,
+				Conf_Micro = 0.0,
+				MicroPredicted = false,
+				PredMicroUp = false,
+				PredMicroDown = false,
+				RegimeDown = false,
+				Reason = string.Empty,
+				MinMove = minMove
+				};
+
+			var forward = new ForwardOutcomes
+				{
+				DateUtc = dateUtc,
+				WindowEndUtc = dateUtc.AddHours (24),
+				Entry = 100.0,
+				MaxHigh24 = 105.0,
+				MinLow24 = 95.0,
+				Close24 = 100.0,
+				DayMinutes = Array.Empty<Candle1m> (),
+				MinMove = minMove,
+				TrueLabel = 1,
+				FactMicroUp = false,
+				FactMicroDown = false
+				};
+
+			return new BacktestRecord
+				{
+				Causal = causal,
+				Forward = forward
+				};
+			}
+
+		private static double[] BuildVector64Deterministic ( DateTime dateUtc )
+			{
+			var v = new double[MlSchema.FeatureCount];
+
+			int seed = dateUtc.Year * 10_000 + dateUtc.Month * 100 + dateUtc.Day;
+			var rng = new Random (seed);
+
+			for (int i = 0; i < v.Length; i++)
+				v[i] = (rng.NextDouble () - 0.5) * 2.0;
+
+			return v;
 			}
 
 		private static List<BacktestRecord> CloneRows ( List<BacktestRecord> src )
@@ -156,52 +204,75 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var res = new List<BacktestRecord> (src.Count);
 			foreach (var r in src)
 				{
-				res.Add (new BacktestRecord
-					{
-					Date = r.ToCausalDateUtc(),
-					IsMorning = r.Causal.IsMorning,
-					MinMove = r.MinMove
-					});
+				res.Add (CreateBacktestRecord (
+					dateUtc: r.DateUtc,
+					isMorning: r.Causal.IsMorning == true,
+					minMove: r.MinMove));
 				}
 			return res;
 			}
 
-		private static void MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntil )
+		private static List<BacktestRecord> MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntilUtc )
 			{
-			foreach (var r in rows.Where (r => r.ToCausalDateUtc() > trainUntil))
+			var res = new List<BacktestRecord> (rows.Count);
+
+			foreach (var r in rows)
 				{
-				r.Causal.IsMorning = !r.Causal.IsMorning;
-				r.MinMove = r.MinMove * 2.0;
+				if (r.DateUtc <= trainUntilUtc)
+					{
+					res.Add (r);
+					continue;
+					}
+
+				res.Add (CreateBacktestRecord (
+					dateUtc: r.DateUtc,
+					isMorning: !(r.Causal.IsMorning == true),
+					minMove: r.MinMove * 2.0));
 				}
+
+			return res;
 			}
 
 		private static void AssertRowsEqual ( List<BacktestRecord> xs, List<BacktestRecord> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
-			for (var i = 0; i < xs.Count; i++)
+			for (int i = 0; i < xs.Count; i++)
 				{
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
+				Assert.Equal (a.DateUtc, b.DateUtc);
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.MinMove, b.MinMove);
 				}
 			}
 
-		private static List<BinaryOutput> GetSlPredictions (
-			ITransformer model,
-			List<SlHitSample> samples )
+		private static List<BinaryOutput> GetSlPredictions ( ITransformer model, List<SlHitSample> samples )
 			{
+			if (model == null) throw new ArgumentNullException (nameof (model));
+			if (samples == null) throw new ArgumentNullException (nameof (samples));
+
 			var ml = new MLContext (seed: 42);
 
 			var data = ml.Data.LoadFromEnumerable (
-				samples.Select (s => new SlEvalRow
-					{
-					Label = s.Forward.TrueLabel,
-					Features = s.Causal.Features ?? Array.Empty<float> ()
-					}));
+				samples.Select (s =>
+				{
+					if (s.Features == null)
+						throw new InvalidOperationException ("[sl-test] SlHitSample.Features is null.");
+
+					if (s.Features.Length != MlSchema.FeatureCount)
+						{
+						throw new InvalidOperationException (
+							$"[sl-test] SlHitSample.Features length mismatch: got={s.Features.Length}, expected={MlSchema.FeatureCount}.");
+						}
+
+					return new SlEvalRow
+						{
+						Label = s.Label,
+						Features = s.Features
+						};
+				}));
 
 			var scored = model.Transform (data);
 
@@ -210,14 +281,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				.ToList ();
 			}
 
-		private static void AssertBinaryOutputsEqual (
-			List<BinaryOutput> a,
-			List<BinaryOutput> b,
-			double tol = 1e-6 )
+		private static void AssertBinaryOutputsEqual ( List<BinaryOutput> a, List<BinaryOutput> b, double tol = 1e-6 )
 			{
 			Assert.Equal (a.Count, b.Count);
 
-			for (var i = 0; i < a.Count; i++)
+			for (int i = 0; i < a.Count; i++)
 				{
 				Assert.Equal (a[i].PredictedLabel, b[i].PredictedLabel);
 				Assert.InRange (Math.Abs (a[i].Score - b[i].Score), 0.0, tol);

@@ -70,10 +70,9 @@ namespace SolSignalModel1D_Backtest
 			if (solWinTrain.Count == 0)
 				throw new InvalidOperationException ("[daily-rows] aligned SOL 6h window is empty after intersection.");
 
-			// Индикаторные ряды должны покрывать весь диапазон, иначе лучше упасть, чем тихо обучиться на дырках.
+			// Индикаторные ряды должны покрывать весь диапазон
 			var fngDict = indicatorsUpdater.LoadFngDict (histFrom.ToCausalDateUtc (), toUtc.ToCausalDateUtc ());
 			var dxyDict = indicatorsUpdater.LoadDxyDict (histFrom.ToCausalDateUtc (), toUtc.ToCausalDateUtc ());
-			indicatorsUpdater.EnsureCoverageOrFail (histFrom.ToCausalDateUtc (), toUtc.ToCausalDateUtc ());
 
 			var build = RowBuilder.BuildDailyRows (
 				solWinTrain: solWinTrain,

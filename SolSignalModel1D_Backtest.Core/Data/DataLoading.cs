@@ -1,5 +1,11 @@
-﻿using System.Globalization;
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
+using System.Threading.Tasks;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 
@@ -47,15 +53,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					if (endTimeMs.HasValue)
 						url += $"&endTime={endTimeMs.Value}";
 
-					using var resp = await http.GetAsync (url);
+					using var resp = await http.GetAsync (url).ConfigureAwait (false);
 					if (!resp.IsSuccessStatusCode)
 						{
 						Console.WriteLine ($"[binance-1m] HTTP {(int) resp.StatusCode} при загрузке {symbol}, url={url}");
 						resp.EnsureSuccessStatusCode ();
 						}
 
-					await using var s = await resp.Content.ReadAsStreamAsync ();
-					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+					await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
+					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
 
 					if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
 						break;
@@ -135,15 +141,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					if (endTimeMs.HasValue)
 						url += $"&endTime={endTimeMs.Value}";
 
-					using var resp = await http.GetAsync (url);
+					using var resp = await http.GetAsync (url).ConfigureAwait (false);
 					if (!resp.IsSuccessStatusCode)
 						{
 						Console.WriteLine ($"[binance-6h] HTTP {(int) resp.StatusCode} при загрузке {symbol}, url={url}");
 						resp.EnsureSuccessStatusCode ();
 						}
 
-					await using var s = await resp.Content.ReadAsStreamAsync ();
-					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+					await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
+					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
 
 					if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
 						break;
@@ -230,15 +236,15 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					if (endTimeMs.HasValue)
 						url += $"&endTime={endTimeMs.Value}";
 
-					using var resp = await http.GetAsync (url);
+					using var resp = await http.GetAsync (url).ConfigureAwait (false);
 					if (!resp.IsSuccessStatusCode)
 						{
 						Console.WriteLine ($"[binance-1h] HTTP {(int) resp.StatusCode} при загрузке {symbol}, url={url}");
 						resp.EnsureSuccessStatusCode ();
 						}
 
-					await using var s = await resp.Content.ReadAsStreamAsync ();
-					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+					await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
+					var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
 
 					if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
 						break;
@@ -297,16 +303,18 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 			try
 				{
-				string url = "https://api.alternative.me/fng/?limit=1000";
-				using var resp = await http.GetAsync (url);
+				// limit=0 => вернуть всю доступную историю (не только последние 1000 точек).
+				// Это критично, если строим пайплайн с 2021 года.
+				string url = "https://api.alternative.me/fng/?limit=0";
+				using var resp = await http.GetAsync (url).ConfigureAwait (false);
 				if (!resp.IsSuccessStatusCode)
 					{
 					Console.WriteLine ($"[fng] HTTP {(int) resp.StatusCode} при загрузке FNG, url={url}");
 					resp.EnsureSuccessStatusCode ();
 					}
 
-				await using var s = await resp.Content.ReadAsStreamAsync ();
-				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+				await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
+				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
 
 				if (root.TryGetProperty ("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
 					{
@@ -314,7 +322,9 @@ namespace SolSignalModel1D_Backtest.Core.Data
 						{
 						if (!el.TryGetProperty ("timestamp", out var tsEl)) continue;
 						if (!long.TryParse (tsEl.GetString (), out long ts)) continue;
+
 						DateTime d = DateTimeOffset.FromUnixTimeSeconds (ts).UtcDateTime.ToCausalDateUtc ();
+
 						if (el.TryGetProperty ("value", out var vEl) && int.TryParse (vEl.GetString (), out int v))
 							dict[d] = v;
 						}
@@ -335,33 +345,29 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			if (end < start)
 				throw new ArgumentException ("end < start для диапазона DXY", nameof (end));
 
+			// Работаем строго в терминах дней (UTC), чтобы чанки не «плыли» из-за времени.
+			var startDay = start.ToCausalDateUtc ();
+			var endDay = end.ToCausalDateUtc ();
+
+			// На длинном периоде устойчивее резать запросы на куски.
+			// Даже если API *в теории* принимает большие диапазоны, на практике часто встречаются обрезания/таймауты.
+			const int MaxDaysPerRequest = 370; // ~1 год с запасом
+
 			var dict = new Dictionary<DateTime, double> ();
 
 			try
 				{
-				string to = "EUR,JPY,GBP,CAD,SEK,CHF";
-				string url = $"https://api.frankfurter.app/{start:yyyy-MM-dd}..{end:yyyy-MM-dd}?from=USD&to={to}";
-				using var resp = await http.GetAsync (url);
-				if (!resp.IsSuccessStatusCode)
+				for (var cur = startDay; cur <= endDay;)
 					{
-					Console.WriteLine ($"[dxy] HTTP {(int) resp.StatusCode} при загрузке DXY, url={url}");
-					resp.EnsureSuccessStatusCode ();
-					}
+					var chunkEnd = cur.AddDays (MaxDaysPerRequest - 1);
+					if (chunkEnd > endDay) chunkEnd = endDay;
 
-				await using var s = await resp.Content.ReadAsStreamAsync ();
-				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+					var chunk = await GetDxySeriesChunk (http, cur, chunkEnd).ConfigureAwait (false);
 
-				if (root.TryGetProperty ("rates", out var rates))
-					{
-					foreach (var day in rates.EnumerateObject ())
-						{
-						if (!DateTime.TryParse (day.Name, out var d))
-							continue;
+					foreach (var kv in chunk)
+						dict[kv.Key] = kv.Value;
 
-						double idx = IndexFromRates (day.Value, out int used);
-						if (!double.IsNaN (idx) && used >= 4)
-							dict[d.ToCausalDateUtc ()] = idx;
-						}
+					cur = chunkEnd.AddDays (1);
 					}
 
 				return dict;
@@ -373,21 +379,70 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				}
 			}
 
+		private static async Task<Dictionary<DateTime, double>> GetDxySeriesChunk ( HttpClient http, DateTime startDayUtc, DateTime endDayUtc )
+			{
+			var dict = new Dictionary<DateTime, double> ();
+
+			// Актуальный Frankfurter API: api.frankfurter.dev/v1, параметры base/symbols.
+			string symbols = "EUR,JPY,GBP,CAD,SEK,CHF";
+			string url =
+				$"https://api.frankfurter.dev/v1/{startDayUtc:yyyy-MM-dd}..{endDayUtc:yyyy-MM-dd}?base=USD&symbols={symbols}";
+
+			using var resp = await http.GetAsync (url).ConfigureAwait (false);
+			if (!resp.IsSuccessStatusCode)
+				{
+				Console.WriteLine ($"[dxy] HTTP {(int) resp.StatusCode} при загрузке DXY, url={url}");
+				resp.EnsureSuccessStatusCode ();
+				}
+
+			await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
+			var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
+
+			if (!root.TryGetProperty ("rates", out var rates) || rates.ValueKind != JsonValueKind.Object)
+				return dict;
+
+			foreach (var day in rates.EnumerateObject ())
+				{
+				if (!DateTime.TryParseExact (
+						day.Name,
+						"yyyy-MM-dd",
+						CultureInfo.InvariantCulture,
+						DateTimeStyles.None,
+						out var d))
+					{
+					continue;
+					}
+
+				// Нормализуем в каузальную дату UTC (00:00Z).
+				d = DateTime.SpecifyKind (d, DateTimeKind.Utc).ToCausalDateUtc ();
+
+				double idx = IndexFromRates (day.Value, out int used);
+				if (!double.IsNaN (idx) && used >= 4)
+					dict[d] = idx;
+				}
+
+			return dict;
+			}
+
 		private static double IndexFromRates ( JsonElement rates, out int used )
 			{
 			double sumW = 0, acc = 0;
 			used = 0;
+
 			foreach (var kv in DxyWeights)
 				{
 				if (!rates.TryGetProperty (kv.Key, out var re) || re.ValueKind != JsonValueKind.Number)
 					continue;
+
 				double r = re.GetDouble ();
 				if (r <= 0) continue;
+
 				double w = kv.Value / 100.0;
 				acc += w * Math.Log (r);
 				sumW += w;
 				used++;
 				}
+
 			if (used == 0 || sumW == 0) return double.NaN;
 			return Math.Exp (acc / sumW);
 			}
@@ -429,7 +484,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			}
 
 		// ===== диапазонный загрузчик =====
-		public static async Task<List<(DateTime openUtc, double open, double high, double low,     double close)>> GetBinanceKlinesRange (
+		public static async Task<List<(DateTime openUtc, double open, double high, double low, double close)>> GetBinanceKlinesRange (
 			HttpClient http,
 			string symbol,
 			string interval,
@@ -446,15 +501,12 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					{
 					var diff = fromUtc - toUtc; // >= 0 при to<=from
 
-					// Маленький "отрицательный" диапазон (ещё не началась следующая свеча) — нормально,
-					// просто ничего не загружаем.
 					if (diff <= intervalLen.Value + TimeSpan.FromSeconds (5))
 						{
 						return new List<(DateTime openUtc, double open, double high, double low, double close)> (0);
 						}
 					}
 
-				// Реальная аномалия — toUtc сильно меньше fromUtc.
 				throw new ArgumentException ("toUtc < fromUtc для диапазона klines", nameof (toUtc));
 				}
 
@@ -475,7 +527,7 @@ namespace SolSignalModel1D_Backtest.Core.Data
 				string url =
 					$"https://api.binance.com/api/v3/klines?symbol={symbolEsc}&interval={interval}&limit={limit}&startTime={cursor}&endTime={endMs}";
 
-				using var resp = await http.GetAsync (url);
+				using var resp = await http.GetAsync (url).ConfigureAwait (false);
 				if (!resp.IsSuccessStatusCode)
 					{
 					Console.WriteLine (
@@ -483,8 +535,8 @@ namespace SolSignalModel1D_Backtest.Core.Data
 					resp.EnsureSuccessStatusCode ();
 					}
 
-				await using var s = await resp.Content.ReadAsStreamAsync ();
-				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s);
+				await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
+				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
 
 				if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength () == 0)
 					break;
@@ -508,8 +560,6 @@ namespace SolSignalModel1D_Backtest.Core.Data
 
 				if (maxTs == 0)
 					{
-					// Ненормальная ситуация: Binance вернул непустой массив,
-					// но ни одной валидной метки времени мы не увидели.
 					var cursorDt = DateTimeOffset.FromUnixTimeMilliseconds (cursor).UtcDateTime;
 					var endDt = DateTimeOffset.FromUnixTimeMilliseconds (endMs).UtcDateTime;
 
@@ -528,7 +578,6 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			return result;
 			}
 
-		// helper 
 		private static TimeSpan? TryGetBinanceIntervalLength ( string interval )
 			{
 			return interval switch

@@ -1,70 +1,34 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 	{
 	/// <summary>
-	/// Контейнер датасета для SL-модели:
-	/// - MorningRows — исходные дневные строки для утренних точек;
-	/// - Samples — SL-сэмплы (long/short) для обучения.
+	/// Контейнер датасета для SL-модели.
 	/// </summary>
 	public sealed class SlDataset
 		{
-		/// <summary>
-		/// Граница train-окна для SL-модели.
-		/// Все сэмплы в этом датасете имеют baseline-выход <= TrainUntilUtc.
-		/// </summary>
 		public DateTime TrainUntilUtc { get; init; }
 
-		/// <summary>
-		/// Утренние дневные строки, по которым строились SL-сэмплы.
-		/// Один день может давать несколько сэмплов (long/short),
-		/// но сам BacktestRecord здесь уникален по Date.
-		/// </summary>
 		public List<BacktestRecord> MorningRows { get; init; } = new List<BacktestRecord> ();
 
-		/// <summary>
-		/// Сырые SL-сэмплы (long/short), которыми фактически тренируется модель.
-		/// </summary>
 		public List<SlHitSample> Samples { get; init; } = new List<SlHitSample> ();
 		}
 
 	/// <summary>
-	/// Builder SL-датасета поверх низкоуровневого SlOfflineBuilder.
-	/// Задача:
-	/// - использовать только дни с Date <= trainUntil;
-	/// - выкинуть любые сэмплы, у которых baseline-выход залезает за trainUntil.
-	///
-	/// Таким образом, train-часть SL-модели строго future-blind
-	/// и не использует path-based информацию из OOS-участка.
+	/// Builder SL-датасета.
 	/// </summary>
 	public static class SlDatasetBuilder
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		/// <summary>
-		/// Строит SlDataset для обучения SL-модели.
-		/// </summary>
-		/// <param name="rows">
-		/// Все дневные строки RowBuilder'а (включая IsMorning/MinMove/RegimeDown).
-		/// </param>
-		/// <param name="sol1h">Вся 1h-история SOL (для фичей). Может быть null.</param>
-		/// <param name="sol1m">Вся 1m-история SOL (для path-based факта).</param>
-		/// <param name="sol6hDict">Словарь 6h-свечей SOL по Date (NY-утро).</param>
-		/// <param name="trainUntil">
-		/// Граница train-окна. Дни, у которых baseline-выход &gt; trainUntil,
-		/// не попадают в датасет.
-		/// </param>
-		/// <param name="tpPct">TP (в долях, 0.03 = 3%).</param>
-		/// <param name="slPct">SL (в долях, 0.05 = 5%).</param>
-		/// <param name="strongSelector">
-		/// Кастомная логика strong/weak для SL-фич; если null — все дни сильные.
-		/// </param>
 		public static SlDataset Build (
 			List<BacktestRecord> rows,
 			IReadOnlyList<Candle1h>? sol1h,
@@ -77,29 +41,46 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 			{
 			if (rows == null) throw new ArgumentNullException (nameof (rows));
 			if (sol6hDict == null) throw new ArgumentNullException (nameof (sol6hDict));
-			if (sol1m == null) throw new ArgumentNullException (nameof (sol1m));
 
-			// 1. Берём только дни с Date <= trainUntil.
-			// Это гарантирует, что EntryUtc сэмпла не позже trainUntil.
-			var rowsTrain = rows
-				.Where (r => r.ToCausalDateUtc() <= trainUntil)
-				.OrderBy (r => r.ToCausalDateUtc())
-				.ToList ();
+			if (sol1m == null || sol1m.Count == 0)
+				throw new InvalidOperationException ("[SlDatasetBuilder] sol1m is required and must be non-empty.");
+
+			if (sol1h == null || sol1h.Count == 0)
+				throw new InvalidOperationException ("[SlDatasetBuilder] sol1h is required and must be non-empty.");
+
+			if (trainUntil.Kind == DateTimeKind.Local)
+				throw new InvalidOperationException ($"[SlDatasetBuilder] trainUntil must not be Local: {trainUntil:O}.");
+
+			var trainUntilUtc = trainUntil.Kind == DateTimeKind.Unspecified
+				? DateTime.SpecifyKind (trainUntil, DateTimeKind.Utc)
+				: trainUntil;
+
+			// Берём только утренние точки, у которых baseline-exit укладывается в trainUntil.
+			var rowsTrain = new List<BacktestRecord> (rows.Count);
+
+			foreach (var r in rows.OrderBy (r => r.DateUtc))
+				{
+				if (r.Causal.IsMorning != true)
+					continue;
+
+				if (!Windowing.TryComputeBaselineExitUtc (r.DateUtc, NyTz, out var exitUtc))
+					continue;
+
+				if (exitUtc <= trainUntilUtc)
+					rowsTrain.Add (r);
+				}
 
 			if (rowsTrain.Count == 0)
 				{
 				return new SlDataset
 					{
-					TrainUntilUtc = trainUntil,
+					TrainUntilUtc = trainUntilUtc,
 					MorningRows = new List<BacktestRecord> (),
 					Samples = new List<SlHitSample> ()
 					};
 				}
 
-			// 2. Низкоуровневая генерация SL-сэмплов (long/short) поверх rowsTrain.
-			// Внутри SlOfflineBuilder.Build:
-			// - используется только rowsTrain (IsMorning/MinMove);
-			// - 1h/1m/6h берутся "как есть" по всей истории.
+			// Генерация SL-сэмплов только на заранее отфильтрованных днях.
 			var allSamples = SlOfflineBuilder.Build (
 				rows: rowsTrain,
 				sol1h: sol1h,
@@ -107,60 +88,51 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 				sol6hDict: sol6hDict,
 				tpPct: tpPct,
 				slPct: slPct,
-				strongSelector: strongSelector
-			);
+				strongSelector: strongSelector);
 
 			if (allSamples.Count == 0)
 				{
 				return new SlDataset
 					{
-					TrainUntilUtc = trainUntil,
+					TrainUntilUtc = trainUntilUtc,
 					MorningRows = new List<BacktestRecord> (),
 					Samples = new List<SlHitSample> ()
 					};
 				}
 
-			// 3. Фильтруем сэмплы: baseline-выход не должен залезать за trainUntil.
-			// path-based логика внутри SlOfflineBuilder использует окна до
-			// ComputeBaselineExitUtc(entry), здесь мы просто режем по этой границе.
+			// Финальный safety-cut по baseline-exit (на случай неконсистентного EntryUtc в сэмплах).
 			var filteredSamples = new List<SlHitSample> (allSamples.Count);
 
 			foreach (var s in allSamples)
 				{
-				var exit = Windowing.ComputeBaselineExitUtc (s.EntryUtc, NyTz);
-
-				if (exit <= trainUntil)
-					{
+				var exitUtc = Windowing.ComputeBaselineExitUtc (s.EntryUtc, NyTz);
+				if (exitUtc <= trainUntilUtc)
 					filteredSamples.Add (s);
-					}
 				}
 
-			// 4. Собираем утренние строки, по которым остались сэмплы.
-			var morningByDate = rowsTrain
-				.Where (r => r.Causal.IsMorning == true)
-				.GroupBy (r => r.ToCausalDateUtc())
+			var morningByEntryUtc = rowsTrain
+				.GroupBy (r => r.DateUtc)
 				.ToDictionary (g => g.Key, g => g.First ());
 
 			var morningRows = new List<BacktestRecord> ();
 
 			foreach (var s in filteredSamples)
 				{
-				if (morningByDate.TryGetValue (s.EntryUtc, out var row))
-					{
-					morningRows.Add (row);
-					}
+				if (!morningByEntryUtc.TryGetValue (s.EntryUtc, out var row))
+					throw new InvalidOperationException ($"[SlDatasetBuilder] No BacktestRecord for sample entryUtc={s.EntryUtc:O}.");
+
+				morningRows.Add (row);
 				}
 
-			// Делаем уникальными по Date (иначе long/short дадут дубликаты одного дня).
 			var distinctMorning = morningRows
-				.OrderBy (r => r.ToCausalDateUtc())
-				.GroupBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => r.DateUtc)
+				.GroupBy (r => r.DateUtc)
 				.Select (g => g.First ())
 				.ToList ();
 
 			return new SlDataset
 				{
-				TrainUntilUtc = trainUntil,
+				TrainUntilUtc = trainUntilUtc,
 				MorningRows = distinctMorning,
 				Samples = filteredSamples
 				};

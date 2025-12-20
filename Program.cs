@@ -209,7 +209,7 @@ namespace SolSignalModel1D_Backtest
 			DateTime trainUntilUtc )
 			{
 			// Собираем датасет так же, как внутри ModelTrainer.
-			// Важно: эта метрика отвечает на вопрос "как модель выглядит на том train, на котором она реально училась".
+			// Важно: метрика отвечает на вопрос "как модель выглядит на том train, на котором она реально училась".
 			var dataset = DailyDatasetBuilder.Build (
 				allRows,
 				trainUntilUtc,
@@ -219,12 +219,15 @@ namespace SolSignalModel1D_Backtest
 				datesToExclude: null
 			);
 
-			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.ToCausalDateUtc()));
+			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.Causal.DateUtc));
 
 			var trainRecords = new List<BacktestRecord> (trainDates.Count);
-			foreach (var r in records)
+			for (int i = 0; i < records.Count; i++)
 				{
-				if (trainDates.Contains (r.ToCausalDateUtc()))
+				var r = records[i];
+
+				// Требование: ключ датасета и ключ record должны совпадать по дню.
+				if (trainDates.Contains (r.Forward.DateUtc))
 					trainRecords.Add (r);
 				}
 
@@ -268,20 +271,19 @@ namespace SolSignalModel1D_Backtest
 			// Единый контракт сплита как в DailyDatasetBuilder/MicroDatasetBuilder:
 			// граница интерпретируется через baseline-exit (TrainBoundary).
 			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
-			var split = boundary.Split (records, r => r.ToCausalDateUtc());
+			var split = boundary.Split (records, r => r.Forward.DateUtc);
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.ToCausalDateUtc().ToString ("O"));
+					.Select (r => r.Forward.DateUtc.ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[train-split] Found excluded records (baseline-exit undefined). " +
 					$"count={split.Excluded.Count}. sample=[{string.Join (", ", sample)}].");
 				}
 
-			// Возвращаем конкретные List, чтобы внешний код не зависел от внутреннего типа коллекций split.
 			train = split.Train is List<BacktestRecord> tl ? tl : split.Train.ToList ();
 			oos = split.Oos is List<BacktestRecord> ol ? ol : split.Oos.ToList ();
 			}

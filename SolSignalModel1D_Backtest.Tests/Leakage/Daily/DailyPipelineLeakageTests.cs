@@ -1,18 +1,16 @@
-﻿using System;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
 	/// <summary>
-	/// Интеграционный тест "поведение должно ломаться при разрушении train-сигнала":
-	/// 1) shuffle train-лейблов → качество на OOS должно заметно упасть;
-	/// 2) randomize train-фичей → качество на OOS должно стать близким к случайному.
-	///
-	/// Тест специально самодостаточный: не зависит от внешнего кэша свечей/старых бутстрапов,
-	/// чтобы не маскировать ошибки инфраструктуры отсутствием данных.
+	/// Интеграционный тест: разрушение train-сигнала должно ломать качество на OOS.
 	/// </summary>
 	public sealed class DailyPipelineLeakageTests
 		{
@@ -27,20 +25,18 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public async Task DailyModel_OosQualityDrops_WhenTrainLabelsAreShuffled ()
 			{
 			var allRows = BuildSyntheticRows (
-				startUtc: new DateTime (2022, 01, 01, 0, 0, 0, DateTimeKind.Utc),
-				days: 700,
+				startUtc: new DateTime (2022, 01, 01, 13, 0, 0, DateTimeKind.Utc),
+				days: 720,
 				seed: 123);
 
-			var baseline = await RunDailyPipelineAsync (
-				allRows,
-				mutateTrain: null);
+			var baseline = await RunDailyPipelineAsync (allRows, mutateTrain: null);
 
 			Assert.False (double.IsNaN (baseline.BaselineOosAccuracy), "Baseline OOS accuracy is NaN.");
 			Assert.True (baseline.BaselineOosAccuracy > 0.45, $"Baseline OOS accuracy too low: {baseline.BaselineOosAccuracy:0.000}");
 
 			var shuffled = await RunDailyPipelineAsync (
 				allRows,
-				mutateTrain: ( rows, trainUntil ) => ShuffleTrainLabels (rows, trainUntil, seed: 777));
+				mutateTrain: ( rows, trainUntil ) => rows = ShuffleTrainLabels (rows, trainUntil, seed: 777));
 
 			var accShuffled = ComputeAccuracy (shuffled.OosPreds);
 
@@ -53,20 +49,18 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		public async Task DailyModel_OosQualityDrops_WhenTrainFeaturesAreRandomized ()
 			{
 			var allRows = BuildSyntheticRows (
-				startUtc: new DateTime (2022, 01, 01, 0, 0, 0, DateTimeKind.Utc),
-				days: 700,
+				startUtc: new DateTime (2022, 01, 01, 13, 0, 0, DateTimeKind.Utc),
+				days: 720,
 				seed: 42);
 
-			var baseline = await RunDailyPipelineAsync (
-				allRows,
-				mutateTrain: null);
+			var baseline = await RunDailyPipelineAsync (allRows, mutateTrain: null);
 
 			Assert.False (double.IsNaN (baseline.BaselineOosAccuracy), "Baseline OOS accuracy is NaN.");
 			Assert.True (baseline.BaselineOosAccuracy > 0.45, $"Baseline OOS accuracy too low: {baseline.BaselineOosAccuracy:0.000}");
 
 			var randomized = await RunDailyPipelineAsync (
 				allRows,
-				mutateTrain: ( rows, trainUntil ) => RandomizeTrainFeatures (rows, trainUntil, seed: 999));
+				mutateTrain: ( rows, trainUntil ) => rows = RandomizeTrainFeatures (rows, trainUntil, seed: 999));
 
 			var accRandom = ComputeAccuracy (randomized.OosPreds);
 
@@ -77,37 +71,30 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 		private static async Task<DailyRunResult> RunDailyPipelineAsync (
 			List<LabeledCausalRow> allRows,
-			Action<List<BacktestRecord>, DateTime>? mutateTrain )
+			Func<List<LabeledCausalRow>, DateTime, List<LabeledCausalRow>>? mutateTrain )
 			{
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
-			if (allRows.Count == 0) throw new InvalidOperationException ("RunDailyPipelineAsync: пустой allRows.");
+			if (allRows.Count == 0) throw new InvalidOperationException ("RunDailyPipelineAsync: empty allRows.");
 
-			// Стабильный порядок по времени.
-			var ordered = allRows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
-
-			var maxDate = ordered[^1].Date;
+			var ordered = allRows.OrderBy (r => r.DateUtc).ToList ();
+			var maxDate = ordered[^1].DateUtc;
 
 			const int HoldoutDays = 120;
 			var trainUntil = maxDate.AddDays (-HoldoutDays);
 
-			var trainRows = TakeTrainRows (ordered, trainUntil);
+			var trainRows = ordered.Where (r => r.DateUtc <= trainUntil).ToList ();
 
 			if (trainRows.Count < 100)
 				{
 				trainRows = ordered;
-				trainUntil = ordered[^1].Date;
+				trainUntil = ordered[^1].DateUtc;
 				}
 
-			// Даём тесту возможность испортить train-сигнал ДО обучения.
-			mutateTrain?.Invoke (allRows, trainUntil);
-
-			// После мутации восстанавливаем консистентность:
-			// - заново сортируем,
-			// - заново берём trainRows,
-			// - приводим Features к каузальному вектору (иначе тренировка/инференс могут разъехаться).
-			ordered = allRows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
-			trainRows = TakeTrainRows (ordered, trainUntil);
-			SyncFeaturesWithCausalVector (trainRows);
+			if (mutateTrain != null)
+				{
+				ordered = mutateTrain (ordered, trainUntil).OrderBy (r => r.DateUtc).ToList ();
+				trainRows = ordered.Where (r => r.DateUtc <= trainUntil).ToList ();
+				}
 
 			var trainer = new ModelTrainer
 				{
@@ -118,19 +105,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				};
 
 			var bundle = trainer.TrainAll (trainRows);
-
 			var engine = new PredictionEngine (bundle);
 
-			// OOS предсказания.
 			var oos = new List<(DateTime, int, int)> ();
 
 			foreach (var r in ordered)
 				{
-				if (r.ToCausalDateUtc() <= trainUntil)
+				if (r.DateUtc <= trainUntil)
 					continue;
 
-				var p = engine.PredictCausal (r.ToCausal ());
-				oos.Add ((r.ToCausalDateUtc(), r.Forward.TrueLabel, p.Class));
+				var p = engine.PredictCausal (r.Causal);
+				oos.Add ((r.DateUtc, r.TrueLabel, p.PredLabel));
 				}
 
 			var acc = ComputeAccuracy (oos);
@@ -143,30 +128,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				});
 			}
 
-		private static void SyncFeaturesWithCausalVector ( List<BacktestRecord> rows )
-			{
-			foreach (var r in rows)
-				{
-				// Инвариант: фичи, на которых учимся, должны совпадать с тем,
-				// что реально подаётся в PredictCausal (через CausalDataRow.FeaturesVector).
-				var v = r.ToCausal ().FeaturesVector;
-				r.Causal.Features = v.ToArray ();
-				}
-			}
-
-		private static List<BacktestRecord> TakeTrainRows ( List<BacktestRecord> orderedByDate, DateTime trainUntilUtc )
-			{
-			var train = new List<BacktestRecord> (orderedByDate.Count);
-			foreach (var r in orderedByDate)
-				{
-				if (r.ToCausalDateUtc() <= trainUntilUtc)
-					train.Add (r);
-				else
-					break;
-				}
-			return train;
-			}
-
 		private static double ComputeAccuracy ( List<(DateTime DateUtc, int TrueLabel, int PredLabel)> preds )
 			{
 			int total = preds.Count;
@@ -177,22 +138,24 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				{
 				if (x.PredLabel == x.TrueLabel) ok++;
 				}
+
 			return ok / (double) total;
 			}
 
-		private static void ShuffleTrainLabels ( List<BacktestRecord> rows, DateTime trainUntilUtc, int seed )
+		private static List<LabeledCausalRow> ShuffleTrainLabels ( List<LabeledCausalRow> rows, DateTime trainUntilUtc, int seed )
 			{
-			var train = new List<BacktestRecord> (rows.Count);
-			foreach (var r in rows)
+			var trainIdx = new List<int> ();
+
+			for (int i = 0; i < rows.Count; i++)
 				{
-				if (r.ToCausalDateUtc() <= trainUntilUtc)
-					train.Add (r);
+				if (rows[i].DateUtc <= trainUntilUtc)
+					trainIdx.Add (i);
 				}
 
-			if (train.Count == 0)
+			if (trainIdx.Count == 0)
 				throw new InvalidOperationException ("[shuffle-labels] train-set is empty.");
 
-			var labels = train.Select (r => r.Forward.TrueLabel).ToArray ();
+			var labels = trainIdx.Select (idx => rows[idx].TrueLabel).ToArray ();
 
 			var rng = new Random (seed);
 			for (int i = labels.Length - 1; i > 0; i--)
@@ -201,98 +164,167 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				(labels[i], labels[j]) = (labels[j], labels[i]);
 				}
 
-			for (int i = 0; i < train.Count; i++)
-				train[i].Label = labels[i];
+			var res = new List<LabeledCausalRow> (rows.Count);
+
+			for (int i = 0; i < rows.Count; i++)
+				{
+				var r = rows[i];
+
+				if (r.DateUtc > trainUntilUtc)
+					{
+					res.Add (r);
+					continue;
+					}
+
+				int pos = trainIdx.IndexOf (i);
+				int newLabel = labels[pos];
+
+				res.Add (new LabeledCausalRow (
+					causal: r.Causal,
+					trueLabel: newLabel,
+					factMicroUp: r.FactMicroUp,
+					factMicroDown: r.FactMicroDown));
+				}
+
+			return res;
 			}
 
-		private static void RandomizeTrainFeatures ( List<BacktestRecord> rows, DateTime trainUntilUtc, int seed )
+		private static List<LabeledCausalRow> RandomizeTrainFeatures ( List<LabeledCausalRow> rows, DateTime trainUntilUtc, int seed )
 			{
 			var rng = new Random (seed);
 
+			var res = new List<LabeledCausalRow> (rows.Count);
+
 			foreach (var r in rows)
 				{
-				if (r.ToCausalDateUtc() > trainUntilUtc)
+				if (r.DateUtc > trainUntilUtc)
+					{
+					res.Add (r);
 					continue;
+					}
 
-				var feats = r.Causal.Features;
-				if (feats == null || feats.Length == 0)
-					throw new InvalidOperationException ("[randomize-features] Features must be non-empty for train rows.");
+				var c = r.Causal;
 
-				for (int i = 0; i < feats.Length; i++)
-					feats[i] = rng.NextDouble () * 2.0 - 1.0; // [-1;1]
+				double NextRand () => rng.NextDouble () * 2.0 - 1.0;
+
+				var randomized = new CausalDataRow (
+					dateUtc: c.DateUtc,
+					regimeDown: c.RegimeDown,
+					isMorning: c.IsMorning,
+					hardRegime: c.HardRegime,
+					minMove: c.MinMove,
+
+					solRet30: NextRand (),
+					btcRet30: NextRand (),
+					solBtcRet30: NextRand (),
+
+					solRet1: NextRand (),
+					solRet3: NextRand (),
+					btcRet1: NextRand (),
+					btcRet3: NextRand (),
+
+					fngNorm: NextRand (),
+					dxyChg30: NextRand (),
+					goldChg30: NextRand (),
+
+					btcVs200: NextRand (),
+
+					solRsiCenteredScaled: NextRand (),
+					rsiSlope3Scaled: NextRand (),
+
+					gapBtcSol1: NextRand (),
+					gapBtcSol3: NextRand (),
+
+					atrPct: Math.Abs (NextRand ()) * 0.05 + 0.001,
+					dynVol: Math.Abs (NextRand ()) * 2.0 + 0.1,
+
+					solAboveEma50: NextRand (),
+					solEma50vs200: NextRand () * 0.05,
+					btcEma50vs200: NextRand () * 0.05);
+
+				res.Add (new LabeledCausalRow (
+					causal: randomized,
+					trueLabel: r.TrueLabel,
+					factMicroUp: r.FactMicroUp,
+					factMicroDown: r.FactMicroDown));
 				}
+
+			return res;
 			}
 
-		private static List<BacktestRecord> BuildSyntheticRows ( DateTime startUtc, int days, int seed )
+		private static List<LabeledCausalRow> BuildSyntheticRows ( DateTime startUtc, int days, int seed )
 			{
 			if (startUtc.Kind != DateTimeKind.Utc)
 				throw new InvalidOperationException ("startUtc must be UTC.");
 
 			var rng = new Random (seed);
-			var rows = new List<BacktestRecord> (days);
+			var rows = new List<LabeledCausalRow> (days);
 
 			for (int i = 0; i < days; i++)
 				{
-				var date = startUtc.AddDays (i);
+				var dateUtc = startUtc.AddDays (i);
 
-				// Синтетический сигнал: solRet1 определяет класс.
-				// Это нужно, чтобы baseline-качество было выше случайного и тест имел смысл.
-				double solRet1 = (rng.NextDouble () - 0.5) * 0.10; // [-5%; +5%]
+				double solRet1 = (rng.NextDouble () - 0.5) * 0.10;
+
 				int label =
 					solRet1 > 0.01 ? 2 :
 					solRet1 < -0.01 ? 0 :
 					1;
 
-				var r = new BacktestRecord
+				bool regimeDown = (label == 0);
+
+				bool factMicroUp = false;
+				bool factMicroDown = false;
+
+				if (label == 1)
 					{
-					Date = date,
-					Label = label,
+					factMicroUp = rng.NextDouble () < 0.5;
+					factMicroDown = !factMicroUp;
+					}
 
-					RegimeDown = label == 0,
-					IsMorning = true,
+				var causal = new CausalDataRow (
+					dateUtc: dateUtc,
+					regimeDown: regimeDown,
+					isMorning: true,
+					hardRegime: 1,
+					minMove: 0.02,
 
-					SolRet30 = (rng.NextDouble () - 0.5) * 0.20,
-					BtcRet30 = (rng.NextDouble () - 0.5) * 0.15,
-					SolRet1 = solRet1,
-					SolRet3 = solRet1 * 0.7,
-					BtcRet1 = solRet1 * 0.3,
-					BtcRet3 = solRet1 * 0.2,
+					solRet30: solRet1 * 0.2,
+					btcRet30: 0.0,
+					solBtcRet30: 0.0,
 
-					Fng = (rng.NextDouble () - 0.5) * 2.0,
-					DxyChg30 = (rng.NextDouble () - 0.5) * 0.06,
-					GoldChg30 = (rng.NextDouble () - 0.5) * 0.06,
-					BtcVs200 = (rng.NextDouble () - 0.5) * 0.10,
-					SolRsiCentered = (rng.NextDouble () - 0.5) * 40.0,
-					RsiSlope3 = (rng.NextDouble () - 0.5) * 10.0,
+					solRet1: solRet1,
+					solRet3: solRet1 * 0.7,
+					btcRet1: solRet1 * 0.1,
+					btcRet3: solRet1 * 0.05,
 
-					AtrPct = 0.02 + rng.NextDouble () * 0.02,
-					DynVol = 0.5 + rng.NextDouble () * 1.0,
-					MinMove = 0.01 + rng.NextDouble () * 0.02,
+					fngNorm: 0.0,
+					dxyChg30: 0.0,
+					goldChg30: 0.0,
 
-					TrendRet24h = (rng.NextDouble () - 0.5) * 0.08,
-					TrendVol7d = 0.5 + rng.NextDouble () * 1.0,
-					VolShiftRatio = 0.5 + rng.NextDouble () * 1.0,
-					TrendAbs30 = rng.NextDouble () * 0.2,
+					btcVs200: 0.0,
 
-					HardRegime = rng.NextDouble () < 0.2 ? 2 : 1,
+					solRsiCenteredScaled: 0.0,
+					rsiSlope3Scaled: 0.0,
 
-					SolEma50 = 100 + rng.NextDouble () * 10,
-					SolEma200 = 100 + rng.NextDouble () * 10,
-					BtcEma50 = 100 + rng.NextDouble () * 10,
-					BtcEma200 = 100 + rng.NextDouble () * 10,
-					SolEma50vs200 = (rng.NextDouble () - 0.5) * 0.05,
-					BtcEma50vs200 = (rng.NextDouble () - 0.5) * 0.05,
-					};
+					gapBtcSol1: 0.0,
+					gapBtcSol3: 0.0,
 
-				// Важный шаг: делаем Features строго эквивалентным тому,
-				// что пойдёт в PredictCausal через CausalDataRow.
-				var v = r.ToCausal ().FeaturesVector;
-				r.Causal.Features = v.ToArray ();
+					atrPct: 0.02 + rng.NextDouble () * 0.02,
+					dynVol: 0.5 + rng.NextDouble () * 1.0,
 
-				rows.Add (r);
+					solAboveEma50: 1.0,
+					solEma50vs200: 0.01,
+					btcEma50vs200: 0.01);
+
+				rows.Add (new LabeledCausalRow (
+					causal: causal,
+					trueLabel: label,
+					factMicroUp: factMicroUp,
+					factMicroDown: factMicroDown));
 				}
 
-			return rows;
+			return rows.OrderBy (r => r.DateUtc).ToList ();
 			}
 		}
 	}

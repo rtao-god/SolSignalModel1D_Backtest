@@ -1,359 +1,149 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Xunit;
 using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
-	/// <summary>
-	/// Структурные тесты на утечку через RegimeDown:
-	/// 1) RegimeDown для "ранних" дней не должен зависеть от будущего хвоста (t > entryUtc);
-	/// 2) RegimeDown для дня D не должен зависеть от того, какой close у свечи,
-	///    покрывающей baseline-exit (аналог теста для фич, но для режима).
-	///
-	/// Важно: эти тесты используют реальный RowBuilder, т.е. реальную логику режима.
-	/// </summary>
 	public sealed class RowBuilderRegimeLeakageTests
 		{
-		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
-
 		[Fact]
 		public void RegimeDown_DoesNotChange_WhenAllFutureAfterEntryIsMutated ()
 			{
-			var tz = NyTz;
+			var tz = CoreWindowing.NyTz;
 
-			const int total6h = 400;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int days = 260;
 
-			var solAll6h_A = new List<Candle6h> ();
-			var solAll6h_B = new List<Candle6h> ();
-			var btcAll6h = new List<Candle6h> ();
-			var paxgAll6h = new List<Candle6h> ();
+			BuildSyntheticMarket (
+				days: days,
+				out var solAll6h_A,
+				out var btcAll6h,
+				out var paxgAll6h,
+				out var solWinTrain_A,
+				out var btcWinTrain,
+				out var paxgWinTrain,
+				out var solAll1m_A,
+				out var fngBase,
+				out var dxyBase);
 
-			for (int i = 0; i < total6h; i++)
-				{
-				var t = start.AddHours (6 * i);
-				double solPrice = 100.0 + i;
-				double btcPrice = 50.0 + i * 0.5;
-				double goldPrice = 1500.0 + i * 0.2;
+			CloneMarket (
+				solAll6h_A,
+				solAll1m_A,
+				out var solAll6h_B,
+				out var solAll1m_B);
 
-				var solA = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					};
-				var solB = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					};
-				var btc = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = btcPrice,
-					High = btcPrice + 1.0,
-					Low = btcPrice - 1.0
-					};
-				var paxg = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = goldPrice,
-					High = goldPrice + 1.0,
-					Low = goldPrice - 1.0
-					};
+			// Важно: train-списки должны быть отдельными списками, но с теми же таймстемпами.
+			var solWinTrain_B = BuildDailyWinTrainFromAll6h (solAll6h_B);
 
-				solAll6h_A.Add (solA);
-				solAll6h_B.Add (solB);
-				btcAll6h.Add (btc);
-				paxgAll6h.Add (paxg);
-				}
-
-			// Минутки: две копии (A/B), как и для 6h.
-			var solAll1m_A = new List<Candle1m> ();
-			var solAll1m_B = new List<Candle1m> ();
-			var minutesStart = start;
-			int totalMinutes = total6h * 6 * 60;
-
-			for (int i = 0; i < totalMinutes; i++)
-				{
-				var t = minutesStart.AddMinutes (i);
-				double price = 100.0 + i * 0.0001;
-
-				var mA = new Candle1m
-					{
-					OpenTimeUtc = t,
-					Close = price,
-					High = price + 0.0005,
-					Low = price - 0.0005
-					};
-				var mB = new Candle1m
-					{
-					OpenTimeUtc = t,
-					Close = price,
-					High = price + 0.0005,
-					Low = price - 0.0005
-					};
-
-				solAll1m_A.Add (mA);
-				solAll1m_B.Add (mB);
-				}
-
-			// FNG / DXY: стабильные ряды по датам.
-			var fngBase = new Dictionary<DateTime, double> ();
-			var dxyBase = new Dictionary<DateTime, double> ();
-			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
-
-			var startDay = start.ToCausalDateUtc ();
-			var firstDate = startDay.AddDays (-60);
-			var lastDate = startDay.AddDays (400);
-
-			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
-				{
-				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
-				fngBase[key] = 50;
-				dxyBase[key] = 100.0;
-				}
-
-			// A: базовый сценарий.
-			var rowsA = RowBuilder.BuildRowsDaily (
-				solWinTrain: solAll6h_A,
-				btcWinTrain: btcAll6h,
-				paxgWinTrain: paxgAll6h,
+			var resA = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrain_A,
+				btcWinTrain: btcWinTrain,
+				paxgWinTrain: paxgWinTrain,
 				solAll6h: solAll6h_A,
 				solAll1m: solAll1m_A,
 				fngHistory: fngBase,
 				dxySeries: dxyBase,
-				extraDaily: extraDaily,
+				extraDaily: null,
 				nyTz: tz);
+
+			var rowsA = resA.CausalRows
+				.OrderBy (r => r.DateUtc)
+				.ToList ();
 
 			Assert.NotEmpty (rowsA);
 
-			// Выбираем entry не слишком близко к краям и не в выходной.
-			int entryIdx = Enumerable.Range (200, 50)
-				.First (i =>
-				{
-					var utc = solAll6h_A[i].OpenTimeUtc;
-					var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, tz);
-					return ny.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
-				});
+			var entryUtc = FindMidEntryUtc (solWinTrain_A, tz);
+			Assert.Contains (rowsA, r => r.DateUtc == entryUtc);
 
-			var entryUtc = solAll6h_A[entryIdx].OpenTimeUtc;
-
-			// B: ломаем всю историю ПОСЛЕ entryUtc (чистое будущее).
-			for (int i = 0; i < solAll6h_B.Count; i++)
-				{
-				if (solAll6h_B[i].OpenTimeUtc > entryUtc)
-					{
-					solAll6h_B[i].Close *= 10.0;
-					solAll6h_B[i].High = solAll6h_B[i].Close + 5.0;
-					solAll6h_B[i].Low = solAll6h_B[i].Close - 5.0;
-					}
-				}
-
-			for (int i = 0; i < solAll1m_B.Count; i++)
-				{
-				if (solAll1m_B[i].OpenTimeUtc > entryUtc)
-					{
-					var p = solAll1m_B[i].Close * 10.0;
-					solAll1m_B[i].Close = p;
-					solAll1m_B[i].High = p + 0.01;
-					solAll1m_B[i].Low = p - 0.01;
-					}
-				}
+			MutateAllFutureAfterEntry (
+				solAll6h: solAll6h_B,
+				solWinTrain: solWinTrain_B,
+				solAll1m: solAll1m_B,
+				entryUtc: entryUtc,
+				sol6hFactor: 10.0,
+				sol1mFactor: 10.0);
 
 			var fngB = new Dictionary<DateTime, double> (fngBase);
 			var dxyB = new Dictionary<DateTime, double> (dxyBase);
 
-			foreach (var key in fngBase.Keys.ToList ())
+			var entryDay = entryUtc.ToCausalDateUtc ();
+			foreach (var k in fngB.Keys.ToList ())
 				{
-				if (key.ToCausalDateUtc() > entryUtc.ToCausalDateUtc())
+				if (k.ToCausalDateUtc () > entryDay)
 					{
-					fngB[key] = fngBase[key] + 100;
-					dxyB[key] = dxyBase[key] + 50.0;
+					fngB[k] = fngB[k] + 100.0;
+					dxyB[k] = dxyB[k] + 50.0;
 					}
 				}
 
-			var rowsB = RowBuilder.BuildRowsDaily (
-				solWinTrain: solAll6h_B,
-				btcWinTrain: btcAll6h,
-				paxgWinTrain: paxgAll6h,
+			var resB = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrain_B,
+				btcWinTrain: btcWinTrain,
+				paxgWinTrain: paxgWinTrain,
 				solAll6h: solAll6h_B,
 				solAll1m: solAll1m_B,
 				fngHistory: fngB,
 				dxySeries: dxyB,
-				extraDaily: extraDaily,
+				extraDaily: null,
 				nyTz: tz);
+
+			var rowsB = resB.CausalRows
+				.OrderBy (r => r.DateUtc)
+				.ToList ();
 
 			Assert.NotEmpty (rowsB);
 
-			var dictA = rowsA.ToDictionary (r => r.ToCausalDateUtc(), r => r.RegimeDown);
-			var dictB = rowsB.ToDictionary (r => r.ToCausalDateUtc(), r => r.RegimeDown);
+			var dictA = rowsA.ToDictionary (r => r.DateUtc, r => r.RegimeDown);
+			var dictB = rowsB.ToDictionary (r => r.DateUtc, r => r.RegimeDown);
 
-			// Для всех дат ≤ entryUtc RegimeDown должен совпасть.
 			foreach (var kv in dictA)
 				{
-				var date = kv.Key;
-				if (date > entryUtc)
+				var dateUtc = kv.Key;
+				if (dateUtc > entryUtc)
 					continue;
 
-				Assert.True (dictB.ContainsKey (date), $"Во втором наборе нет строки для {date:O}");
-
-				Assert.Equal (
-					kv.Value,
-					dictB[date]);
+				Assert.True (dictB.ContainsKey (dateUtc), $"Во втором наборе нет строки для {dateUtc:O}");
+				Assert.Equal (kv.Value, dictB[dateUtc]);
 				}
 			}
 
-		/// <summary>
-		/// Аналог RowBuilderFeatureLeakageTests, но для RegimeDown:
-		/// режим дня D не должен зависеть от того, какой close у свечи,
-		/// покрывающей baseline-exit (это чистое будущее).
-		/// </summary>
 		[Fact]
 		public void RegimeDown_DoesNotChange_WhenBaselineExitCloseChanges ()
 			{
-			var tz = NyTz;
+			var tz = CoreWindowing.NyTz;
 
-			const int total6h = 300;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int days = 260;
 
-			var solAll6h_A = new List<Candle6h> ();
-			var solAll6h_B = new List<Candle6h> ();
-			var btcAll6h = new List<Candle6h> ();
-			var paxgAll6h = new List<Candle6h> ();
+			BuildSyntheticMarket (
+				days: days,
+				out var solAll6h_A,
+				out var btcAll6h,
+				out var paxgAll6h,
+				out var solWinTrain_A,
+				out var btcWinTrain,
+				out var paxgWinTrain,
+				out var solAll1m,
+				out var fng,
+				out var dxy);
 
-			for (int i = 0; i < total6h; i++)
-				{
-				var t = start.AddHours (6 * i);
-				double solPrice = 100.0 + i;
-				double btcPrice = 50.0 + i * 0.5;
-				double goldPrice = 1500.0 + i * 0.2;
+			CloneMarket (
+				solAll6h_A,
+				solAll1m,
+				out var solAll6h_B,
+				out var solAll1m_B);
 
-				var solA = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					};
-				var solB = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					};
-				var btc = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = btcPrice,
-					High = btcPrice + 1.0,
-					Low = btcPrice - 1.0
-					};
-				var paxg = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = goldPrice,
-					High = goldPrice + 1.0,
-					Low = goldPrice - 1.0
-					};
+			var solWinTrain_B = BuildDailyWinTrainFromAll6h (solAll6h_B);
 
-				solAll6h_A.Add (solA);
-				solAll6h_B.Add (solB);
-				btcAll6h.Add (btc);
-				paxgAll6h.Add (paxg);
-				}
+			var entryUtc = FindMidEntryUtc (solWinTrain_A, tz);
 
-			// train-окно = вся история.
-			var solWinTrain_A = solAll6h_A;
-			var solWinTrain_B = solAll6h_B;
-			var btcWinTrain = btcAll6h;
-			var paxgWinTrain = paxgAll6h;
+			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, nyTz: CoreWindowing.NyTz);
+			int exit6hIdx = FindCovering6hCandleIndex (solAll6h_B, exitUtc);
+			Assert.True (exit6hIdx >= 0, "Не удалось найти 6h-свечу, покрывающую baseline-exit.");
 
-			// FNG/DXY как в других тестах.
-			var fng = new Dictionary<DateTime, double> ();
-			var dxy = new Dictionary<DateTime, double> ();
+			Scale6hCandleInPlace (solAll6h_B, exit6hIdx, factor: 10.0);
 
-			var startDay = start.ToCausalDateUtc ();
-			var firstDate = startDay.AddDays (-60);
-			var lastDate = startDay.AddDays (400);
-
-			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
-				{
-				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
-				fng[key] = 50;
-				dxy[key] = 100.0;
-				}
-
-			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
-
-			// Минутки только одна копия (они одинаковы в обоих сценариях).
-			var solAll1m = new List<Candle1m> ();
-			var minutesStart = start;
-			int totalMinutes = total6h * 6 * 60;
-
-			for (int i = 0; i < totalMinutes; i++)
-				{
-				var t = minutesStart.AddMinutes (i);
-				double price = 100.0 + i * 0.0001;
-
-				solAll1m.Add (new Candle1m
-					{
-					OpenTimeUtc = t,
-					Close = price,
-					High = price + 0.0005,
-					Low = price - 0.0005
-					});
-				}
-
-			// Выбираем entryIdx не слишком близко к краям и не в выходной.
-			int entryIdx = Enumerable.Range (200, 50)
-				.First (i =>
-				{
-					var utc = solWinTrain_A[i].OpenTimeUtc;
-					var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, tz);
-					var d = ny.DayOfWeek;
-					return d != DayOfWeek.Saturday && d != DayOfWeek.Sunday;
-				});
-
-			var entryUtc = solWinTrain_A[entryIdx].OpenTimeUtc;
-
-			// Находим baseline-exit и индекс свечи, которая его покрывает, в B-сценарии.
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, tz);
-
-			int exitIdx = -1;
-			for (int i = 0; i < solAll6h_B.Count; i++)
-				{
-				var startUtc = solAll6h_B[i].OpenTimeUtc;
-				var endUtc = (i + 1 < solAll6h_B.Count)
-					? solAll6h_B[i + 1].OpenTimeUtc
-					: startUtc.AddHours (6);
-
-				if (exitUtc >= startUtc && exitUtc < endUtc)
-					{
-					exitIdx = i;
-					break;
-					}
-				}
-
-			Assert.True (exitIdx >= 0, "Не удалось найти 6h-свечу, покрывающую baseline exit.");
-
-			// Меняем будущий close только в сценарии B (чистое будущее относительно entry).
-			solAll6h_B[exitIdx].Close *= 10.0;
-			solAll6h_B[exitIdx].High = solAll6h_B[exitIdx].Close + 1.0;
-			solAll6h_B[exitIdx].Low = solAll6h_B[exitIdx].Close - 1.0;
-
-			// Строим строки для обоих сценариев.
-			var rowsA = RowBuilder.BuildRowsDaily (
+			var resA = RowBuilder.BuildDailyRows (
 				solWinTrain: solWinTrain_A,
 				btcWinTrain: btcWinTrain,
 				paxgWinTrain: paxgWinTrain,
@@ -361,28 +151,249 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				solAll1m: solAll1m,
 				fngHistory: fng,
 				dxySeries: dxy,
-				extraDaily: extraDaily,
+				extraDaily: null,
 				nyTz: tz);
 
-			var rowsB = RowBuilder.BuildRowsDaily (
+			var resB = RowBuilder.BuildDailyRows (
 				solWinTrain: solWinTrain_B,
 				btcWinTrain: btcWinTrain,
 				paxgWinTrain: paxgWinTrain,
 				solAll6h: solAll6h_B,
-				solAll1m: solAll1m,
+				solAll1m: solAll1m_B,
 				fngHistory: fng,
 				dxySeries: dxy,
-				extraDaily: extraDaily,
+				extraDaily: null,
 				nyTz: tz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowA = resA.CausalRows.SingleOrDefault (r => r.DateUtc == entryUtc);
+			var rowB = resB.CausalRows.SingleOrDefault (r => r.DateUtc == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
 
-			// Для дня D режим не должен меняться от изменения future-close.
 			Assert.Equal (rowA!.RegimeDown, rowB!.RegimeDown);
+			}
+
+		// ===== helpers =====
+
+		private static void BuildSyntheticMarket (
+			int days,
+			out List<Candle6h> solAll6h,
+			out List<Candle6h> btcAll6h,
+			out List<Candle6h> paxgAll6h,
+			out List<Candle6h> solWinTrain,
+			out List<Candle6h> btcWinTrain,
+			out List<Candle6h> paxgWinTrain,
+			out List<Candle1m> solAll1m,
+			out Dictionary<DateTime, double> fng,
+			out Dictionary<DateTime, double> dxy )
+			{
+			int total6h = days * 4;
+			int totalMinutes = days * 24 * 60;
+
+			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+			solAll6h = new List<Candle6h> (total6h);
+			btcAll6h = new List<Candle6h> (total6h);
+			paxgAll6h = new List<Candle6h> (total6h);
+			solAll1m = new List<Candle1m> (totalMinutes);
+
+			for (int i = 0; i < total6h; i++)
+				{
+				var t = start.AddHours (6 * i);
+
+				double sol = 100.0 + i * 0.1;
+				double btc = 500.0 + i * 0.3;
+				double paxg = 1500.0 + i * 0.05;
+
+				solAll6h.Add (new Candle6h
+					{
+					OpenTimeUtc = t,
+					Open = sol,
+					High = sol * 1.01,
+					Low = sol * 0.99,
+					Close = sol * 1.005
+					});
+
+				btcAll6h.Add (new Candle6h
+					{
+					OpenTimeUtc = t,
+					Open = btc,
+					High = btc * 1.01,
+					Low = btc * 0.99,
+					Close = btc * 1.005
+					});
+
+				paxgAll6h.Add (new Candle6h
+					{
+					OpenTimeUtc = t,
+					Open = paxg,
+					High = paxg * 1.01,
+					Low = paxg * 0.99,
+					Close = paxg * 1.005
+					});
+				}
+
+			for (int i = 0; i < totalMinutes; i++)
+				{
+				var t = start.AddMinutes (i);
+
+				double p = 100.0 + i * 0.0002;
+
+				solAll1m.Add (new Candle1m
+					{
+					OpenTimeUtc = t,
+					Open = p,
+					High = p * 1.0005,
+					Low = p * 0.9995,
+					Close = p
+					});
+				}
+
+			solWinTrain = BuildDailyWinTrainFromAll6h (solAll6h);
+			btcWinTrain = BuildDailyWinTrainFromAll6h (btcAll6h);
+			paxgWinTrain = BuildDailyWinTrainFromAll6h (paxgAll6h);
+
+			fng = new Dictionary<DateTime, double> ();
+			dxy = new Dictionary<DateTime, double> ();
+
+			var first = start.ToCausalDateUtc ().AddDays (-260);
+			var last = start.ToCausalDateUtc ().AddDays (days + 260);
+
+			for (var d = first; d <= last; d = d.AddDays (1))
+				{
+				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
+				fng[key] = 50.0;
+				dxy[key] = 100.0 + (d.Day % 7) * 0.1;
+				}
+			}
+
+		private static List<Candle6h> BuildDailyWinTrainFromAll6h ( List<Candle6h> all6h )
+			{
+			// Берём ровно один 6h-бар в сутки: 12:00 UTC (это NY morning 07/08).
+			return all6h
+				.Where (c => c.OpenTimeUtc.Hour == 12)
+				.ToList ();
+			}
+
+		private static DateTime FindMidEntryUtc ( List<Candle6h> solWinTrain, TimeZoneInfo tz )
+			{
+			int start = Math.Min (220, Math.Max (0, solWinTrain.Count / 2));
+			int count = Math.Min (80, Math.Max (0, solWinTrain.Count - start - 10));
+
+			for (int i = start; i < start + count; i++)
+				{
+				var utc = solWinTrain[i].OpenTimeUtc;
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, tz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					continue;
+
+				return utc;
+				}
+
+			throw new InvalidOperationException ("Не удалось подобрать weekday entryUtc в середине синтетической истории.");
+			}
+
+		private static void CloneMarket (
+			List<Candle6h> solAll6h_A,
+			List<Candle1m> solAll1m_A,
+			out List<Candle6h> solAll6h_B,
+			out List<Candle1m> solAll1m_B )
+			{
+			solAll6h_B = solAll6h_A
+				.Select (c => new Candle6h
+					{
+					OpenTimeUtc = c.OpenTimeUtc,
+					Open = c.Open,
+					High = c.High,
+					Low = c.Low,
+					Close = c.Close
+					})
+				.ToList ();
+
+			solAll1m_B = solAll1m_A
+				.Select (c => new Candle1m
+					{
+					OpenTimeUtc = c.OpenTimeUtc,
+					Open = c.Open,
+					High = c.High,
+					Low = c.Low,
+					Close = c.Close
+					})
+				.ToList ();
+			}
+
+		private static void MutateAllFutureAfterEntry (
+			List<Candle6h> solAll6h,
+			List<Candle6h> solWinTrain,
+			List<Candle1m> solAll1m,
+			DateTime entryUtc,
+			double sol6hFactor,
+			double sol1mFactor )
+			{
+			for (int i = 0; i < solAll6h.Count; i++)
+				{
+				var c = solAll6h[i];
+				if (c.OpenTimeUtc <= entryUtc) continue;
+
+				c.Open *= sol6hFactor;
+				c.High *= sol6hFactor;
+				c.Low *= sol6hFactor;
+				c.Close *= sol6hFactor;
+
+				solAll6h[i] = c;
+				}
+
+			for (int i = 0; i < solWinTrain.Count; i++)
+				{
+				var c = solWinTrain[i];
+				if (c.OpenTimeUtc <= entryUtc) continue;
+
+				c.Open *= sol6hFactor;
+				c.High *= sol6hFactor;
+				c.Low *= sol6hFactor;
+				c.Close *= sol6hFactor;
+
+				solWinTrain[i] = c;
+				}
+
+			for (int i = 0; i < solAll1m.Count; i++)
+				{
+				var m = solAll1m[i];
+				if (m.OpenTimeUtc <= entryUtc) continue;
+
+				m.Open *= sol1mFactor;
+				m.High *= sol1mFactor;
+				m.Low *= sol1mFactor;
+				m.Close *= sol1mFactor;
+
+				solAll1m[i] = m;
+				}
+			}
+
+		private static int FindCovering6hCandleIndex ( List<Candle6h> solAll6h, DateTime utc )
+			{
+			for (int i = 0; i < solAll6h.Count; i++)
+				{
+				var start = solAll6h[i].OpenTimeUtc;
+				var end = (i + 1 < solAll6h.Count) ? solAll6h[i + 1].OpenTimeUtc : start.AddHours (6);
+				if (utc >= start && utc < end)
+					return i;
+				}
+
+			return -1;
+			}
+
+		private static void Scale6hCandleInPlace ( List<Candle6h> xs, int idx, double factor )
+			{
+			var c = xs[idx];
+
+			c.Open *= factor;
+			c.High *= factor;
+			c.Low *= factor;
+			c.Close *= factor;
+
+			xs[idx] = c;
 			}
 		}
 	}

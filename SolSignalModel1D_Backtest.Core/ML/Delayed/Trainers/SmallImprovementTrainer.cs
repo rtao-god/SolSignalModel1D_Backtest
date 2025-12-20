@@ -39,6 +39,16 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 				if (s.Features == null || s.Features.Length == 0)
 					throw new InvalidOperationException ($"[B-trainer] empty Features for sample entry={s.EntryUtc:O}.");
 
+				// ML.NET требует фиксированную длину вектора.
+				// Любая “подгонка” длины скрывает баги в источнике фичей.
+				if (s.Features.Length != MlSchema.FeatureCount)
+					{
+					throw new InvalidOperationException (
+						$"[B-trainer] Features length mismatch for sample entry={s.EntryUtc:O}: " +
+						$"len={s.Features.Length}, expected={MlSchema.FeatureCount}. " +
+						"Почини источник фичей: длина должна быть строго фиксированной для данного датасета/модели.");
+					}
+
 				double ageDays = (asOfUtc - s.EntryUtc).TotalDays;
 				float timeW =
 					ageDays <= 90 ? 1.0f :
@@ -47,8 +57,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 				float clsW = s.Label ? 2.0f : 1.0f;
 
+				// Клонируем фичи, чтобы исключить внешние мутации sample.Features.
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Features, feats, Math.Min (s.Features.Length, MlSchema.FeatureCount));
+				Array.Copy (s.Features, feats, MlSchema.FeatureCount);
 
 				rows.Add (new TrainRow
 					{

@@ -52,25 +52,47 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 		/// </summary>
 		public static double ComputeDynVol6h ( IReadOnlyList<Candle6h> arr, int idx, int lookbackWindows )
 			{
-			if (arr == null || arr.Count == 0) return 0.0;
-			int from = Math.Max (1, idx - lookbackWindows + 1);
-			int to = idx;
-			if (from >= to) return 0.0;
+			if (arr == null) throw new ArgumentNullException (nameof (arr));
+			if (arr.Count == 0) throw new ArgumentException ("arr must be non-empty.", nameof (arr));
+			if (idx < 0 || idx >= arr.Count) throw new ArgumentOutOfRangeException (nameof (idx), $"idx={idx}, count={arr.Count}");
+			if (lookbackWindows <= 0) throw new ArgumentOutOfRangeException (nameof (lookbackWindows), $"lookbackWindows={lookbackWindows}");
+
+			// Требуются lookbackWindows доходностей, каждая использует пару (i-1, i).
+			// Минимально допустимо: idx - lookbackWindows + 1 >= 1  =>  idx >= lookbackWindows
+			int from = idx - lookbackWindows + 1;
+			if (from < 1)
+				{
+				throw new InvalidOperationException (
+					$"[indicators] dynVol warm-up/invalid call: idx={idx}, lookback={lookbackWindows}. " +
+					"Этот метод нельзя вызывать до прохождения warm-up (см. warmup-guards).");
+				}
 
 			double sumAbs = 0.0;
-			int cnt = 0;
-			for (int i = from; i <= to; i++)
+
+			for (int i = from; i <= idx; i++)
 				{
 				double prev = arr[i - 1].Close;
 				double cur = arr[i].Close;
-				if (prev > 0 && cur > 0)
+
+				if (!double.IsFinite (prev) || !double.IsFinite (cur) || prev <= 0.0 || cur <= 0.0)
 					{
-					double ret = cur / prev - 1.0;
-					sumAbs += Math.Abs (ret);
-					cnt++;
+					throw new InvalidOperationException (
+						$"[indicators] dynVol invalid Close in window: i={i}, prevClose={prev}, curClose={cur}, tPrev={arr[i - 1].OpenTimeUtc:O}, tCur={arr[i].OpenTimeUtc:O}.");
 					}
+
+				double ret = cur / prev - 1.0;
+				sumAbs += Math.Abs (ret);
 				}
-			return cnt > 0 ? sumAbs / cnt : 0.0;
+
+			double dynVol = sumAbs / lookbackWindows;
+
+			if (!double.IsFinite (dynVol) || dynVol <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[indicators] dynVol non-positive after calc: {dynVol}. idx={idx}, lookback={lookbackWindows}.");
+				}
+
+			return dynVol;
 			}
 
 		// =========================
@@ -223,7 +245,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 
 		/// <summary>
 		/// Берём FNG на дату asOfUtcDate; если точной нет — ближайшая предыдущая (до 14 дней).
-		/// Если нет, вернём 50.
 		/// </summary>
 		public static double PickNearestFng ( Dictionary<DateTime, double> fngByDate, DateTime asOfUtcDate )
 			{

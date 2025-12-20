@@ -82,8 +82,15 @@ namespace SolSignalModel1D_Backtest
 
 			// Окно бэктеста относительно последней 6h-свечи SOL (после сортировки это последний элемент).
 			var lastUtc = solAll6h[solAll6h.Count - 1].OpenTimeUtc;
-			fromUtc = lastUtc.ToCausalDateUtc().AddDays (-540);
-			toUtc = lastUtc.ToCausalDateUtc();
+
+			toUtc = lastUtc.ToCausalDateUtc ();
+
+			// Единый старт истории = fullFrom (как в candle-updater логе fullFrom=2021-08-02...).
+			fromUtc = FullBackfillFromUtc.ToCausalDateUtc ();
+
+			if (fromUtc > toUtc)
+				throw new InvalidOperationException (
+					$"[init] fromUtc({fromUtc:O}) > toUtc({toUtc:O}). Проверить FullBackfillFromUtc и 6h-ряд SOL.");
 
 			sw.Stop ();
 			Console.WriteLine ($"[perf] LoadAllCandlesAndWindow done in {sw.Elapsed.TotalSeconds:F1}s");

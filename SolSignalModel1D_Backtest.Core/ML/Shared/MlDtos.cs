@@ -1,24 +1,41 @@
-﻿using Microsoft.ML.Data;
+﻿using System;
+using Microsoft.ML.Data;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
-	// обычный мультикласс
-	public sealed class MlSample
+	public sealed class MlBinaryOutput
 		{
-		public float Label { get; set; }
+		[ColumnName ("PredictedLabel")]
+		public bool PredictedLabel { get; set; }
 
-		[VectorType (MlSchema.FeatureCount)]
-		public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
+		[ColumnName ("Score")]
+		public float Score { get; set; }
+
+		[ColumnName ("Probability")]
+		public float Probability { get; set; }
 		}
 
-	// мультикласс с весом
-	public sealed class MlSampleWeighted
+	public sealed class SlHitSample
 		{
-		public float Label { get; set; }
+		public bool Label { get; set; }
 
-		[VectorType (MlSchema.FeatureCount)]
-		public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
+		[VectorType (SlSchema.FeatureCount)]
+		public float[] Features { get; set; } = new float[SlSchema.FeatureCount];
+
+		public DateTime EntryUtc { get; set; }
 
 		public float Weight { get; set; }
+		}
+
+	public sealed class SlHitPrediction
+		{
+		[ColumnName ("PredictedLabel")]
+		public bool PredictedLabel { get; set; }
+
+		[ColumnName ("Score")]
+		public float Score { get; set; }
+
+		[ColumnName ("Probability")]
+		public float Probability { get; set; }
 		}
 	}

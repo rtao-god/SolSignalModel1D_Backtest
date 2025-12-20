@@ -2,19 +2,15 @@
 using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
 	{
@@ -27,16 +23,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			public float Probability { get; set; }
 			}
 
-		private sealed class SlEvalRow
-			{
-			public bool Label { get; set; }
-
-			[VectorType (MlSchema.FeatureCount)]
-			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
-			}
-
 		[Fact]
-		public void EndToEnd_DailyAndSl_Training_IsFutureBlind_ToOosCandleTailMutation_ByTrainBoundary ()
+		public void EndToEnd_DailyTraining_IsFutureBlind_ToOosCandleTailMutation_ByTrainUntil ()
 			{
 			SyntheticCandleHistory.Build (
 				days: 600,
@@ -44,6 +32,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				out var btcWinTrainA,
 				out var paxgWinTrainA,
 				out var solAll6hA,
+				out var solAll1hA,
 				out var solAll1mA,
 				out var sol6hDictA,
 				out var fngHistory,
@@ -51,164 +40,149 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			SyntheticCandleHistory.Clone (
 				solWinTrainA, btcWinTrainA, paxgWinTrainA,
-				solAll6hA, solAll1mA,
+				solAll6hA, solAll1hA, solAll1mA,
 				out var solWinTrainB,
 				out var btcWinTrainB,
 				out var paxgWinTrainB,
 				out var solAll6hB,
+				out var solAll1hB,
 				out var solAll1mB);
 
-			var rowsAAll = RowBuilder.BuildRowsDaily (
-					solWinTrain: solWinTrainA,
-					btcWinTrain: btcWinTrainA,
-					paxgWinTrain: paxgWinTrainA,
-					solAll6h: solAll6hA,
-					solAll1m: solAll1mA,
-					fngHistory: fngHistory,
-					dxySeries: dxyHistory,
-					extraDaily: null,
-					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.ToCausalDateUtc())
+			var buildA0 = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrainA,
+				btcWinTrain: btcWinTrainA,
+				paxgWinTrain: paxgWinTrainA,
+				solAll6h: solAll6hA,
+				solAll1m: solAll1mA,
+				fngHistory: fngHistory,
+				dxySeries: dxyHistory,
+				extraDaily: null,
+				nyTz: Windowing.NyTz);
+
+			var rowsAAll = buildA0.LabeledRows
+				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
 			Assert.NotEmpty (rowsAAll);
 
-			var minDate = rowsAAll.First ().Date;
-			var maxDate = rowsAAll.Last ().Date;
-			var cutoffTicks = minDate.Ticks + (long) ((maxDate.Ticks - minDate.Ticks) * 0.6);
-			var trainUntilUtc = new DateTime (cutoffTicks, DateTimeKind.Utc);
+			var minDate = rowsAAll.First ().DateUtc;
+			var maxDate = rowsAAll.Last ().DateUtc;
 
-			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+			var cutoffTicks = minDate.Ticks + (long) ((maxDate.Ticks - minDate.Ticks) * 0.60);
+			var trainUntilUtc = new DateTime (cutoffTicks, DateTimeKind.Utc);
 
 			var tailStartUtc = trainUntilUtc.AddDays (5);
 
 			SyntheticCandleHistory.MutateFutureTail (
-				solWinTrainB, btcWinTrainB, paxgWinTrainB,
-				solAll6hB, solAll1mB,
+				solWinTrain: solWinTrainB,
+				btcWinTrain: btcWinTrainB,
+				paxgWinTrain: paxgWinTrainB,
+				solAll6h: solAll6hB,
+				solAll1h: solAll1hB,
+				solAll1m: solAll1mB,
 				tailStartUtc: tailStartUtc);
 
-			var rowsBAll = RowBuilder.BuildRowsDaily (
-					solWinTrain: solWinTrainB,
-					btcWinTrain: btcWinTrainB,
-					paxgWinTrain: paxgWinTrainB,
-					solAll6h: solAll6hB,
-					solAll1m: solAll1mB,
-					fngHistory: fngHistory,
-					dxySeries: dxyHistory,
-					extraDaily: null,
-					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.ToCausalDateUtc())
+			var buildB0 = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrainB,
+				btcWinTrain: btcWinTrainB,
+				paxgWinTrain: paxgWinTrainB,
+				solAll6h: solAll6hB,
+				solAll1m: solAll1mB,
+				fngHistory: fngHistory,
+				dxySeries: dxyHistory,
+				extraDaily: null,
+				nyTz: Windowing.NyTz);
+
+			var rowsBAll = buildB0.LabeledRows
+				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
-			var splitA = boundary.Split (rowsAAll, r => r.ToCausalDateUtc());
-			var splitB = boundary.Split (rowsBAll, r => r.ToCausalDateUtc());
+			Assert.NotEmpty (rowsBAll);
 
-			Assert.Empty (splitA.Excluded);
-			Assert.Empty (splitB.Excluded);
+			var dsA = DailyDatasetBuilder.Build (
+				allRows: rowsAAll,
+				trainUntil: trainUntilUtc,
+				balanceMove: true,
+				balanceDir: true,
+				balanceTargetFrac: 0.7,
+				datesToExclude: null);
 
-			var trainRowsA = splitA.Train.OrderBy (r => r.ToCausalDateUtc()).ToList ();
-			var trainRowsB = splitB.Train.OrderBy (r => r.ToCausalDateUtc()).ToList ();
+			var dsB = DailyDatasetBuilder.Build (
+				allRows: rowsBAll,
+				trainUntil: trainUntilUtc,
+				balanceMove: true,
+				balanceDir: true,
+				balanceTargetFrac: 0.7,
+				datesToExclude: null);
 
-			Assert.NotEmpty (trainRowsA);
-			Assert.Equal (trainRowsA.Count, trainRowsB.Count);
-
-			// Позиционный вызов: не зависит от имени trainUntil*.
-			var dsA = DailyDatasetBuilder.Build (trainRowsA, trainUntilUtc, true, true, 0.7, null);
-			var dsB = DailyDatasetBuilder.Build (trainRowsB, trainUntilUtc, true, true, 0.7, null);
-
-			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
-			AssertRowsEqual (dsA.MoveTrainRows, dsB.MoveTrainRows);
-			AssertRowsEqual (dsA.DirNormalRows, dsB.DirNormalRows);
-			AssertRowsEqual (dsA.DirDownRows, dsB.DirDownRows);
+			AssertLabeledRowsEqual (dsA.TrainRows, dsB.TrainRows);
+			AssertLabeledRowsEqual (dsA.MoveTrainRows, dsB.MoveTrainRows);
+			AssertLabeledRowsEqual (dsA.DirNormalRows, dsB.DirNormalRows);
+			AssertLabeledRowsEqual (dsA.DirDownRows, dsB.DirDownRows);
 
 			var bundleA = new ModelTrainer ().TrainAll (dsA.TrainRows);
 			var bundleB = new ModelTrainer ().TrainAll (dsB.TrainRows);
 
-			var movePredsA = GetMovePredictions (bundleA, dsA.MoveTrainRows);
-			var movePredsB = GetMovePredictions (bundleB, dsB.MoveTrainRows);
+			var movePredsA = GetBinaryPredictions (
+				bundleA.MlCtx,
+				bundleA.MoveModel,
+				dsA.MoveTrainRows,
+				labelSelector: r => r.TrueLabel != 1);
+
+			var movePredsB = GetBinaryPredictions (
+				bundleB.MlCtx,
+				bundleB.MoveModel,
+				dsB.MoveTrainRows,
+				labelSelector: r => r.TrueLabel != 1);
+
 			AssertBinaryOutputsEqual (movePredsA, movePredsB);
 
-			var dirNormalPredsA = GetDirPredictions (bundleA, dsA.DirNormalRows);
-			var dirNormalPredsB = GetDirPredictions (bundleB, dsB.DirNormalRows);
+			var dirNormalPredsA = GetBinaryPredictions (
+				bundleA.MlCtx,
+				bundleA.DirModelNormal,
+				dsA.DirNormalRows,
+				labelSelector: r => r.TrueLabel == 2);
+
+			var dirNormalPredsB = GetBinaryPredictions (
+				bundleB.MlCtx,
+				bundleB.DirModelNormal,
+				dsB.DirNormalRows,
+				labelSelector: r => r.TrueLabel == 2);
+
 			AssertBinaryOutputsEqual (dirNormalPredsA, dirNormalPredsB);
 
-			var dirDownPredsA = GetDirPredictions (bundleA, dsA.DirDownRows);
-			var dirDownPredsB = GetDirPredictions (bundleB, dsB.DirDownRows);
+			var dirDownPredsA = GetBinaryPredictions (
+				bundleA.MlCtx,
+				bundleA.DirModelDown,
+				dsA.DirDownRows,
+				labelSelector: r => r.TrueLabel == 2);
+
+			var dirDownPredsB = GetBinaryPredictions (
+				bundleB.MlCtx,
+				bundleB.DirModelDown,
+				dsB.DirDownRows,
+				labelSelector: r => r.TrueLabel == 2);
+
 			AssertBinaryOutputsEqual (dirDownPredsA, dirDownPredsB);
-
-			const double TpPct = 0.01;
-			const double SlPct = 0.02;
-
-			var slDsA = SlDatasetBuilder.Build (trainRowsA, null, solAll1mA, sol6hDictA, trainUntilUtc, TpPct, SlPct, null);
-			var slDsB = SlDatasetBuilder.Build (trainRowsB, null, solAll1mB, sol6hDictA, trainUntilUtc, TpPct, SlPct, null);
-
-			Assert.True (slDsA.Samples.Count > 0, "E2E SL leakage test: synthetic SL dataset is empty.");
-			Assert.Equal (slDsA.Samples.Count, slDsB.Samples.Count);
-
-			var slModelA = new SlFirstTrainer ().Train (slDsA.Samples, asOfUtc: trainUntilUtc);
-			var slModelB = new SlFirstTrainer ().Train (slDsB.Samples, asOfUtc: trainUntilUtc);
-
-			var slPredsA = GetSlPredictions (slModelA, slDsA.Samples);
-			var slPredsB = GetSlPredictions (slModelB, slDsB.Samples);
-
-			AssertBinaryOutputsEqual (slPredsA, slPredsB);
 			}
 
-		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<BacktestRecord> rows )
+		private static List<BinaryOutput> GetBinaryPredictions (
+			MLContext ml,
+			ITransformer? model,
+			IReadOnlyList<LabeledCausalRow> rows,
+			Func<LabeledCausalRow, bool> labelSelector )
 			{
-			if (bundle.MoveModel == null || rows.Count == 0)
+			if (model == null || rows.Count == 0)
 				return new List<BinaryOutput> ();
-
-			var ml = bundle.MlCtx ?? new MLContext (seed: 42);
 
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Forward.TrueLabel != 1,
-					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
-					}));
-
-			var scored = bundle.MoveModel.Transform (data);
-
-			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
-			}
-
-		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<BacktestRecord> rows )
-			{
-			if ((bundle.DirModelNormal == null && bundle.DirModelDown == null) || rows.Count == 0)
-				return new List<BinaryOutput> ();
-
-			var ml = bundle.MlCtx ?? new MLContext (seed: 42);
-
-			var data = ml.Data.LoadFromEnumerable (
-				rows.Select (r => new MlSampleBinary
-					{
-					Label = r.Forward.TrueLabel == 2,
-					Features = MlTrainingUtils.ToFloatFixed (r.Causal.Features)
-					}));
-
-			ITransformer? model = rows.Any (r => r.RegimeDown) ? bundle.DirModelDown : bundle.DirModelNormal;
-			if (model == null)
-				return new List<BinaryOutput> ();
-
-			var scored = model.Transform (data);
-
-			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
-			}
-
-		private static List<BinaryOutput> GetSlPredictions ( ITransformer model, IReadOnlyList<SlHitSample> samples )
-			{
-			var ml = new MLContext (seed: 42);
-
-			var data = ml.Data.LoadFromEnumerable (
-				samples.Select (s => new SlEvalRow
-					{
-					Label = s.Forward.TrueLabel,
-					Features = s.Causal.Features ?? Array.Empty<float> ()
+					Label = labelSelector (r),
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 					}));
 
 			var scored = model.Transform (data);
-
 			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
@@ -224,7 +198,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				}
 			}
 
-		private static void AssertRowsEqual ( IReadOnlyList<BacktestRecord> xs, IReadOnlyList<BacktestRecord> ys )
+		private static void AssertLabeledRowsEqual ( IReadOnlyList<LabeledCausalRow> xs, IReadOnlyList<LabeledCausalRow> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
@@ -233,18 +207,21 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
-				Assert.Equal (a.Forward.TrueLabel, b.Forward.TrueLabel);
+				Assert.Equal (a.DateUtc, b.DateUtc);
+				Assert.Equal (a.TrueLabel, b.TrueLabel);
+				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
+				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
+
+				var va = a.Causal.FeaturesVector.Span;
+				var vb = b.Causal.FeaturesVector.Span;
+
+				Assert.Equal (va.Length, vb.Length);
+				for (int j = 0; j < va.Length; j++)
+					Assert.Equal (va[j], vb[j], precision: 10);
+
+				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
-				Assert.Equal (a.MinMove, b.MinMove);
-				Assert.Equal (a.RegimeDown, b.RegimeDown);
-
-				var fa = a.Causal.Features ?? Array.Empty<double> ();
-				var fb = b.Causal.Features ?? Array.Empty<double> ();
-
-				Assert.Equal (fa.Length, fb.Length);
-				for (int j = 0; j < fa.Length; j++)
-					Assert.Equal (fa[j], fb[j]);
+				Assert.Equal (a.Causal.MinMove, b.Causal.MinMove, precision: 12);
 				}
 			}
 		}

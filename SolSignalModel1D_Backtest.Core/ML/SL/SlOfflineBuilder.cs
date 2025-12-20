@@ -1,12 +1,11 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
@@ -30,8 +29,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			if (sol1h == null || sol1h.Count == 0)
 				throw new InvalidOperationException ("[sl-offline] sol1h is null/empty: cannot build SL features.");
 
-			// Контракт: всё уже отсортировано на бутстрапе.
-			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.ToCausalDateUtc(), "sl-offline.rows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (rows, r => r.Forward.DateUtc, "sl-offline.rows");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "sl-offline.sol1m");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1h, c => c.OpenTimeUtc, "sl-offline.sol1h");
 
@@ -42,18 +40,12 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 					$"[sl-offline] Invalid config: tpPct<=0 and slPct<=0 (tp={tpPct}, sl={slPct}).");
 
 			var result = new List<SlHitSample> (rows.Count * 2);
-
-			// ВАЖНО:
-			// Where/ToList тут не нужны.
-			// 1) rows и так отсортированы;
-			// 2) фильтр “утренние входы” дешевле делать inline без аллокаций списка.
 			bool hasAnyMorning = false;
 
 			foreach (var r in rows)
 				{
-				DateTime entryUtc = r.ToCausalDateUtc();
+				DateTime entryUtc = r.Forward.DateUtc;
 
-				// Утро вычисляем строго по time-contract, а не по полям prediction-record.
 				if (!Windowing.IsNyMorning (entryUtc, nyTz: TimeZones.NewYork))
 					continue;
 
@@ -63,7 +55,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 					{
 					throw new InvalidOperationException (
 						$"[sl-offline] 6h candle not found for morning entry {entryUtc:O}. " +
-						"Проверь согласование OpenTimeUtc 6h и BacktestRecord.ToCausalDateUtc().");
+						"Проверь согласование OpenTimeUtc 6h и Forward.DateUtc.");
 					}
 
 				double entry = c6.Close;
@@ -73,14 +65,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 						$"[sl-offline] Non-positive entry price from 6h close for {entryUtc:O}: entry={entry}.");
 					}
 
-				// День-минимув нужен для SL-фич (если это твой контракт).
-				// Если r.MinMove отсутствует в BacktestRecord — это отдельная компил-ошибка
 				double dayMinMove = r.MinMove;
 				if (dayMinMove <= 0.0 || double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove))
 					{
 					throw new InvalidOperationException (
-						$"[sl-offline] Invalid dayMinMove (MinMove) for {entryUtc:O}: {dayMinMove}. " +
-						"Это не лечится дефолтом. Почини источник MinMove или исключай такие дни явно до SL-датасета.");
+						$"[sl-offline] Invalid dayMinMove (MinMove) for {entryUtc:O}: {dayMinMove}.");
 					}
 
 				bool strongSignal = strongSelector?.Invoke (r) ?? true;
@@ -137,10 +126,16 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 							candles1h: sol1h
 						);
 
+						if (feats.Length != SlSchema.FeatureCount)
+							{
+							throw new InvalidOperationException (
+								$"[sl-offline] SlFeatureBuilder returned invalid length: got={feats.Length}, expected={SlSchema.FeatureCount}.");
+							}
+
 						result.Add (new SlHitSample
 							{
 							Label = labelRes == HourlyTradeResult.SlFirst,
-							Features = Pad (feats),
+							Features = feats,
 							EntryUtc = entryUtc
 							});
 						}
@@ -168,10 +163,16 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 							candles1h: sol1h
 						);
 
+						if (feats.Length != SlSchema.FeatureCount)
+							{
+							throw new InvalidOperationException (
+								$"[sl-offline] SlFeatureBuilder returned invalid length: got={feats.Length}, expected={SlSchema.FeatureCount}.");
+							}
+
 						result.Add (new SlHitSample
 							{
 							Label = labelRes == HourlyTradeResult.SlFirst,
-							Features = Pad (feats),
+							Features = feats,
 							EntryUtc = entryUtc
 							});
 						}
@@ -271,18 +272,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				}
 
 			return lo;
-			}
-
-		private static float[] Pad ( float[] src )
-			{
-			if (src == null) throw new ArgumentNullException (nameof (src));
-
-			if (src.Length == MlSchema.FeatureCount)
-				return src;
-
-			var arr = new float[MlSchema.FeatureCount];
-			Array.Copy (src, arr, Math.Min (src.Length, MlSchema.FeatureCount));
-			return arr;
 			}
 		}
 	}

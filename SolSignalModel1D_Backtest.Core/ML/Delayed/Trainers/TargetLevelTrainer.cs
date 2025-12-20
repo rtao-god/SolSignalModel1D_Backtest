@@ -55,7 +55,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers
 
 				// Копирование можно убрать ради скорости/памяти, но оставляем как “идеальный” вариант против мутаций извне.
 				var feats = new float[MlSchema.FeatureCount];
-				Array.Copy (s.Features, feats, feats.Length);
+				Array.Copy (s.Features, feats, MlSchema.FeatureCount);
 
 				trainRows.Add (new TrainRow
 					{

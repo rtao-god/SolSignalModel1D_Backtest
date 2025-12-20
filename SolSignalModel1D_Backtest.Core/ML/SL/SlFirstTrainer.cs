@@ -4,28 +4,21 @@ using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Trainers.LightGbm;
-using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
-	/// <summary>
-	/// SL-классификатор: учим на прошлых сэмплах, свежим — больший вес,
-	/// и дополнительно усиливаем TP, чтобы модель не “залипала” в SL.
-	/// </summary>
 	public sealed class SlFirstTrainer
 		{
 		private readonly MLContext _ml = new MLContext (seed: 42);
 
 		private sealed class SlHitTrainRow
 			{
-			// Label=true означает "SL first" (как в SlOfflineBuilder).
 			public bool Label { get; set; }
 
-			[VectorType (MlSchema.FeatureCount)]
-			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
+			[VectorType (SlSchema.FeatureCount)]
+			public float[] Features { get; set; } = new float[SlSchema.FeatureCount];
 
-			// Вес примера (время + ребаланс классов).
 			public float Weight { get; set; }
 			}
 
@@ -41,7 +34,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 
 			foreach (var s in samples)
 				{
-				// Контракт: EntryUtc задан, UTC, и не позже asOfUtc.
 				if (s.EntryUtc == default)
 					throw new InvalidOperationException ("[sl-model] SlHitSample.EntryUtc is default.");
 
@@ -71,12 +63,10 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			int slCount = trainRows.Count (r => r.Label);
 			int tpCount = trainRows.Count - slCount;
 
-			// Контракт: бинарная модель требует оба класса в обучении.
 			if (slCount == 0 || tpCount == 0)
 				throw new InvalidOperationException (
 					$"[sl-model] Training set must contain both classes (SL and TP). SL={slCount}, TP={tpCount}.");
 
-			// Доп. ребаланс классов.
 			if (tpCount < slCount)
 				{
 				double ratio = slCount / (double) tpCount;
@@ -125,9 +115,6 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			return _ml.Model.CreatePredictionEngine<SlHitSample, SlHitPrediction> (model);
 			}
 
-		/// <summary>
-		/// PFI + direction для SL-модели на произвольном наборе SlHitSample (train/test/holdout).
-		/// </summary>
 		public void LogFeatureImportance (
 			ITransformer model,
 			IEnumerable<SlHitSample> evalSamples,
@@ -136,30 +123,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			if (model == null) throw new ArgumentNullException (nameof (model));
 			if (evalSamples == null) throw new ArgumentNullException (nameof (evalSamples));
 
-			var list = evalSamples.ToList ();
-			if (list.Count == 0)
-				{
-				Console.WriteLine ($"[pfi:{tag}] SL eval dataset is empty, skip.");
-				return;
-				}
-
-			var rows = list
-				.Select (s => new SlHitTrainRow
-					{
-					Label = s.Label,
-					Features = CopyFixedFeaturesOrThrow (s.Features),
-					Weight = 1.0f
-					})
-				.ToList ();
-
-			var data = _ml.Data.LoadFromEnumerable (rows);
-
-			FeatureImportanceAnalyzer.LogBinaryFeatureImportance (
-				_ml,
-				model,
-				data,
-				SlFeatureSchema.Names,
-				tag);
+			SlPfiAnalyzer.LogBinaryPfiWithDirection (_ml, model, evalSamples, tag: tag);
 			}
 
 		private static float[] CopyFixedFeaturesOrThrow ( float[]? src )
@@ -167,12 +131,12 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			if (src == null)
 				throw new InvalidOperationException ("[sl-model] SlHitSample.Features is null.");
 
-			if (src.Length != MlSchema.FeatureCount)
+			if (src.Length != SlSchema.FeatureCount)
 				throw new InvalidOperationException (
-					$"[sl-model] SlHitSample.Features length mismatch: len={src.Length}, expected={MlSchema.FeatureCount}.");
+					$"[sl-model] SlHitSample.Features length mismatch: len={src.Length}, expected={SlSchema.FeatureCount}.");
 
-			var arr = new float[MlSchema.FeatureCount];
-			Array.Copy (src, arr, MlSchema.FeatureCount);
+			var arr = new float[SlSchema.FeatureCount];
+			Array.Copy (src, arr, SlSchema.FeatureCount);
 			return arr;
 			}
 		}
