@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 	{
@@ -32,11 +33,11 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 
 			// Стабильный порядок по entryUtc (каузальная дата).
 			var ordered = records
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => r.Causal.DateUtc.ToCausalDateUtc())
 				.ToList ();
 
 			// ЕДИНСТВЕННОЕ правило сегментации — в boundary.
-			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc.ToCausalDateUtc());
 
 			var train = split.Train;
 			var oos = split.Oos;

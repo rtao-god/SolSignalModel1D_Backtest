@@ -29,9 +29,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 				return;
 				}
 
-			// Печать сводки по срезу.
-			var minDate = evalRows.Min (r => r.ToCausalDateUtc ());
-			var maxDate = evalRows.Max (r => r.ToCausalDateUtc ());
+			// Важно: период печатаем по "каузальному дню" (UTC-date).
+			// Здесь не используем extension ToCausalDateUtc(LabeledCausalRow), потому что в проекте есть 2 одинаковых экстеншена,
+			// что даёт CS0121. Для диагностики достаточно устойчивого нормализатора по DateUtc.
+			var minDate = evalRows.Min (r => ToCausalDayUtc (r.Causal.DateUtc));
+			var maxDate = evalRows.Max (r => ToCausalDayUtc (r.Causal.DateUtc));
 			Console.WriteLine ($"[pfi:daily: {datasetTag}] rows={evalRows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
 
 			// Единая логика разбиения на датасеты как в обучении (move/dir-normal/dir-down).
@@ -132,6 +134,16 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
 				{
 				Console.WriteLine ($"[pfi:daily: {datasetTag}] MicroFlatModel == null, skip micro layer PFI.");
 				}
+			}
+
+		private static DateTime ToCausalDayUtc ( DateTime tUtc )
+			{
+			// Инвариант: каузальные даты в пайплайне должны быть UTC.
+			if (tUtc.Kind != DateTimeKind.Utc)
+				throw new InvalidOperationException ($"[pfi:daily] expected UTC DateUtc, got Kind={tUtc.Kind}, t={tUtc:O}.");
+
+			// Нормализация "день" без таймзонных преобразований: считаем, что вход уже в UTC.
+			return DateTime.SpecifyKind (tUtc.Date, DateTimeKind.Utc);
 			}
 		}
 	}

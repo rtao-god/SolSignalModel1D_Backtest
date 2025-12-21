@@ -1,5 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,7 +34,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 			// Берём утренние точки с path-based микро-разметкой.
 			var labeled = mornings
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))
 				.ToList ();
 
 			if (labeled.Count < 20)
@@ -42,15 +43,17 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 					$"[micro] размеченных микро-дней слишком мало ({labeled.Count}), пропускаем sanity-проверку.");
 				}
 
-			// Мапа дата → факт (FactMicroUp/Down).
-			var factByDate = labeled.ToDictionary (r => r.ToCausalDateUtc(), r => r);
+			// Мапа day-key → факт (FactMicroUp/Down).
+			var factByDayKey = labeled.ToDictionary (r => CausalTimeKey.DayKeyUtc (r), r => r);
 
-			// Собираем пары (прогноз микро-слоя + факт).
-			var pairs = new List<(DateTime DateUtc, bool PredUp, bool FactUp)> ();
+			// Собираем пары (прогноз микро-слоя + факт) по day-key, чтобы не смешивать timestamp и date-key.
+			var pairs = new List<(DateTime DayKeyUtc, bool PredUp, bool FactUp)> ();
 
 			foreach (var rec in records)
 				{
-				if (!factByDate.TryGetValue (rec.DateUtc, out var row))
+				var dayKey = CausalTimeKey.DayKeyUtc (rec);
+
+				if (!factByDayKey.TryGetValue (dayKey, out var row))
 					continue;
 
 				// Если микро-прогноз не был выдан, пропускаем день.
@@ -58,7 +61,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 					continue;
 
 				pairs.Add ((
-					rec.DateUtc,
+					DayKeyUtc: dayKey,
 					PredUp: rec.PredMicroUp,
 					FactUp: row.FactMicroUp));
 				}
@@ -69,8 +72,11 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 					$"[micro] слишком мало дней, где есть и микро-прогноз, и path-based разметка ({pairs.Count}).");
 				}
 
-			var train = pairs.Where (p => p.DateUtc <= ctx.TrainUntilUtc).ToList ();
-			var oos = pairs.Where (p => p.DateUtc > ctx.TrainUntilUtc).ToList ();
+			// Train/OOS режем по day-key, чтобы сравнение не зависело от внутридневного времени.
+			var trainUntilDayKey = ctx.TrainUntilUtc.ToCausalDateUtc ();
+
+			var train = pairs.Where (p => p.DayKeyUtc <= trainUntilDayKey).ToList ();
+			var oos = pairs.Where (p => p.DayKeyUtc > trainUntilDayKey).ToList ();
 
 			double accAll = ComputeAccuracy (pairs);
 			double accTrain = ComputeAccuracy (train);
@@ -88,7 +94,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 
 			if (oos.Count == 0)
 				{
-				warnings.Add ("[micro] OOS-часть для микро-слоя пуста (нет дней с DateUtc > _trainUntilUtc).");
+				warnings.Add ("[micro] OOS-часть для микро-слоя пуста (нет дней с day-key > trainUntil).");
 				}
 
 			// OOS слишком хорош → подозрение на утечку.
@@ -126,7 +132,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 			return result;
 			}
 
-		private static double ComputeAccuracy ( IReadOnlyList<(DateTime DateUtc, bool PredUp, bool FactUp)> items )
+		private static double ComputeAccuracy ( IReadOnlyList<(DateTime DayKeyUtc, bool PredUp, bool FactUp)> items )
 			{
 			if (items == null || items.Count == 0)
 				return double.NaN;

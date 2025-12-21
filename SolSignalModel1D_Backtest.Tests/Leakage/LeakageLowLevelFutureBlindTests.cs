@@ -53,14 +53,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			Assert.NotEmpty (rowsOriginal);
 
-			// Берём entry-момент последней строки (UTC). Это "поздняя" точка для хвоста.
-			var lastRowEntryUtc = rowsOriginal.Last ().ToCausalDateUtc();
+			// EntryUtc берём явно из causal-части, без record-extension (устраняем ambiguous).
+			var lastRowEntryUtc = rowsOriginal.Last ().Causal.DateUtc;
 
-			// Мутируем свечи после этого момента (часть хвоста).
 			var mutateAfterUtc = lastRowEntryUtc.AddDays (-1);
-
-			// "Защищённая" граница должна быть раньше, чтобы baseline-окно для этих дней
-			// не пересекалось с мутированным хвостом.
 			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3);
 
 			var solWinTrainMut = CloneCandles6h (solWinTrain);
@@ -93,12 +89,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			Assert.NotEmpty (rowsMutated);
 
 			var safeOriginal = rowsOriginal
-				.Where (r => r.ToCausalDateUtc() <= protectedBoundaryUtc)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.ToCausalDateUtc() <= protectedBoundaryUtc)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
@@ -111,7 +107,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var b = safeMutated[i];
 
 				Assert.Equal (a.DateUtc, b.DateUtc);
-				Assert.Equal (a.ToCausalDateUtc(), b.ToCausalDateUtc());
+				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
 
 				var fa = a.Causal.FeaturesVector.Span;
 				var fb = b.Causal.FeaturesVector.Span;
@@ -121,7 +117,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				for (int j = 0; j < fa.Length; j++)
 					{
 					AssertAlmostEqual (fa[j], fb[j], 1e-9,
-						$"FeatureVector[{j}] differs for Date={a.ToCausalDateUtc():O}");
+						$"FeatureVector[{j}] differs for EntryUtc={a.Causal.DateUtc:O}");
 					}
 
 				AssertAlmostEqual (a.Causal.SolRet30, b.Causal.SolRet30, 1e-9, "SolRet30 mismatch");
@@ -162,7 +158,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			Assert.NotEmpty (rowsOriginal);
 
-			var lastRowEntryUtc = rowsOriginal.Last ().ToCausalDateUtc();
+			var lastRowEntryUtc = rowsOriginal.Last ().Causal.DateUtc;
 			var mutateAfterUtc = lastRowEntryUtc.AddDays (-1);
 			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3);
 
@@ -195,12 +191,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			Assert.NotEmpty (rowsMutated);
 
 			var safeOriginal = rowsOriginal
-				.Where (r => r.ToCausalDateUtc() <= protectedBoundaryUtc)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.ToCausalDateUtc() <= protectedBoundaryUtc)
+				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
 				.OrderBy (r => r.DateUtc)
 				.ToList ();
 
@@ -214,14 +210,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 				Assert.Equal (a.DateUtc, b.DateUtc);
 
-				// Контракт таргета в текущей архитектуре:
-				// - TrueLabel (0..2)
-				// - факты micro-ветки для flat-дней
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
 				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
 
-				// MinMove — каузальное значение, не должно меняться от мутации будущего хвоста.
 				AssertAlmostEqual (a.Causal.MinMove, b.Causal.MinMove, 1e-9, "MinMove mismatch");
 				}
 			}

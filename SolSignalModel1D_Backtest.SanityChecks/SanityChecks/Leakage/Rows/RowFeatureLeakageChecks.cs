@@ -1,5 +1,9 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
@@ -8,8 +12,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 	/// Self-check на жёсткую утечку: пытается найти фичи, которые численно совпадают
 	/// с будущими таргетами (MaxHigh24/MinLow24/Close24/первая 1m после exit и т.п.).
 	///
-	/// Ключевой принцип: фичи читаем только из каузального вектора (FeaturesVector),
-	/// future-таргеты берём только из omniscient части BacktestRecord.
+	/// Ключевой принцип:
+	/// - фичи читаем только из каузального вектора (FeaturesVector);
+	/// - будущие таргеты берём только из omniscient части записи;
+	/// - time-contract: baseline-exit считается от EntryUtc, а агрегации/джойны делаются по DayKeyUtc.
 	/// </summary>
 	public static class RowFeatureLeakageChecks
 		{
@@ -51,8 +57,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 				Summary = "[rows-leak] features vs future targets"
 				};
 
-			// В текущей архитектуре “строки” для проверки — это BacktestRecord:
-			// внутри есть Causal (вектор фич) и Forward (будущие факты).
 			var allRows = ctx.Records;
 			var sol1m = ctx.Sol1m;
 			var nyTz = ctx.NyTz;
@@ -70,35 +74,33 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 					.ToList ();
 				}
 
-			// Собираем future-таргеты на дату.
-			var futureTargetsByDate = new Dictionary<DateTime, List<(string Name, double Value)>> ();
+			var futureTargetsByDayKey = new Dictionary<DateTime, List<(string Name, double Value)>> ();
 
 			foreach (var rec in allRows)
 				{
 				if (rec == null)
 					throw new InvalidOperationException ("[rows-leak] AllRows contains null item.");
 
-				var date = rec.ToCausalDateUtc ();
+				var entryUtc = CausalTimeKey.EntryUtc (rec);
+				var dayKey = entryUtc.ToCausalDateUtc ();
 
 				var targets = new List<(string Name, double Value)> ();
 
-				// MaxHigh24/MinLow24/Close24 — явные future-факты.
+				// Будущие таргеты должны браться только из omniscient-части записи.
 				targets.Add (("MaxHigh24", rec.MaxHigh24));
 				targets.Add (("MinLow24", rec.MinLow24));
 				targets.Add (("Close24", rec.Close24));
 
-				// SolFwd1 как отдельного поля может не быть.
-				// Если нужно сравнение с “доходностью” по суткам — считаем строго и явно.
 				if (double.IsFinite (rec.Entry) && rec.Entry > 0.0 && double.IsFinite (rec.Close24))
 					{
 					double solFwd1 = rec.Close24 / rec.Entry - 1.0;
 					targets.Add (("SolFwd1(calc:Close24/Entry-1)", solFwd1));
 					}
 
-				// Первая 1m после baseline-exit.
 				if (sol1mSorted != null && nyTz != null)
 					{
-					var exitUtc = CoreWindowing.ComputeBaselineExitUtc (date, nyTz);
+					// baseline-exit считается от EntryUtc (timestamp), а не от day-key.
+					var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 					var future1m = FindFirstMinuteAfter (sol1mSorted, exitUtc);
 					if (future1m != null)
 						{
@@ -106,24 +108,37 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 						}
 					}
 
-				futureTargetsByDate[date] = targets;
+				futureTargetsByDayKey[dayKey] = targets;
 				}
 
 			var suspiciousMatches = new List<MatchInfo> (capacity: 256);
+
+			// Диагностика невалидных чисел: это не "шум", это поломка пайплайна.
+			int emptyFeatureVectorCount = 0;
+			int invalidFeatureValueCount = 0;
+			int invalidTargetValueCount = 0;
+
+			var invalidFeatureSamples = new List<string> (capacity: 8);
+			var invalidTargetSamples = new List<string> (capacity: 8);
+			var emptyVectorSamples = new List<string> (capacity: 8);
 
 			foreach (var rec in allRows)
 				{
 				if (rec == null) continue;
 
-				var date = rec.ToCausalDateUtc ();
+				var dayKey = CausalTimeKey.DayKeyUtc (rec);
 
-				if (!futureTargetsByDate.TryGetValue (date, out var targets) || targets.Count == 0)
+				if (!futureTargetsByDayKey.TryGetValue (dayKey, out var targets) || targets.Count == 0)
 					continue;
 
-				// Фичи берём ТОЛЬКО из каузального вектора.
 				var vec = rec.Causal.FeaturesVector;
 				if (vec.IsEmpty)
+					{
+					emptyFeatureVectorCount++;
+					if (emptyVectorSamples.Count < 5)
+						emptyVectorSamples.Add ($"[rows-leak] empty FeaturesVector: dayKey={dayKey:O}");
 					continue;
+					}
 
 				var feats = vec.Span;
 
@@ -131,25 +146,44 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 					{
 					double fVal = feats[fi];
 					if (double.IsNaN (fVal) || double.IsInfinity (fVal))
+						{
+						invalidFeatureValueCount++;
+						if (invalidFeatureSamples.Count < 5)
+							{
+							string featName =
+								fi >= 0 && fi < FeatureNames.Length
+									? FeatureNames[fi]
+									: $"feat{fi}";
+
+							invalidFeatureSamples.Add (
+								$"[rows-leak] invalid feature value: dayKey={dayKey:O}, featureIndex={fi} ({featName}), featureVal={fVal}");
+							}
 						continue;
+						}
 
 					foreach (var (name, tVal) in targets)
 						{
 						if (double.IsNaN (tVal) || double.IsInfinity (tVal))
+							{
+							invalidTargetValueCount++;
+							if (invalidTargetSamples.Count < 5)
+								{
+								invalidTargetSamples.Add (
+									$"[rows-leak] invalid target value: dayKey={dayKey:O}, target={name}, targetVal={tVal}");
+								}
 							continue;
+							}
 
 						if (IsNearlyEqual (fVal, tVal))
 							{
 							suspiciousMatches.Add (new MatchInfo
 								{
-								Date = date,
+								Date = dayKey,
 								FeatureIndex = fi,
 								TargetName = name,
 								FeatureVal = fVal,
 								TargetVal = tVal,
 
-								// Диагностический контекст. Не все поля обязаны существовать в BacktestRecord —
-								// здесь используем только то, что уже проксируется/есть в текущей модели.
 								TrueLabel = rec.TrueLabel,
 								MinMove = rec.MinMove,
 								RegimeDown = rec.RegimeDown,
@@ -157,6 +191,29 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 								});
 							}
 						}
+					}
+				}
+
+			if (emptyFeatureVectorCount > 0 || invalidFeatureValueCount > 0 || invalidTargetValueCount > 0)
+				{
+				result.Success = false;
+
+				if (emptyFeatureVectorCount > 0)
+					{
+					result.Errors.Add ($"[rows-leak] invalid input: empty FeaturesVector count={emptyFeatureVectorCount}.");
+					foreach (var s in emptyVectorSamples) result.Errors.Add (s);
+					}
+
+				if (invalidFeatureValueCount > 0)
+					{
+					result.Errors.Add ($"[rows-leak] invalid input: NaN/Infinity in features count={invalidFeatureValueCount}.");
+					foreach (var s in invalidFeatureSamples) result.Errors.Add (s);
+					}
+
+				if (invalidTargetValueCount > 0)
+					{
+					result.Errors.Add ($"[rows-leak] invalid input: NaN/Infinity in future targets count={invalidTargetValueCount}.");
+					foreach (var s in invalidTargetSamples) result.Errors.Add (s);
 					}
 				}
 
@@ -220,7 +277,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
 				bool targetMostlyZero = fracZeroTarget >= 0.8;
 
-				// Типовой шум: бинарная фича vs таргет, который почти всегда около 0.
 				if (isBinaryFeature && targetMostlyZero)
 					noiseGroups.Add (g);
 				else
@@ -235,7 +291,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 			if (realLeaks.Count == 0)
 				{
 				result.Summary += " → only binary/near-zero groups, treated as noise.";
-				result.Success = true;
 				return result;
 				}
 
@@ -271,7 +326,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 			foreach (var sample in g.NonZeroMatches.OrderBy (x => x.Date).Take (5))
 				{
 				var line =
-					$"[rows-leak]   date={sample.Date:O}, " +
+					$"[rows-leak]   dayKey={sample.Date:O}, " +
 					$"featureVal={sample.FeatureVal:0.########}, " +
 					$"targetVal={sample.TargetVal:0.########}, " +
 					$"trueLabel={sample.TrueLabel}, minMove={sample.MinMove:0.####}, " +

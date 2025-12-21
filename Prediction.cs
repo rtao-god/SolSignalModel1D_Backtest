@@ -199,7 +199,6 @@ namespace SolSignalModel1D_Backtest
 					MinLow24 = minLow,
 					Close24 = fwdClose,
 
-					// Гипотеза: MinMove хранится в каузальной строке. Если поле называется иначе — привяжи сюда корректный источник.
 					MinMove = r.Causal.MinMove,
 
 					WindowEndUtc = exitUtc,

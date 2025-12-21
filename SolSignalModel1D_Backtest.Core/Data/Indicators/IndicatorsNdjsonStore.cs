@@ -19,6 +19,15 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 		{
 		private readonly string _path = path;
 
+		private string IndicatorKey
+			{
+			get
+				{
+				var name = Path.GetFileNameWithoutExtension (_path);
+				return string.IsNullOrWhiteSpace (name) ? "indicators" : name.Trim ().ToLowerInvariant ();
+				}
+			}
+
 		public sealed class IndicatorLine ( DateTime dateUtc, double value )
 			{
 			public DateTime D { get; } = dateUtc.ToCausalDateUtc ();
@@ -44,7 +53,8 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				lineIndex++;
 				if (string.IsNullOrWhiteSpace (line)) continue;
 
-				return ParseLineDateOrThrow (line, lineIndex);
+				var parsed = ParseLineOrThrow (line, lineIndex);
+				return parsed.DateUtc;
 				}
 
 			return null;
@@ -77,7 +87,9 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				}
 
 			if (lastNonEmpty == null) return null;
-			return ParseLineDateOrThrow (lastNonEmpty, lastIndex);
+
+			var parsedLast = ParseLineOrThrow (lastNonEmpty, lastIndex);
+			return parsedLast.DateUtc;
 			}
 
 		/// <summary>
@@ -163,59 +175,71 @@ namespace SolSignalModel1D_Backtest.Core.Data.Indicators
 				lineIndex++;
 				if (string.IsNullOrWhiteSpace (line)) continue;
 
-				try
-					{
-					using var doc = JsonDocument.Parse (line);
-					var root = doc.RootElement;
+				var parsed = ParseLineOrThrow (line, lineIndex);
 
-					if (!root.TryGetProperty ("d", out var dEl))
-						throw new InvalidOperationException (
-							$"[indicators] property 'd' not found in '{_path}' at line #{lineIndex}: '{line}'");
+				if (parsed.DateUtc < start || parsed.DateUtc > end)
+					continue;
 
-					if (!root.TryGetProperty ("v", out var vEl))
-						throw new InvalidOperationException (
-							$"[indicators] property 'v' not found in '{_path}' at line #{lineIndex}: '{line}'");
-
-					if (!DateTime.TryParse (dEl.GetString (), out var d))
-						throw new InvalidOperationException (
-							$"[indicators] cannot parse 'd' as DateTime in '{_path}' at line #{lineIndex}: '{line}'");
-
-					var date = d.ToCausalDateUtc ();
-					if (date < start || date > end) continue;
-
-					double v = vEl.GetDouble ();
-					res[date] = v;
-					}
-				catch (Exception ex)
-					{
-					throw new InvalidOperationException (
-						$"[indicators] invalid NDJSON in '{_path}' at line #{lineIndex}: '{line}'",
-						ex);
-					}
+				res[parsed.DateUtc] = parsed.Value;
 				}
 
 			return res;
 			}
 
-		private DateTime ParseLineDateOrThrow ( string line, int lineIndex )
+		private (DateTime DateUtc, double Value) ParseLineOrThrow ( string rawLine, int lineIndex )
 			{
 			try
 				{
-				using var doc = JsonDocument.Parse (line);
-				if (!doc.RootElement.TryGetProperty ("d", out var dEl))
-					throw new InvalidOperationException (
-						$"[indicators] property 'd' not found in '{_path}' at line #{lineIndex}: '{line}'");
+				using var doc = JsonDocument.Parse (rawLine);
+				var root = doc.RootElement;
 
-				if (!DateTime.TryParse (dEl.GetString (), out var d))
+				if (!root.TryGetProperty ("d", out var dEl))
 					throw new InvalidOperationException (
-						$"[indicators] cannot parse 'd' as DateTime in '{_path}' at line #{lineIndex}: '{line}'");
+						$"[indicators:{IndicatorKey}] property 'd' not found. source='{_path}', line=#{lineIndex}, raw='{rawLine}'");
 
-				return d.ToCausalDateUtc ();
+				if (!root.TryGetProperty ("v", out var vEl))
+					throw new InvalidOperationException (
+						$"[indicators:{IndicatorKey}] property 'v' not found. source='{_path}', line=#{lineIndex}, raw='{rawLine}'");
+
+				var dStr = dEl.GetString ();
+				if (string.IsNullOrWhiteSpace (dStr))
+					throw new InvalidOperationException (
+						$"[indicators:{IndicatorKey}] empty 'd'. source='{_path}', line=#{lineIndex}, raw='{rawLine}'");
+
+				if (!DateTime.TryParseExact (
+						dStr,
+						"yyyy-MM-dd",
+						CultureInfo.InvariantCulture,
+						DateTimeStyles.None,
+						out var d))
+					{
+					throw new InvalidOperationException (
+						$"[indicators:{IndicatorKey}] cannot parse day. day='{dStr}'. source='{_path}', line=#{lineIndex}, raw='{rawLine}'");
+					}
+
+				var day = d.ToCausalDateUtc ();
+
+				// v может быть числом; если формат битый/тип не тот — GetDouble() кинет и уйдём в catch ниже.
+				double v = vEl.GetDouble ();
+
+				// Жёсткая защита от недопустимых double (в т.ч. если источник/генератор “впрыснул” NaN/Inf).
+				if (double.IsNaN (v) || double.IsInfinity (v))
+					{
+					throw new InvalidOperationException (
+						$"[indicators:{IndicatorKey}] invalid value parsed. day={day:yyyy-MM-dd}, v={v}. " +
+						$"source='{_path}', line='{rawLine}'");
+					}
+
+				return (day, v);
+				}
+			catch (InvalidOperationException)
+				{
+				throw;
 				}
 			catch (Exception ex)
 				{
 				throw new InvalidOperationException (
-					$"[indicators] failed to parse NDJSON line in '{_path}' at line #{lineIndex}: '{line}'",
+					$"[indicators:{IndicatorKey}] invalid NDJSON. source='{_path}', line=#{lineIndex}, raw='{rawLine}'",
 					ex);
 				}
 			}

@@ -1,6 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
-using System;
-using System.Collections.Generic;
+﻿using System.Linq;
 using System.Globalization;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data

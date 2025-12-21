@@ -1,14 +1,15 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
@@ -16,23 +17,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	/// E2E-тесты для дневной модели:
 	/// - синтетическая монотонная история (smoke: пайплайн не падает, классы валидные);
 	/// - синтетическая зигзагообразная история (модель не должна вырождаться в константу).
-	/// Пайплайн: RowBuilder.BuildRowsDaily → ModelTrainer.TrainAll → PredictionEngine.
+	/// Пайплайн: RowBuilder.BuildDailyRows → ModelTrainer.TrainAll → PredictionEngine.
 	/// </summary>
 	public sealed class DailyModelEndToEndTests
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		/// <summary>
-		/// Монотонный ап-тренд:
-		/// - проверяем, что весь пайплайн ходит от конца до конца;
-		/// - PredictionEngine выдаёт хотя бы одно предсказание и все классы в диапазоне [0..2].
-		/// В этом сценарии микро-слой может не обучиться (слишком мало микро-дней) — это допустимо.
-		/// </summary>
 		[Fact]
 		public void DailyModel_EndToEnd_OnMonotonicTrendHistory_ProducesValidPredictions ()
 			{
 			var rows = BuildMonotonicHistory ();
-			var ordered = rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
+			var ordered = rows.OrderBy (EntryUtc).ToList ();
 
 			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
@@ -42,17 +37,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			Assert.InRange (result.PredictedClasses.Count, 1, 3);
 			}
 
-		/// <summary>
-		/// Зигзагообразная история:
-		/// - специально даём SOL волнообразный профиль по минуткам;
-		/// - требуем, чтобы модель использовала минимум два класса на истории (не выродилась в константу).
-		/// Микро-слой здесь также опционален, важен именно дневной Pred.Class.
-		/// </summary>
 		[Fact]
 		public void DailyModel_EndToEnd_OnZigZagHistory_UsesAtLeastTwoClasses ()
 			{
 			var rows = BuildZigZagHistory ();
-			var ordered = rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
+			var ordered = rows.OrderBy (EntryUtc).ToList ();
 
 			const int HoldoutDays = 60;
 			var result = TrainAndPredict (ordered, HoldoutDays);
@@ -76,37 +65,39 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// <summary>
 		/// Общая часть: делим на train/OOS, тренируем дневной бандл и прогоняем PredictionEngine по всей истории.
 		/// </summary>
-		private static DailyE2eResult TrainAndPredict ( List<BacktestRecord> orderedRows, int holdoutDays )
+		private static DailyE2eResult TrainAndPredict ( List<LabeledCausalRow> orderedRows, int holdoutDays )
 			{
 			if (orderedRows == null) throw new ArgumentNullException (nameof (orderedRows));
 			Assert.NotEmpty (orderedRows);
+			if (holdoutDays <= 0) throw new ArgumentOutOfRangeException (nameof (holdoutDays));
 
-			var minDate = orderedRows.First ().Date;
-			var maxDate = orderedRows.Last ().Date;
+			// Важно: не используем record-extension ToCausalDateUtc(), чтобы не ловить CS0121 (ambiguous).
+			// Здесь entryUtc берём явно из causal-части.
+			var minDayKey = DayKeyUtc (orderedRows.First ());
+			var maxDayKey = DayKeyUtc (orderedRows.Last ());
 
-			var trainUntil = maxDate.AddDays (-holdoutDays);
+			var maxEntryUtc = EntryUtc (orderedRows.Last ());
+			var trainUntilEntryUtc = maxEntryUtc.AddDays (-holdoutDays);
 
 			var trainRows = orderedRows
-				.Where (r => r.ToCausalDateUtc() <= trainUntil)
+				.Where (r => EntryUtc (r) <= trainUntilEntryUtc)
 				.ToList ();
 
 			var oosRows = orderedRows
-				.Where (r => r.ToCausalDateUtc() > trainUntil)
+				.Where (r => EntryUtc (r) > trainUntilEntryUtc)
 				.ToList ();
 
 			Assert.True (trainRows.Count > 50,
-				$"Слишком мало train-дней для обучения (train={trainRows.Count}, диапазон {minDate:yyyy-MM-dd}..{trainUntil:yyyy-MM-dd}).");
+				$"Слишком мало train-дней для обучения (train={trainRows.Count}, диапазон {minDayKey:yyyy-MM-dd}..{trainUntilEntryUtc:yyyy-MM-dd}).");
 			Assert.True (oosRows.Count > 10,
-				$"Слишком мало OOS-дней для проверки (oos={oosRows.Count}, диапазон {trainUntil:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}).");
+				$"Слишком мало OOS-дней для проверки (oos={oosRows.Count}, диапазон {trainUntilEntryUtc:yyyy-MM-dd}..{maxDayKey:yyyy-MM-dd}).");
 
-			// Обучаем дневной бандл.
 			var trainer = new ModelTrainer ();
 			var bundle = trainer.TrainAll (trainRows);
 
 			Assert.NotNull (bundle);
 			Assert.NotNull (bundle.MlCtx);
 			Assert.NotNull (bundle.MoveModel);
-			// Микро-слой здесь опционален: если микро-датасет мал, MicroFlatModel == null — это допустимо.
 
 			var engine = new PredictionEngine (bundle);
 
@@ -116,12 +107,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			foreach (var row in orderedRows)
 				{
-				var pred = engine.Predict (row);
+				// Инвариант: предиктим только causal-часть.
+				var pred = engine.PredictCausal (row.Causal);
 
 				totalPredictions++;
-				classes.Add (pred.Class);
+				classes.Add (pred.PredLabel);
 
-				if (pred.Class < 0 || pred.Class > 2)
+				if (pred.PredLabel < 0 || pred.PredLabel > 2)
 					clsOutOfRange++;
 				}
 
@@ -134,36 +126,33 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				};
 			}
 
+		private static DateTime EntryUtc ( LabeledCausalRow r ) => r.Causal.DateUtc;
+
 		/// <summary>
-		/// Строит монотонную историю: плавный ап-тренд + лёгкий шум.
-		/// Используется как smoke-тест пайплайна.
+		/// Day-key (00:00 UTC) для сообщений/диапазонов/словарей.
 		/// </summary>
-		private static List<BacktestRecord> BuildMonotonicHistory ()
+		private static DateTime DayKeyUtc ( LabeledCausalRow r ) => r.Causal.DateUtc.ToCausalDateUtc ();
+
+		private static List<LabeledCausalRow> BuildMonotonicHistory ()
 			{
 			return BuildSyntheticRows (
 				solPriceFunc: i =>
 				{
-					// Плавный рост + небольшой синусоидальный шум.
-					double trend = 100.0 + 0.002 * i;          // ~0.2% на 100 минут
-					double noise = Math.Sin (i * 0.005) * 0.3; // колебания порядка ±0.3$
+					double trend = 100.0 + 0.002 * i;
+					double noise = Math.Sin (i * 0.005) * 0.3;
 					return trend + noise;
 				}
 			);
 			}
 
-		/// <summary>
-		/// Строит зигзагообразную историю: выраженные волны вверх/вниз по SOL.
-		/// </summary>
-		private static List<BacktestRecord> BuildZigZagHistory ()
+		private static List<LabeledCausalRow> BuildZigZagHistory ()
 			{
 			return BuildSyntheticRows (
 				solPriceFunc: i =>
 				{
-					// Крупные волны вверх/вниз + лёгкий ап-тренд,
-					// чтобы по дневным окнам были как up-, так и down-дни.
 					double basePrice = 100.0;
-					double wave = 10.0 * Math.Sin (i * 0.01);   // период ~ 600 минут (~10 часов)
-					double slowDrift = 0.0005 * i;              // лёгкий дрейф вверх
+					double wave = 10.0 * Math.Sin (i * 0.01);
+					double slowDrift = 0.0005 * i;
 					return basePrice + wave + slowDrift;
 				}
 			);
@@ -174,10 +163,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		/// - генерирует 1m-ряд по заданной функции цены SOL;
 		/// - агрегирует его в 6h-свечи SOL;
 		/// - строит простые тренды для BTC/PAXG;
-		/// - генерирует FNG/DXY;
-		/// - передаёт всё это в RowBuilder.BuildRowsDaily.
+		/// - генерирует FNG/DXY (важно: ключи DateTimeKind.Utc и покрытие дат).
 		/// </summary>
-		private static List<BacktestRecord> BuildSyntheticRows ( Func<int, double> solPriceFunc )
+		private static List<LabeledCausalRow> BuildSyntheticRows ( Func<int, double> solPriceFunc )
 			{
 			if (solPriceFunc == null) throw new ArgumentNullException (nameof (solPriceFunc));
 
@@ -189,7 +177,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var solAll1m = new List<Candle1m> (totalMinutes);
 			var solPrices = new double[totalMinutes];
 
-			// 1. Минутный ряд SOL.
 			for (int i = 0; i < totalMinutes; i++)
 				{
 				var t = start.AddMinutes (i);
@@ -209,7 +196,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					});
 				}
 
-			// 2. Агрегация в 6h-свечи SOL + простые ряды BTC/PAXG.
 			var solAll6h = new List<Candle6h> (total6h);
 			var btcAll6h = new List<Candle6h> (total6h);
 			var paxgAll6h = new List<Candle6h> (total6h);
@@ -240,7 +226,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					Low = low
 					});
 
-				// BTC/PAXG — простые плавные тренды, чтобы фичи были не константными.
 				double btcPrice = 50.0 + 0.05 * block;
 				double paxgPrice = 1500.0 + 0.02 * block;
 
@@ -261,12 +246,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					});
 				}
 
-			// 3. FNG/DXY: простые плоские ряды, но с полным покрытием дат.
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
-			var firstDate = start.ToCausalDateUtc().AddDays (-200);
-			var lastDate = start.ToCausalDateUtc().AddDays (400);
+			var firstDate = start.ToCausalDateUtc ().AddDays (-200);
+			var lastDate = start.ToCausalDateUtc ().AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -275,8 +259,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				dxy[key] = 100.0;
 				}
 
-			// 4. Строим дневные строки через реальный RowBuilder.
-			var rows = RowBuilder.BuildRowsDaily (
+			var rows = RowBuilder.BuildDailyRows (
 				solWinTrain: solAll6h,
 				btcWinTrain: btcAll6h,
 				paxgWinTrain: paxgAll6h,
@@ -286,10 +269,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				dxySeries: dxy,
 				extraDaily: null,
 				nyTz: NyTz
-			);
+			).LabeledRows;
 
 			Assert.NotEmpty (rows);
-			return rows.OrderBy (r => r.ToCausalDateUtc()).ToList ();
+			return rows.OrderBy (EntryUtc).ToList ();
 			}
 		}
 	}

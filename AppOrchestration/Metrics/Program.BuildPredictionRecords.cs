@@ -2,6 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
@@ -44,7 +45,7 @@ namespace SolSignalModel1D_Backtest
 				}
 
 			// Логируем, какие вообще дни есть в утренних точках.
-			DumpRange ("mornings", mornings, r => r.ToCausalDateUtc());
+			DumpRange ("mornings", mornings, r => CausalTimeKey.DayKeyUtc (r));
 
 			// PredictionEngine создаётся один раз для всей дневной выборки.
 			var engine = CreatePredictionEngineOrFallback (allRows);

@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
@@ -14,18 +16,11 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 	/// Сквозной тест дневной модели:
 	/// RowBuilder + ModelTrainer + PredictionEngine на синтетическом "зигзаге".
 	/// Цель:
-	/// - таргеты Label на train не вырождаются в один класс;
+	/// - таргеты на train не вырождаются в один класс;
 	/// - предсказания PredLabel тоже не вырождаются в один класс.
-	/// Если где-то случится деградация (RowBuilder/Trainer/PredictionEngine),
-	/// тест должен это поймать.
 	/// </summary>
 	public sealed class DailyModelE2ETests
 		{
-		/// <summary>
-		/// Генерация зигзагообразного 6h-ряда:
-		/// часть баров вверх, часть вниз, с фиксированным seed.
-		/// Такой ряд даёт микс "up / down / flat" для path-таргетов.
-		/// </summary>
 		private static List<Candle6h> BuildZigZagSeries (
 			int count,
 			double startPrice,
@@ -46,7 +41,6 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 					? price * (1.0 + upStepPct)
 					: price * (1.0 - downStepPct);
 
-				// Небольшой спред high/low, чтобы были адекватные диапазоны.
 				double high = Math.Max (price, newPrice) * 1.002;
 				double low = Math.Min (price, newPrice) * 0.998;
 
@@ -66,11 +60,6 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			return list;
 			}
 
-		/// <summary>
-		/// Строит 1m-ряд на основе 6h-баров:
-		/// внутри каждого 6h-интервала линейный переход от open к close.
-		/// Это даёт согласованные минутки для PathLabeler/MinMove.
-		/// </summary>
 		private static List<Candle1m> BuildMinuteSeriesFrom6h ( IReadOnlyList<Candle6h> sixHours )
 			{
 			var list = new List<Candle1m> ();
@@ -81,7 +70,6 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				double end = c.Close;
 				var baseTime = c.OpenTimeUtc;
 
-				// 6 часов = 360 минут.
 				for (int i = 0; i < 360; i++)
 					{
 					double alpha = (i + 1) / 360.0;
@@ -107,49 +95,25 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 		[Fact]
 		public void DailyModel_UsesMoreThanOneClass_OnSyntheticZigZag ()
 			{
-			// Немного длиннее ряда, чтобы:
-			// - индикаторы успели "разогреться";
-			// - осталась нормальная train-часть + OOS.
-			const int total6h = 800;       // ~200 дней
-			const int holdoutDays = 60;    // OOS для проверки предиктов
+			const int total6h = 800;     // ~200 дней
+			const int holdoutDays = 60;  // OOS для проверки предиктов
 
 			var nyTz = TimeZones.NewYork;
 
-			// --- 1. Синтетические SOL/BTC/PAXG 6h-ряды (зигзаги с разными шагами) ---
-			var solAll6h = BuildZigZagSeries (
-				count: total6h,
-				startPrice: 100.0,
-				upStepPct: 0.015,
-				downStepPct: 0.015,
-				seed: 42);
+			var solAll6h = BuildZigZagSeries (total6h, 100.0, 0.015, 0.015, 42);
+			var btcAll6h = BuildZigZagSeries (total6h, 50.0, 0.01, 0.01, 43);
+			var paxgAll6h = BuildZigZagSeries (total6h, 1500.0, 0.004, 0.004, 44);
 
-			var btcAll6h = BuildZigZagSeries (
-				count: total6h,
-				startPrice: 50.0,
-				upStepPct: 0.01,
-				downStepPct: 0.01,
-				seed: 43);
-
-			var paxgAll6h = BuildZigZagSeries (
-				count: total6h,
-				startPrice: 1500.0,
-				upStepPct: 0.004,
-				downStepPct: 0.004,
-				seed: 44);
-
-			// Минутки для PathLabeler/MinMove.
 			var solAll1m = BuildMinuteSeriesFrom6h (solAll6h);
 
-			// --- 2. Макро-ряды FNG/DXY: ровные, без шума, только чтобы RowBuilder не падал ---
-			var firstDate = solAll6h.First ().OpenTimeUtc.ToCausalDateUtc().AddDays (-120);
-			var lastDate = solAll6h.Last ().OpenTimeUtc.ToCausalDateUtc().AddDays (120);
+			var firstDate = solAll6h.First ().OpenTimeUtc.ToCausalDateUtc ().AddDays (-120);
+			var lastDate = solAll6h.Last ().OpenTimeUtc.ToCausalDateUtc ().AddDays (120);
 
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
-				// Важно: Kind = Utc, чтобы совпадать с логикой RowBuilder.
 				var key = new DateTime (d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc);
 				fng[key] = 50;
 				dxy[key] = 100.0;
@@ -157,8 +121,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			// --- 3. Строим BacktestRecord через боевой RowBuilder ---
-			var rows = RowBuilder.BuildRowsDaily (
+			var build = RowBuilder.BuildDailyRows (
 				solWinTrain: solAll6h,
 				btcWinTrain: btcAll6h,
 				paxgWinTrain: paxgAll6h,
@@ -169,42 +132,37 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				extraDaily: extraDaily,
 				nyTz: nyTz);
 
+			var rows = build.LabeledRows;
+
 			Assert.True (rows.Count > 200, $"Too few rows built for e2e test: {rows.Count}");
 
+			static DateTime EntryUtc ( LabeledCausalRow r ) => r.Causal.DateUtc;
+
 			var ordered = rows
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (EntryUtc)
 				.ToList ();
 
-			// --- 4. Диагностика таргетов на трене: Label не должен быть константой ---
+			// TrueLabel не должен быть константой на синтетике.
 			var labelHist = ordered
-				.GroupBy (r => r.Forward.TrueLabel)
+				.GroupBy (r => r.TrueLabel)
 				.OrderBy (g => g.Key)
 				.ToDictionary (g => g.Key, g => g.Count ());
 
-			// Должно быть хотя бы два класса.
 			Assert.True (labelHist.Count >= 2,
-				"Path-based Label на зигзаге выродился в один класс. Это странно для e2e-сценария.");
+				"Path-based TrueLabel on zigzag collapsed to a single class. This is suspicious for an e2e scenario.");
 
-			// И каждый класс должен иметь хотя бы небольшое число примеров,
-			// чтобы Trainer имел шанс чему-то научиться.
 			foreach (var kv in labelHist)
-				{
-				Assert.True (kv.Value >= 10,
-					$"Label {kv.Key} has too few samples for training: {kv.Value}.");
-				}
+				Assert.True (kv.Value >= 10, $"Label {kv.Key} has too few samples for training: {kv.Value}.");
 
-			// --- 5. Делим на train / OOS, как в боевом коде, но с более коротким hold-out ---
-			DateTime maxDate = ordered.Last ().Date;
-			DateTime trainUntil = maxDate.AddDays (-holdoutDays);
+			DateTime maxEntryUtc = EntryUtc (ordered.Last ());
+			DateTime trainUntil = maxEntryUtc.AddDays (-holdoutDays);
 
 			var trainRows = ordered
-				.Where (r => r.ToCausalDateUtc() <= trainUntil)
+				.Where (r => EntryUtc (r) <= trainUntil)
 				.ToList ();
 
-			Assert.True (trainRows.Count >= 100,
-				$"Too few train rows for daily model e2e: {trainRows.Count}.");
+			Assert.True (trainRows.Count >= 100, $"Too few train rows for daily model e2e: {trainRows.Count}.");
 
-			// --- 6. Тренируем дневную модель через боевой ModelTrainer ---
 			var trainer = new ModelTrainer ();
 			var bundle = trainer.TrainAll (trainRows);
 
@@ -214,9 +172,8 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			var engine = new PredictionEngine (bundle);
 
-			// --- 7. Гоним предсказания по OOS-части и смотрим распределение PredLabel ---
 			var evalRows = ordered
-				.Where (r => r.ToCausalDateUtc() > trainUntil)
+				.Where (r => EntryUtc (r) > trainUntil)
 				.ToList ();
 
 			if (evalRows.Count < 100)
@@ -233,23 +190,18 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			foreach (var r in evalRows)
 				{
-				var p = engine.PredictCausal (r.ToCausal ());
-				preds.Add ((r.Forward.TrueLabel, p.PredLabel));
+				var p = engine.PredictCausal (r.Causal);
+				preds.Add ((r.TrueLabel, p.PredLabel));
 				}
-
-			Assert.NotEmpty (preds);
 
 			var predHist = preds
 				.GroupBy (p => p.PredLabel)
 				.OrderBy (g => g.Key)
 				.ToDictionary (g => g.Key, g => g.Count ());
 
-			// Ключевой инвариант e2e:
-			// дневная модель НЕ должна схлопываться в один PredLabel на разумной синтетике.
 			Assert.True (predHist.Count >= 2,
 				"Daily model collapsed to a single predicted class on synthetic zigzag data.");
 
-			// Дополнительная sanity-проверка: accuracy не должна быть ни нулём, ни магическими 100%.
 			double acc = preds.Count (p => p.TrueLabel == p.PredLabel) / (double) preds.Count;
 			Assert.InRange (acc, 0.2, 0.95);
 			}

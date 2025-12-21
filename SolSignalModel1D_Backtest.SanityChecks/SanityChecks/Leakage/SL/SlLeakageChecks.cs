@@ -20,7 +20,16 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 
 			if (records.Count == 0 || candles1h.Count == 0)
 				{
-				return SelfCheckResult.Ok ("[sl] нет данных для SL-слоя (records или 1h-профиль пустой).");
+				var missing = new SelfCheckResult
+					{
+					Success = false,
+					Summary = "[sl] отсутствуют входные данные для проверки SL-слоя."
+					};
+
+				if (records.Count == 0) missing.Errors.Add ("[sl] ctx.Records is empty.");
+				if (candles1h.Count == 0) missing.Errors.Add ("[sl] ctx.SolAll1h is empty.");
+
+				return missing;
 				}
 
 			var boundary = new TrainBoundary (ctx.TrainUntilUtc, ctx.NyTz);
@@ -55,7 +64,18 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 					return badRange;
 					}
 
-				double dayMinMove = c.MinMove > 0 ? c.MinMove : 0.02;
+				double dayMinMove = c.MinMove;
+				if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
+					{
+					var bad = new SelfCheckResult
+						{
+						Success = false,
+						Summary = $"[sl] invalid Causal.MinMove={dayMinMove:0.######} for day={c.DateUtc:O}."
+						};
+					bad.Errors.Add ("[sl] Causal.MinMove must be finite and > 0. Fix upstream MinMove computation/windowing.");
+					return bad;
+					}
+
 				bool strongSignal = c.PredLabel == 0 || c.PredLabel == 2;
 
 				var outcome = HourlyTradeEvaluator.EvaluateOne (

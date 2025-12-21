@@ -86,8 +86,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			if (trainRows.Count < 100)
 				{
-				trainRows = ordered;
-				trainUntil = ordered[^1].DateUtc;
+				throw new InvalidOperationException (
+					$"[DailyPipelineLeakageTests] not enough train rows for leakage test: train={trainRows.Count}. " +
+					"Test setup must guarantee sufficient train/OOS split.");
 				}
 
 			if (mutateTrain != null)

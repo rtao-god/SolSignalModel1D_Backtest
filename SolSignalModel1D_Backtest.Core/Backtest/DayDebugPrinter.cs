@@ -17,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			bool delayedAsked = rec.DelayedEntryAsked == true;
 
 			Console.WriteLine (
-				$"[day] {r.ToCausalDateUtc ():yyyy-MM-dd}  pred={rec.PredLabel} " +
+				$"[day] {r.Causal.DateUtc.ToCausalDateUtc ():yyyy-MM-dd}  pred={rec.PredLabel} " +
 				$"micro=({(rec.PredMicroUp ? "UP" : rec.PredMicroDown ? "DOWN" : "-")})  " +
 				$"entry={rec.Entry:F2}  exit24={rec.Close24:F2}  delayedExec={(delayedExec ? "Y" : "N")} " +
 				$"src={rec.DelayedSource ?? "-"}");

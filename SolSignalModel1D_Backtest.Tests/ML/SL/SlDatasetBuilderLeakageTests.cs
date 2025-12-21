@@ -1,46 +1,24 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.SL
 	{
 	/// <summary>
 	/// Тесты, которые проверяют, что SlDatasetBuilder не допускает утечек:
-	/// - SL-сэмплы строятся на всей истории (через SlOfflineBuilder),
-	///   но потом режутся по baseline-exit <= trainUntil.
+	/// - SL-сэмплы строятся по 1m-пути,
+	/// - но в Train датасет попадают только дни, у которых baseline-exit <= trainUntil.
 	/// </summary>
 	public sealed class SlDatasetBuilderLeakageTests
 		{
-		/// <summary>
-		/// Сценарий:
-		///
-		/// 1) Строим один утренний день:
-		///    - есть BacktestRecord с IsMorning = true;
-		///    - есть 6h-свеча для entry (Close > 0);
-		///    - есть 1m-окно после entry, где уже в первой минуте
-		///      одновременно срабатывают и TP, и SL → SlOfflineBuilder
-		///      гарантированно создаст хотя бы один сэмпл.
-		///
-		/// 2) Через SlOfflineBuilder.Build убеждаемся, что raw-сэмплы есть.
-		///
-		/// 3) Вычисляем baseline-exit этого дня и ставим trainUntil строго
-		///    между entry и exit.
-		///
-		/// 4) Через SlDatasetBuilder.Build строим датасет и ожидаем:
-		///    - Samples.Count == 0, т.к. baseline-exit > trainUntil;
-		///    - MorningRows пуст или не содержит этот день.
-		///
-		/// Если кто-то уберёт фильтрацию по baseline-exit в SlDatasetBuilder,
-		/// этот тест сломается: сэмпл останется в Samples при trainUntil "внутри" baseline-окна.
-		/// </summary>
 		[Fact]
 		public void Build_DropsSamplesWhoseBaselineExitGoesBeyondTrainUntil ()
 			{
@@ -53,31 +31,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			Assert.True (exitUtc > entryUtc);
 
-			// Один утренний BacktestRecord.
-			var rows = new List<BacktestRecord>
-			{
-				new BacktestRecord
-				{
-					Date = entryUtc,
-					IsMorning = true,
-					MinMove = 0.02,
-					Features = new double[4]
-				}
-			};
-
-			// 6h-свеча для entry (ключ по Date, как в SlOfflineBuilder).
-			var sol6hDict = new Dictionary<DateTime, Candle6h>
-				{
-				[entryUtc] = new Candle6h
-					{
-					OpenTimeUtc = entryUtc,
-					Close = 100.0,
-					High = 100.0,
-					Low = 100.0
-					}
-				};
-
-			// 1m-окно [entry; entry+10m) с "жирными" High/Low, чтобы TP/SL точно сработали.
+			// 1m-окно (короткое, но достаточное для срабатывания TP/SL в первой минуте).
 			var sol1m = new List<Candle1m> ();
 			double entryPrice = 100.0;
 			double tpPct = 0.01;
@@ -90,18 +44,81 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 				sol1m.Add (new Candle1m
 					{
 					OpenTimeUtc = t,
-					// Уже в первой минуте High и Low таковы, что одновременно
-					// выполняются условия TP и SL; приоритет у SL.
 					High = entryPrice * (1.0 + tpPct + 0.01),
 					Low = entryPrice * (1.0 - slPct - 0.01),
 					Close = entryPrice
 					});
 				}
 
-			// 1h-свечи для фич нам не обязательны — SlFeatureBuilder нормально работает и с null.
-			IReadOnlyList<Candle1h>? sol1h = null;
+			// 1h история нужна, потому что SlFeatureBuilder строит фичи из 1h.
+			// Важно давать запас до entryUtc, иначе фичи с lookback-окном могут упасть по недостатку данных.
+			var sol1h = new List<Candle1h> ();
+			var hStart = entryUtc.AddDays (-7);
+			var hEnd = exitUtc.AddHours (2);
 
-			// 1) Raw SL-сэмплы напрямую через SlOfflineBuilder.
+			for (var t = hStart; t < hEnd; t = t.AddHours (1))
+				{
+				sol1h.Add (new Candle1h
+					{
+					OpenTimeUtc = t,
+					Open = entryPrice,
+					High = entryPrice * 1.001,
+					Low = entryPrice * 0.999,
+					Close = entryPrice
+					});
+				}
+
+			// Один утренний omniscient BacktestRecord.
+			// Здесь нет "маскировки": это тестовый fixture, который явно задаёт входные значения.
+			var rows = new List<BacktestRecord>
+				{
+				new BacktestRecord
+					{
+					Causal = new CausalPredictionRecord
+					{
+						DateUtc = entryUtc,
+						MinMove = 0.02,
+						PredLabel = 2,
+						PredMicroUp = false,
+						PredMicroDown = false
+					},
+					Forward = new ForwardOutcomes
+						{
+						DateUtc = entryUtc,
+						WindowEndUtc = exitUtc,
+
+						TrueLabel = 2,
+						FactMicroUp = false,
+						FactMicroDown = false,
+
+						Entry = entryPrice,
+						MaxHigh24 = entryPrice,
+						MinLow24 = entryPrice,
+						Close24 = entryPrice,
+
+						// Forward.MinMove может использоваться в отчётах; для теста задаём согласованно.
+						MinMove = 0.02,
+
+						// В этом тесте SL-лейблинг использует внешний sol1m, а не Forward.DayMinutes.
+						DayMinutes = Array.Empty<Candle1m> ()
+						}
+					}
+				};
+
+			// 6h-свеча для entry (ключ по entryUtc). Важно: это fixture для теста.
+			var sol6hDict = new Dictionary<DateTime, Candle6h>
+				{
+				[entryUtc] = new Candle6h
+					{
+					OpenTimeUtc = entryUtc,
+					Open = entryPrice,
+					High = entryPrice,
+					Low = entryPrice,
+					Close = entryPrice
+					}
+				};
+
+			// 1) Raw SL-сэмплы напрямую через SlOfflineBuilder (проверяем, что без фильтра они вообще строятся).
 			var rawSamples = SlOfflineBuilder.Build (
 				rows: rows,
 				sol1h: sol1h,
@@ -127,12 +144,13 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 				slPct: slPct,
 				strongSelector: null);
 
-			// Сэмплы с таким entryUtc не должны пройти baseline-фильтр.
 			Assert.Empty (ds.Samples);
 
-			// И в MorningRows такой день тоже не должен остаться,
-			// т.к. он релевантен только сэмплам, которые отрезаны.
-			Assert.DoesNotContain (ds.MorningRows, r => r.ToCausalDateUtc() == entryUtc);
+			// Утренний день не должен остаться в MorningRows,
+			// потому что все связанные с ним сэмплы должны быть отрезаны по baseline-exit.
+			Assert.DoesNotContain (
+				ds.MorningRows,
+				r => r.DateUtc.ToCausalDateUtc () == entryUtc.ToCausalDateUtc ());
 			}
 		}
 	}

@@ -4,6 +4,7 @@ using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 	{
@@ -40,11 +41,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 
 			// Стабильный порядок по entryUtc.
 			var ordered = records
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (r => r.Causal.DateUtc.ToCausalDateUtc())
 				.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
+			var split = boundary.Split (ordered, r => r.Causal.DateUtc.ToCausalDateUtc());
 
 			var train = split.Train;
 			var oos = split.Oos;

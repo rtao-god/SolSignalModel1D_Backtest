@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
@@ -51,12 +50,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				nyTz: Windowing.NyTz);
 
 			var rowsA = resA.LabeledRows
-				.OrderBy (r => r.ToCausalDateUtc ())
+				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))
 				.ToList ();
 
 			Assert.NotEmpty (rowsA);
 
-			var maxCausalDate = rowsA.Last ().ToCausalDateUtc ();
+			var maxCausalDate = CausalTimeKey.DayKeyUtc (rowsA.Last ());
 			var trainUntil = maxCausalDate.AddDays (-40);
 
 			var tailStartUtc = trainUntil.AddDays (5);
@@ -81,15 +80,15 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				nyTz: Windowing.NyTz);
 
 			var rowsB = resB.LabeledRows
-				.OrderBy (r => r.ToCausalDateUtc ())
+				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))
 				.ToList ();
 
 			var safeRowsA = rowsA
-				.Where (r => r.ToCausalDateUtc ().AddDays (8) <= trainUntil)
+				.Where (r => CausalTimeKey.DayKeyUtc (r).AddDays (8) <= trainUntil)
 				.ToList ();
 
 			var safeRowsB = rowsB
-				.Where (r => r.ToCausalDateUtc ().AddDays (8) <= trainUntil)
+				.Where (r => CausalTimeKey.DayKeyUtc (r).AddDays (8) <= trainUntil)
 				.ToList ();
 
 			Assert.NotEmpty (safeRowsA);
@@ -100,28 +99,23 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				var a = safeRowsA[i];
 				var b = safeRowsB[i];
 
-				Assert.Equal (a.ToCausalDateUtc (), b.ToCausalDateUtc ());
+				Assert.Equal (CausalTimeKey.DayKeyUtc (a), CausalTimeKey.DayKeyUtc (b));
 
-				// Labels/facts должны быть стабильны на safe-префиксе.
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
 				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
 
-				// Каузальные доменные поля должны быть стабильны на safe-префиксе.
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);
 				Assert.Equal (a.Causal.HardRegime, b.Causal.HardRegime);
 				Assert.Equal (a.Causal.MinMove, b.Causal.MinMove);
 
-				// ML-вход: сравниваем ровно то, что реально уходит в обучение (FeaturesVector).
 				var fa = a.Causal.FeaturesVector.Span;
 				var fb = b.Causal.FeaturesVector.Span;
 
 				Assert.Equal (fa.Length, fb.Length);
 				for (int j = 0; j < fa.Length; j++)
-					{
 					Assert.Equal (fa[j], fb[j]);
-					}
 				}
 			}
 

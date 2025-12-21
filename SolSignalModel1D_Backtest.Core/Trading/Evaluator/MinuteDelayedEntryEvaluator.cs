@@ -50,15 +50,29 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 				};
 
 			if (day1m == null || day1m.Count == 0)
-				return res;
-			if (!goLong && !goShort)
-				return res;
+				{
+				throw new InvalidOperationException ("[MinuteDelayedEntryEvaluator] day1m is null/empty: cannot evaluate minute delayed entry.");
+				}
 
-			if (dayMinMove <= 0) dayMinMove = 0.02;
+			// Контракт: либо long, либо short, либо “нет сделки”.
+			if (goLong == goShort)
+				{
+				if (!goLong)
+					return res;
+
+				throw new InvalidOperationException ("[MinuteDelayedEntryEvaluator] Invalid direction: expected goLong XOR goShort.");
+				}
+
+			if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
+				throw new ArgumentOutOfRangeException (
+					nameof (dayMinMove),
+					dayMinMove,
+					"[MinuteDelayedEntryEvaluator] dayMinMove must be finite and > 0. " +
+					"Non-positive/NaN/Inf dayMinMove indicates a pipeline bug (invalid MinMove computation/windowing/features).");
+
 			if (dayMinMove < MinDayTradeable)
 				return res;
 
-			// новый baseline-горизонт вместо +24h
 			DateTime exitUtc = Windowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
 
 			var dayMinutes = day1m

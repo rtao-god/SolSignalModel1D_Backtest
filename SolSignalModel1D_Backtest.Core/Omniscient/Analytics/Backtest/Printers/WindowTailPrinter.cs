@@ -1,20 +1,18 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
-	/// <summary>
-	/// Печатает “последний день каждого окна” по схеме блоков: берём takeDays дней, затем пропускаем skipDays.
-	/// </summary>
 	public static class WindowTailPrinter
 		{
+		private static DateTime DayKeyUtc ( BacktestRecord r ) => CausalTimeKey.DayKeyUtc (r);
+
 		public static void PrintBlockTails (
 			IReadOnlyList<LabeledCausalRow> mornings,
 			IReadOnlyList<BacktestRecord> records,
@@ -23,14 +21,18 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			int skipDays = 30,
 			string title = "Last day of each window (take → skip)" )
 			{
-			var recs = (records ?? Array.Empty<BacktestRecord> ()).OrderBy (r => r.DateUtc).ToList ();
-			var pol = (policyResults ?? Array.Empty<BacktestPolicyResult> ()).ToList ();
-			if (recs.Count == 0 || pol.Count == 0) return;
-			if (takeDays <= 0) return;
-			if (mornings == null || mornings.Count == 0) return;
+			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
+			if (records == null) throw new ArgumentNullException (nameof (records));
+			if (policyResults == null) throw new ArgumentNullException (nameof (policyResults));
 
-			// Быстрая мапа: дата → BacktestRecord (а не truth-строка).
-			var byDate = recs.ToDictionary (r => r.ToCausalDateUtc (), r => r);
+			var recs = records.OrderBy (r => CausalTimeKey.EntryUtc (r)).ToList ();
+			var pol = policyResults.ToList ();
+
+			if (recs.Count == 0 || pol.Count == 0) return;
+			if (takeDays <= 0) throw new ArgumentOutOfRangeException (nameof (takeDays), "takeDays must be > 0.");
+			if (mornings.Count == 0) return;
+
+			var byDate = recs.ToDictionary (r => DayKeyUtc (r), r => r);
 
 			ConsoleStyler.WriteHeader ($"=== {title}: {takeDays} → {skipDays} ===");
 
@@ -40,23 +42,30 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			while (i < recs.Count)
 				{
 				int start = i;
-				int endTake = Math.Min (i + takeDays, recs.Count);  // [start, endTake)
+				int endTake = Math.Min (i + takeDays, recs.Count);
 				if (start >= endTake) break;
 
 				var block = recs.GetRange (start, endTake - start);
 				var lastRec = block[^1];
 
 				blockIdx++;
-				var blockStartDate = block.First ().DateUtc.ToCausalDateUtc ();
-				var blockEndDate = lastRec.DateUtc.ToCausalDateUtc ();
 
-				byDate.TryGetValue (lastRec.ToCausalDateUtc (), out var dayRec);
+				var blockStartDate = DayKeyUtc (block.First ());
+				var blockEndDate = DayKeyUtc (lastRec);
+
+				var key = DayKeyUtc (lastRec);
+				if (!byDate.TryGetValue (key, out var dayRec))
+					{
+					throw new InvalidOperationException (
+						$"[window-tail] Internal mismatch: byDate has no key={key:O}. " +
+						"Это означает, что ключи словаря повреждены или DayKeyUtc(...) нестабилен.");
+					}
 
 				ConsoleStyler.WriteHeader (
-					$"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {lastRec.DateUtc:yyyy-MM-dd} ---");
+					$"--- Блок {blockIdx} [{blockStartDate:yyyy-MM-dd} .. {blockEndDate:yyyy-MM-dd}] — последний день @ {blockEndDate:yyyy-MM-dd} ---");
 
 				PrintDayHead (dayRec, lastRec);
-				PrintPolicyTradesForDay (lastRec.DateUtc, pol);
+				PrintPolicyTradesForDay (blockEndDate, pol);
 
 				i = endTake + skipDays;
 				}
@@ -96,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			Console.WriteLine ();
 			}
 
-		private static void PrintPolicyTradesForDay ( DateTime dayUtc, IEnumerable<BacktestPolicyResult> policyResults )
+		private static void PrintPolicyTradesForDay ( DateTime dayKeyUtc, IEnumerable<BacktestPolicyResult> policyResults )
 			{
 			ConsoleStyler.WriteHeader ("Per-policy trades (this day)");
 			var t = new TextTable ();
@@ -105,7 +114,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			foreach (var pr in policyResults.OrderBy (x => x.PolicyName))
 				{
 				var dayTrades = pr.Trades?
-					.Where (tr => tr.DateUtc.ToCausalDateUtc () == dayUtc.ToCausalDateUtc ())
+					.Where (tr => tr.DateUtc.ToCausalDateUtc () == dayKeyUtc.ToCausalDateUtc ())
 					.OrderBy (tr => tr.EntryTimeUtc)
 					.ToList () ?? new List<PnLTrade> ();
 

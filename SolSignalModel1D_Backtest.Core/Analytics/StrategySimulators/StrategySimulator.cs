@@ -100,7 +100,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 			for (int i = 0; i < days; i++)
 				{
 				var row = mornings[i];
-				DateTime entryTimeUtc = row.ToCausalDateUtc();
+				DateTime entryTimeUtc = row.Causal.DateUtc;
 				DateTime exitUtc = ComputeExitWindow (entryTimeUtc, nyTz);
 
 				// Сдвигаем указатель входа до первой свечи с t >= entryTimeUtc.
@@ -156,7 +156,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 				bool isLongBase = dirSign > 0;   // +1 = лонг, -1 = шорт
 
 				// Время входа — дата дневной строки (NY-утро вью).
-				DateTime entryTimeUtc = row.ToCausalDateUtc();
+				DateTime entryTimeUtc = row.Causal.DateUtc;
 
 				// Индексы минуток для текущего дня.
 				var (startIndex, endIndex) = dayRanges[i];

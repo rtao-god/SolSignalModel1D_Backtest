@@ -1,10 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,48 +30,51 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			return ctx.Select (c => c.Sample).ToList ();
 			}
 
-		/// <summary>
-		/// Возвращает ML-сэмплы + контекст, чтобы можно было отлаживать:
-		/// - почему день попал/не попал в датасет,
-		/// - какие базовые исходы и delayed-исходы,
-		/// - какие факторы (DeepFactors) дали label=true/false.
-		/// </summary>
 		public static List<PullbackContinuationContext> BuildContexts (
 			IReadOnlyList<BacktestRecord> rows,
 			IReadOnlyList<Candle1h> sol1h,
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
-			var res = new List<PullbackContinuationContext> (rows?.Count * 4 ?? 0);
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (sol1h == null) throw new ArgumentNullException (nameof (sol1h));
+			if (sol6hDict == null) throw new ArgumentNullException (nameof (sol6hDict));
 
-			if (rows == null || rows.Count == 0)
+			var res = new List<PullbackContinuationContext> (rows.Count * 4);
+
+			if (rows.Count == 0)
 				return res;
 
-			if (sol1h == null || sol1h.Count == 0)
-				return res;
+			if (sol1h.Count == 0)
+				throw new ArgumentException ("sol1h must be non-empty.", nameof (sol1h));
 
-			if (sol6hDict == null || sol6hDict.Count == 0)
-				return res;
+			if (sol6hDict.Count == 0)
+				throw new ArgumentException ("sol6hDict must be non-empty.", nameof (sol6hDict));
 
 			var allHours = sol1h.OrderBy (h => h.OpenTimeUtc).ToList ();
 
 			foreach (var r in rows)
 				{
-				var entryUtc = r.ToCausalDateUtc ();
+				// EntryUtc = реальный timestamp входа, а не day-key.
+				var entryUtc = CausalTimeKey.EntryUtc (r);
 
 				if (!sol6hDict.TryGetValue (entryUtc, out var day6h))
-					continue;
-
-				// КРИТИЧНО: dict ключится по OpenTimeUtc, значит Close/High/Low этой 6h-свечи
-				// содержат будущее относительно entryUtc. Для каузального entry используем ТОЛЬКО Open.
-				double entry = day6h.Open;
-				if (entry <= 0.0) continue;
-
-				double minMove = r.MinMove;
-				if (double.IsNaN (minMove) || double.IsInfinity (minMove) || minMove <= 0.0)
 					{
 					throw new InvalidOperationException (
-						$"[delayed-offline] invalid MinMove for {entryUtc:O}: {minMove}. " +
-						"Fix MinMoveEngine/RowBuilder; do not default here.");
+						$"[pullback-offline] sol6hDict has no key for entryUtc={entryUtc:O}. " +
+						"Это рассинхрон данных: sol6hDict должен ключиться по 6h OpenTimeUtc и покрывать все entryUtc из rows.");
+					}
+
+				// Для каузального entry используем только Open.
+				double entry = day6h.Open;
+				if (entry <= 0.0)
+					throw new InvalidOperationException ($"[pullback-offline] Invalid entry price (day6h.Open) for entryUtc={entryUtc:O}: {entry}.");
+
+				double minMove = r.MinMove;
+				if (!double.IsFinite (minMove) || minMove <= 0.0)
+					{
+					throw new InvalidOperationException (
+						$"[pullback-offline] invalid MinMove for {entryUtc:O}: {minMove}. " +
+						"Чинить нужно MinMoveEngine/RowBuilder, а не подставлять дефолты.");
 					}
 
 				DateTime endUtc;
@@ -79,8 +82,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 				catch (Exception ex)
 					{
 					throw new InvalidOperationException (
-						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}. " +
-						"Fix data/windowing logic instead of relying on fallback.",
+						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}.",
 						ex);
 					}
 
@@ -89,7 +91,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					.ToList ();
 
 				if (dayHours.Count == 0)
-					continue;
+					throw new InvalidOperationException ($"[pullback-offline] No 1h candles in window. entryUtc={entryUtc:O}, endUtc={endUtc:O}.");
 
 				BuildForDir (res, r, entryUtc, dayHours, allHours, entry, minMove, goLong: true, NyTz);
 				BuildForDir (res, r, entryUtc, dayHours, allHours, entry, minMove, goLong: false, NyTz);
@@ -137,13 +139,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 							 delayed.SlPct > 0 &&
 							 delayed.SlPct < baseOutcome.SlPct * 0.7)
 						{
-						// "спасло" = получили SL заметно меньше базового.
 						label = true;
 						}
 					}
 
-				// Важно: TargetLevelFeatureBuilder обязан быть каузальным относительно entryUtc.
-				// Здесь передаётся полный ряд, чтобы builder мог взять историческое окно без копирований.
 				var feats = TargetLevelFeatureBuilder.Build (
 					entryUtc, goLong, strong, dayMinMove, entryPrice, allHours);
 

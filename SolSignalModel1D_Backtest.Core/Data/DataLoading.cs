@@ -299,36 +299,150 @@ namespace SolSignalModel1D_Backtest.Core.Data
 			{
 			if (http == null) throw new ArgumentNullException (nameof (http));
 
-			var dict = new Dictionary<DateTime, double> ();
+			// Делаем парсер тотально строгим:
+			// - никакого "continue" без учёта причины;
+			// - любые проблемы формата → ранний fail с примером проблемных элементов;
+			// - дубликаты по дню → fail (иначе можно тихо перетирать факт).
+			const string url = "https://api.alternative.me/fng/?limit=0";
+
+			static string Short ( string? s, int max )
+				{
+				if (string.IsNullOrEmpty (s)) return string.Empty;
+				return s.Length <= max ? s : s.Substring (0, max) + "...";
+				}
+
+			static bool TryReadInt64 ( JsonElement el, out long v )
+				{
+				v = default;
+
+				if (el.ValueKind == JsonValueKind.Number)
+					return el.TryGetInt64 (out v);
+
+				if (el.ValueKind == JsonValueKind.String)
+					{
+					var s = el.GetString ();
+					return long.TryParse (s, NumberStyles.Integer, CultureInfo.InvariantCulture, out v);
+					}
+
+				return false;
+				}
+
+			static bool TryReadDoubleInvariant ( JsonElement el, out double v )
+				{
+				v = default;
+
+				if (el.ValueKind == JsonValueKind.Number)
+					return el.TryGetDouble (out v);
+
+				if (el.ValueKind == JsonValueKind.String)
+					{
+					var s = el.GetString ();
+					return double.TryParse (s, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+					}
+
+				return false;
+				}
 
 			try
 				{
-				// limit=0 => вернуть всю доступную историю (не только последние 1000 точек).
-				// Это критично, если строим пайплайн с 2021 года.
-				string url = "https://api.alternative.me/fng/?limit=0";
 				using var resp = await http.GetAsync (url).ConfigureAwait (false);
 				if (!resp.IsSuccessStatusCode)
 					{
-					Console.WriteLine ($"[fng] HTTP {(int) resp.StatusCode} при загрузке FNG, url={url}");
-					resp.EnsureSuccessStatusCode ();
+					var body = await resp.Content.ReadAsStringAsync ().ConfigureAwait (false);
+
+					throw new InvalidOperationException (
+						$"[fng] HTTP {(int) resp.StatusCode} {resp.ReasonPhrase} при загрузке FNG, " +
+						$"url={url}, bodyPrefix='{Short (body, 400)}'");
 					}
 
 				await using var s = await resp.Content.ReadAsStreamAsync ().ConfigureAwait (false);
 				var root = await JsonSerializer.DeserializeAsync<JsonElement> (s).ConfigureAwait (false);
 
-				if (root.TryGetProperty ("data", out var arr) && arr.ValueKind == JsonValueKind.Array)
+				if (!root.TryGetProperty ("data", out var arr) || arr.ValueKind != JsonValueKind.Array)
+					throw new InvalidOperationException ($"[fng] invalid payload: missing/invalid 'data' array. url={url}");
+
+				var dict = new Dictionary<DateTime, double> (capacity: Math.Max (arr.GetArrayLength (), 16));
+				var errors = new List<string> ();
+
+				int idx = 0;
+				foreach (var el in arr.EnumerateArray ())
 					{
-					foreach (var el in arr.EnumerateArray ())
+					if (!el.TryGetProperty ("timestamp", out var tsEl))
 						{
-						if (!el.TryGetProperty ("timestamp", out var tsEl)) continue;
-						if (!long.TryParse (tsEl.GetString (), out long ts)) continue;
-
-						DateTime d = DateTimeOffset.FromUnixTimeSeconds (ts).UtcDateTime.ToCausalDateUtc ();
-
-						if (el.TryGetProperty ("value", out var vEl) && int.TryParse (vEl.GetString (), out int v))
-							dict[d] = v;
+						errors.Add ($"idx={idx}: missing 'timestamp', raw={Short (el.GetRawText (), 300)}");
+						idx++;
+						continue;
 						}
+
+					if (!TryReadInt64 (tsEl, out var ts))
+						{
+						errors.Add ($"idx={idx}: invalid 'timestamp'={Short (tsEl.GetRawText (), 80)}, raw={Short (el.GetRawText (), 300)}");
+						idx++;
+						continue;
+						}
+
+					// Источник исторически отдаёт seconds, но на практике API иногда мигрируют на ms.
+					// Эвристика безопасная: Unix seconds в 2020-х ~ 1.6e9, ms ~ 1.6e12.
+					DateTime dtUtc;
+					try
+						{
+						dtUtc = ts >= 1_000_000_000_000L
+							? DateTimeOffset.FromUnixTimeMilliseconds (ts).UtcDateTime
+							: DateTimeOffset.FromUnixTimeSeconds (ts).UtcDateTime;
+						}
+					catch (Exception ex)
+						{
+						errors.Add ($"idx={idx}: timestamp conversion failed ts={ts}, ex={ex.GetType ().Name}, raw={Short (el.GetRawText (), 300)}");
+						idx++;
+						continue;
+						}
+
+					var dayUtc = dtUtc.ToCausalDateUtc ();
+
+					if (!el.TryGetProperty ("value", out var vEl))
+						{
+						errors.Add ($"idx={idx}: missing 'value' for day={dayUtc:yyyy-MM-dd}, raw={Short (el.GetRawText (), 300)}");
+						idx++;
+						continue;
+						}
+
+					if (!TryReadDoubleInvariant (vEl, out var v))
+						{
+						errors.Add ($"idx={idx}: invalid 'value'={Short (vEl.GetRawText (), 80)} for day={dayUtc:yyyy-MM-dd}, raw={Short (el.GetRawText (), 300)}");
+						idx++;
+						continue;
+						}
+
+					if (!double.IsFinite (v) || v < 0.0 || v > 100.0)
+						{
+						errors.Add ($"idx={idx}: out-of-range value={v:G17} for day={dayUtc:yyyy-MM-dd}, raw={Short (el.GetRawText (), 300)}");
+						idx++;
+						continue;
+						}
+
+					if (dict.TryGetValue (dayUtc, out var prev))
+						{
+						// Дубликаты по дню — потенциальный сигнал изменения формата/семантики источника.
+						// Тихо перетирать нельзя: это ломает воспроизводимость.
+						errors.Add ($"idx={idx}: duplicate day key {dayUtc:yyyy-MM-dd}: prev={prev:G17}, next={v:G17}");
+						idx++;
+						continue;
+						}
+
+					dict[dayUtc] = v;
+					idx++;
 					}
+
+				if (errors.Count > 0)
+					{
+					throw new InvalidOperationException (
+						$"[fng] payload parse failed: errors={errors.Count}, url={url}, sample:\n" +
+						string.Join ("\n", errors.Take (30)) +
+						(errors.Count > 30 ? $"\n... (+{errors.Count - 30} more)" : ""));
+					}
+
+				if (dict.Count == 0)
+					throw new InvalidOperationException ($"[fng] parsed 0 points: url={url}.");
 
 				return dict;
 				}

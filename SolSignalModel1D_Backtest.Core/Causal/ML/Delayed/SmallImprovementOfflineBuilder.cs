@@ -1,10 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,36 +16,59 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 		private static readonly double[] ShallowFactors = new[] { 0.12, 0.18, 0.24 };
 		private const double ShallowMaxDelayHours = 2.0;
 
+		/// <summary>
+		/// Реальный момент входа (UTC timestamp), который используется для:
+		/// - baseline-окон (baseline-exit),
+		/// - выборки 1h/1m свечей,
+		/// - словарей по OpenTimeUtc.
+		/// </summary>
+		private static DateTime EntryUtc ( BacktestRecord r ) => CausalTimeKey.EntryUtc (r);
+
 		public static List<SmallImprovementSample> Build (
 			List<BacktestRecord> rows,
 			IReadOnlyList<Candle1h> sol1h,
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
-			var res = new List<SmallImprovementSample> ((rows?.Count ?? 0) * 4);
-			if (rows == null || rows.Count == 0 || sol1h == null || sol1h.Count == 0)
+			if (rows == null) throw new ArgumentNullException (nameof (rows));
+			if (sol1h == null) throw new ArgumentNullException (nameof (sol1h));
+			if (sol6hDict == null) throw new ArgumentNullException (nameof (sol6hDict));
+
+			var res = new List<SmallImprovementSample> (rows.Count * 4);
+
+			if (rows.Count == 0)
 				return res;
+
+			if (sol1h.Count == 0)
+				throw new ArgumentException ("sol1h must be non-empty.", nameof (sol1h));
+
+			if (sol6hDict.Count == 0)
+				throw new ArgumentException ("sol6hDict must be non-empty.", nameof (sol6hDict));
 
 			foreach (var r in rows)
 				{
-				if (!sol6hDict.TryGetValue (r.ToCausalDateUtc(), out var day6))
-					continue;
+				var entryUtc = EntryUtc (r);
+
+				if (!sol6hDict.TryGetValue (entryUtc, out var day6))
+					{
+					throw new InvalidOperationException (
+						$"[small-impr-offline] sol6hDict has no key for entryUtc={entryUtc:O}. " +
+						"Это рассинхрон пайплайна данных: ключ должен совпадать с реальным EntryUtc.");
+					}
 
 				double entry = day6.Close;
+
 				double dayMinMove = r.MinMove;
 				if (dayMinMove <= 0 || double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove))
 					throw new InvalidOperationException (
-						$"[sl-offline] invalid MinMove for {r.ToCausalDateUtc():O}: {dayMinMove}. " +
-						"MinMove должен быть > 0, стоит проверить MinMoveEngine/RowBuilder.");
+						$"[small-impr-offline] invalid MinMove for {entryUtc:O}: {dayMinMove}. " +
+						"MinMove должен быть > 0; исправлять нужно генератор MinMove, а не подставлять дефолты.");
 
-				DateTime entryUtc = r.ToCausalDateUtc();
 				DateTime endUtc;
 				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
 				catch (Exception ex)
 					{
-					// Явно ломаемся с понятным сообщением
 					throw new InvalidOperationException (
-						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}. " +
-						"Fix data/windowing logic instead of relying on fallback.",
+						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}.",
 						ex);
 					}
 
@@ -54,11 +76,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
 					.OrderBy (h => h.OpenTimeUtc)
 					.ToList ();
-				if (dayHours.Count == 0)
-					continue;
 
-				BuildForDir (res, r, dayHours, sol1h, entry, dayMinMove, true, NyTz);
-				BuildForDir (res, r, dayHours, sol1h, entry, dayMinMove, false, NyTz);
+				if (dayHours.Count == 0)
+					{
+					throw new InvalidOperationException (
+						$"[small-impr-offline] No 1h candles in window. entryUtc={entryUtc:O}, endUtc={endUtc:O}. " +
+						"Это означает дырку в sol1h или нарушение контракта baseline-окна.");
+					}
+
+				BuildForDir (res, r, entryUtc, dayHours, sol1h, entry, dayMinMove, goLong: true, NyTz);
+				BuildForDir (res, r, entryUtc, dayHours, sol1h, entry, dayMinMove, goLong: false, NyTz);
 				}
 
 			return res;
@@ -67,6 +94,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 		private static void BuildForDir (
 			List<SmallImprovementSample> sink,
 			BacktestRecord r,
+			DateTime entryUtc,
 			List<Candle1h> dayHours,
 			IReadOnlyList<Candle1h> allHours,
 			double entryPrice,
@@ -78,7 +106,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			bool strong = true;
 
 			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				dayHours, r.ToCausalDateUtc(), goLong, goShort, entryPrice, dayMinMove, strong, nyTz);
+				dayHours, entryUtc, goLong, goShort, entryPrice, dayMinMove, strong, nyTz);
 
 			if (baseOutcome.Result != HourlyTradeResult.SlFirst)
 				return;
@@ -86,7 +114,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			foreach (var f in ShallowFactors)
 				{
 				var delayed = DelayedEntryEvaluator.Evaluate (
-					dayHours, r.ToCausalDateUtc(), goLong, goShort, entryPrice, dayMinMove, strong, f, ShallowMaxDelayHours);
+					dayHours, entryUtc, goLong, goShort, entryPrice, dayMinMove, strong, f, ShallowMaxDelayHours);
 
 				bool label = false;
 
@@ -105,13 +133,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					}
 
 				var feats = TargetLevelFeatureBuilder.Build (
-					r.ToCausalDateUtc(), goLong, strong, dayMinMove, entryPrice, allHours);
+					entryUtc, goLong, strong, dayMinMove, entryPrice, allHours);
 
 				sink.Add (new SmallImprovementSample
 					{
 					Label = label,
 					Features = feats,
-					EntryUtc = r.ToCausalDateUtc()
+					EntryUtc = entryUtc
 					});
 				}
 			}

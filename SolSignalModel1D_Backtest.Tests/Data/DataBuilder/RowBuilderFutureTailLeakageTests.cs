@@ -12,7 +12,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
 	/// <summary>
 	/// Жёсткий тест на утечки в RowBuilder:
-	/// фичи BacktestRecord за день D НЕ должны зависеть от свечей и минуток
+	/// фичи дневной строки за день D НЕ должны зависеть от свечей и минуток
 	/// после baseline-exit (t_exit).
 	/// </summary>
 	public sealed class RowBuilderFutureTailLeakageTests
@@ -39,72 +39,26 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				double btcPrice = 50.0 + i * 0.5;
 				double goldPrice = 1500.0 + i * 0.2;
 
-				var solA = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					};
-				var solB = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = solPrice,
-					High = solPrice + 1.0,
-					Low = solPrice - 1.0
-					};
-				var btc = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = btcPrice,
-					High = btcPrice + 1.0,
-					Low = btcPrice - 1.0
-					};
-				var paxg = new Candle6h
-					{
-					OpenTimeUtc = t,
-					Close = goldPrice,
-					High = goldPrice + 1.0,
-					Low = goldPrice - 1.0
-					};
+				solAll6h_A.Add (new Candle6h { OpenTimeUtc = t, Close = solPrice, High = solPrice + 1.0, Low = solPrice - 1.0 });
+				solAll6h_B.Add (new Candle6h { OpenTimeUtc = t, Close = solPrice, High = solPrice + 1.0, Low = solPrice - 1.0 });
 
-				solAll6h_A.Add (solA);
-				solAll6h_B.Add (solB);
-				btcAll6h.Add (btc);
-				paxgAll6h.Add (paxg);
+				btcAll6h.Add (new Candle6h { OpenTimeUtc = t, Close = btcPrice, High = btcPrice + 1.0, Low = btcPrice - 1.0 });
+				paxgAll6h.Add (new Candle6h { OpenTimeUtc = t, Close = goldPrice, High = goldPrice + 1.0, Low = goldPrice - 1.0 });
 				}
 
-			// 1m-ряд: как в уже существующем тесте, просто сплошные минуты
 			var solAll1m_A = new List<Candle1m> ();
 			var solAll1m_B = new List<Candle1m> ();
-			var minutesStart = start;
 			int totalMinutes = total6h * 6 * 60;
 
 			for (int i = 0; i < totalMinutes; i++)
 				{
-				var t = minutesStart.AddMinutes (i);
+				var t = start.AddMinutes (i);
 				double price = 100.0 + i * 0.0001;
 
-				var mA = new Candle1m
-					{
-					OpenTimeUtc = t,
-					Close = price,
-					High = price + 0.0005,
-					Low = price - 0.0005
-					};
-				var mB = new Candle1m
-					{
-					OpenTimeUtc = t,
-					Close = price,
-					High = price + 0.0005,
-					Low = price - 0.0005
-					};
-
-				solAll1m_A.Add (mA);
-				solAll1m_B.Add (mB);
+				solAll1m_A.Add (new Candle1m { OpenTimeUtc = t, Close = price, High = price + 0.0005, Low = price - 0.0005 });
+				solAll1m_B.Add (new Candle1m { OpenTimeUtc = t, Close = price, High = price + 0.0005, Low = price - 0.0005 });
 				}
 
-			// FNG / DXY / extraDaily как в IndicatorsLeakageTests
 			var fng = new Dictionary<DateTime, double> ();
 			var dxy = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
@@ -120,31 +74,18 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				dxy[key] = 100.0;
 				}
 
-			// A: базовый сценарий
-			var rowsA = RowBuilder.BuildRowsDaily (
-				solWinTrain: solAll6h_A,
-				btcWinTrain: btcAll6h,
-				paxgWinTrain: paxgAll6h,
-				solAll6h: solAll6h_A,
-				solAll1m: solAll1m_A,
-				fngHistory: fng,
-				dxySeries: dxy,
-				extraDaily: extraDaily,
-				nyTz: tz);
-
-			// выбираем день D не на краях и не в выходной
 			int entryIdx = Enumerable.Range (200, 50)
 				.First (i =>
 				{
-					var d = solAll6h_A[i].OpenTimeUtc;
-					var ny = TimeZoneInfo.ConvertTimeFromUtc (d, tz);
+					var utc = solAll6h_A[i].OpenTimeUtc;
+					var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, tz);
 					return ny.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
 				});
 
 			var entryUtc = solAll6h_A[entryIdx].OpenTimeUtc;
+			var entryDate = entryUtc.ToCausalDateUtc ();
 			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, tz);
 
-			// B: мутируем ВЕСЬ хвост после exitUtc
 			for (int i = 0; i < solAll6h_B.Count; i++)
 				{
 				if (solAll6h_B[i].OpenTimeUtc >= exitUtc)
@@ -166,7 +107,18 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 					}
 				}
 
-			var rowsB = RowBuilder.BuildRowsDaily (
+			var rowsA = RowBuilder.BuildDailyRows (
+				solWinTrain: solAll6h_A,
+				btcWinTrain: btcAll6h,
+				paxgWinTrain: paxgAll6h,
+				solAll6h: solAll6h_A,
+				solAll1m: solAll1m_A,
+				fngHistory: fng,
+				dxySeries: dxy,
+				extraDaily: extraDaily,
+				nyTz: tz).LabeledRows;
+
+			var rowsB = RowBuilder.BuildDailyRows (
 				solWinTrain: solAll6h_B,
 				btcWinTrain: btcAll6h,
 				paxgWinTrain: paxgAll6h,
@@ -175,23 +127,22 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				fngHistory: fng,
 				dxySeries: dxy,
 				extraDaily: extraDaily,
-				nyTz: tz);
+				nyTz: tz).LabeledRows;
 
-			var rowA = rowsA.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.ToCausalDateUtc() == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc.ToCausalDateUtc () == entryDate);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc.ToCausalDateUtc () == entryDate);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
 
-			// таргет path-based НЕ должен зависеть от будущего после exit
-			Assert.Equal (rowA!.Label, rowB!.Label);
+			Assert.Equal (rowA!.TrueLabel, rowB!.TrueLabel);
 
-			// а фичи — тоже
-			Assert.Equal (rowA.Causal.Features.Length, rowB.Causal.Features.Length);
-			for (int i = 0; i < rowA.Causal.Features.Length; i++)
-				{
-				Assert.Equal (rowA.Causal.Features[i], rowB.Causal.Features[i], 10);
-				}
+			var fa = rowA.Causal.FeaturesVector.Span;
+			var fb = rowB.Causal.FeaturesVector.Span;
+
+			Assert.Equal (fa.Length, fb.Length);
+			for (int i = 0; i < fa.Length; i++)
+				Assert.Equal (fa[i], fb[i], 10);
 			}
 		}
 	}

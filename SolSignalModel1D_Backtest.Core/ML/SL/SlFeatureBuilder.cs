@@ -48,7 +48,12 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 			int startInclusive = LowerBoundOpenTimeUtc (candles1h, windowFromUtc);
 
 			if (endExclusive <= startInclusive)
-				return feats;
+				{
+				throw new InvalidOperationException (
+					$"[sl-feats] insufficient 1h history before entryUtc={entryUtc:O}. " +
+					$"Need at least one CLOSED 1h candle in window [{windowFromUtc:O}..{knownUntilOpenUtc:O}] (by OpenTimeUtc). " +
+					$"startInclusive={startInclusive}, endExclusive={endExclusive}, total={candles1h.Count}.");
+				}
 
 			var lastClosedHours = new List<Candle1h> (Math.Min (endExclusive - startInclusive, 8));
 			for (int i = startInclusive; i < endExclusive; i++)
@@ -69,7 +74,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				}
 
 			if (lastClosedHours.Count == 0)
-				return feats;
+				{
+				throw new InvalidOperationException (
+					$"[sl-feats] no CLOSED 1h candles found before entryUtc={entryUtc:O} in window " +
+					$"[{windowFromUtc:O}..{knownUntilOpenUtc:O}]. Check TF alignment and candle timestamps.");
+				}
 
 			var blocks2h = Build2hBlocks (lastClosedHours);
 

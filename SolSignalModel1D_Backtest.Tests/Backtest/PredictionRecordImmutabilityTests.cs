@@ -36,23 +36,36 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 		public void BacktestRunner_DoesNotMutate_CoreBacktestRecordFields ()
 			{
 			var utcStart = new DateTime (2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-			var records = new List<BacktestRecord> ();
+
+			var records = new List<BacktestRecord> (20);
+			var mornings = new List<LabeledCausalRow> (20);
 
 			for (int i = 0; i < 20; i++)
 				{
 				var dateUtc = utcStart.AddDays (i);
 				int trueLabel = i % 3;
 
-				double pUp = 0.5;
-				double pFlat = 0.2;
-				double pDown = 0.3;
+				// Канонический каузальный row для morning-потока:
+				// IsMorning валиден (bool), FeaturesVector фиксированной длины и immutable наружу.
+				var causalRow = MakeCausalRow (
+					dateUtc: dateUtc,
+					isMorning: true,
+					regimeDown: (i % 5 == 0),
+					hardRegime: i % 3,
+					minMove: 0.02,
+					seed: i);
 
-				// Важно: истина и micro-facts живут в ForwardOutcomes,
-				// а CausalPredictionRecord содержит только результаты inference + контекст.
+				// CausalPredictionRecord — это результат inference + runtime-оверлеи.
+				// Для теста важно:
+				// - FeaturesVector не пустой (иначе тренировки/диагностика могут падать в рантайме);
+				// - IsMorning не сеттится (он прокси от Features?.IsMorning).
+				double pUp = 0.5, pFlat = 0.2, pDown = 0.3;
+
 				var causal = new CausalPredictionRecord
 					{
 					DateUtc = dateUtc,
-					Features = null, // в этом тесте фичи не используются; проверяем иммутабельность.
+					FeaturesVector = causalRow.FeaturesVector,
+					Features = null,
 
 					PredLabel = trueLabel,
 					PredLabel_Day = trueLabel,
@@ -78,12 +91,10 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 					PredMicroUp = false,
 					PredMicroDown = false,
 
-					RegimeDown = (i % 5 == 0),
+					RegimeDown = causalRow.RegimeDown,
 					Reason = "test",
-					MinMove = 0.02,
+					MinMove = causalRow.MinMove,
 
-					// Runtime-оверлеи в этом тесте не проверяются: оставляем null,
-					// чтобы не имитировать «посчитано».
 					SlProb = null,
 					SlHighDecision = null,
 					Conf_SlLong = null,
@@ -109,22 +120,28 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 					MinLow24 = 90.0,
 					Close24 = 102.0,
 
-					MinMove = 0.02,
+					MinMove = causalRow.MinMove,
 					WindowEndUtc = dateUtc.AddDays (1),
 
 					DayMinutes = Array.Empty<Candle1m> ()
 					};
 
-				records.Add (new BacktestRecord
+				var rec = new BacktestRecord
 					{
 					Causal = causal,
 					Forward = forward
-					});
-				}
+					};
 
-			// Для этого теста нам не нужен отдельный «morning DTO».
-			// Важно только прогнать BacktestRunner и убедиться, что базовые поля записей не мутируются.
-			var mornings = records.ToList ();
+				records.Add (rec);
+
+				// BacktestRunner работает с каузальным morning-потоком как с LabeledCausalRow:
+				// это отдельный тип (CausalDataRow), где IsMorning и feature-vector строго каузальны.
+				mornings.Add (new LabeledCausalRow (
+					causal: causalRow,
+					trueLabel: forward.TrueLabel,
+					factMicroUp: forward.FactMicroUp,
+					factMicroDown: forward.FactMicroDown));
+				}
 
 			var candles1m = Array.Empty<Candle1m> ();
 			var policies = Array.Empty<RollingLoop.PolicySpec> ();
@@ -182,6 +199,52 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 				Assert.Equal (snap.RegimeDown, rec.RegimeDown);
 				Assert.Equal (snap.MinMove, rec.MinMove);
 				}
+			}
+
+		private static CausalDataRow MakeCausalRow (
+			DateTime dateUtc,
+			bool isMorning,
+			bool regimeDown,
+			int hardRegime,
+			double minMove,
+			int seed )
+			{
+			double s = seed;
+
+			return new CausalDataRow (
+				dateUtc: dateUtc,
+				regimeDown: regimeDown,
+				isMorning: isMorning,
+				hardRegime: hardRegime,
+				minMove: minMove,
+
+				solRet30: 0.001 * s,
+				btcRet30: 0.0005 * s,
+				solBtcRet30: 0.001 * s - 0.0005 * s,
+
+				solRet1: 0.0001 * s,
+				solRet3: 0.0003 * s,
+				btcRet1: 0.00005 * s,
+				btcRet3: 0.00015 * s,
+
+				fngNorm: 0.2,
+				dxyChg30: 0.0,
+				goldChg30: 0.0,
+
+				btcVs200: 0.1,
+
+				solRsiCenteredScaled: 0.0,
+				rsiSlope3Scaled: 0.0,
+
+				gapBtcSol1: 0.0,
+				gapBtcSol3: 0.0,
+
+				atrPct: 0.02,
+				dynVol: 0.015,
+
+				solAboveEma50: 1.0,
+				solEma50vs200: 0.1,
+				btcEma50vs200: 0.1);
 			}
 		}
 	}

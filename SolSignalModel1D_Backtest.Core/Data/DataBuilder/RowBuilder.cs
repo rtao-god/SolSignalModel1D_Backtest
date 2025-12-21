@@ -1,15 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
+using SolSignalModel1D_Backtest.Core.Data.Candles;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.Indicators;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Indicators;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
 using CausalDataRowDto = SolSignalModel1D_Backtest.Core.Causal.Data.CausalDataRow;
 using Corendicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
-using LabeledCausalRowDto = SolSignalModel1D_Backtest.Core.Causal.Data.LabeledCausalRow;
 using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using LabeledCausalRowDto = SolSignalModel1D_Backtest.Core.Causal.Data.LabeledCausalRow;
 
 namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 	{
@@ -27,8 +27,12 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 		private const int BtcEmaFast = 50;
 		private const int BtcEmaSlow = 200;
 
-		// Инвариант: dynVol использует lookback по 6h-окнам; ранние индексы дают 0 => это warm-up, а не "значение".
 		private const int DynVolLookbackWindows = 10;
+		private const int RsiSlopeSteps = 3;
+
+		// Сейчас лейблинг 1m делается только по SOL.
+		// Если позже появится лейблинг по другим символам — символ нужно поднять в параметры BuildDailyRows.
+		private const string Sol1mSymbol = "SOLUSDT";
 
 		public static DailyRowsBuildResult BuildDailyRows (
 			List<Candle6h> solWinTrain,
@@ -66,6 +70,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 			SeriesGuards.EnsureStrictlyAscendingUtc (paxgWinTrain, c => c.OpenTimeUtc, "RowBuilder.paxgWinTrain");
 			SeriesGuards.EnsureStrictlyAscendingUtc (solAll1m, c => c.OpenTimeUtc, "RowBuilder.solAll1m");
 
+			// Сканируем дыры в 1m один раз. Дальше только проверяем пересечения по окнам дней.
+			var sol1mGaps = CandleGapScanner.Scan1mGaps (solAll1m, symbol: Sol1mSymbol, seriesName: "RowBuilder.solAll1m");
+			var sol1mGapJournal = new CandleGapJournal (symbol: Sol1mSymbol, interval: "1m");
+
 			var btcIndexByOpen = BuildIndexByOpenUtc (btcWinTrain, "RowBuilder.btcWinTrain");
 			var paxgIndexByOpen = BuildIndexByOpenUtc (paxgWinTrain, "RowBuilder.paxgWinTrain");
 
@@ -90,8 +98,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				LastQuantileTune = DateTime.MinValue
 				};
 
-			// История для MinMove: только факты прошлых дней (realized амплитуда path),
-			// чтобы minMove был строго каузальным.
 			var minMoveHistory = new List<MinMoveHistoryRow> (solWinTrain.Count);
 
 			var causalRows = new List<CausalDataRowDto> (solWinTrain.Count);
@@ -102,7 +108,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				var c = solWinTrain[solIdx];
 				DateTime openUtc = c.OpenTimeUtc;
 
-				using var _ = Infra.Causality.CausalityGuard.Begin ("RowBuilder.BuildDailyRows(day)", openUtc);
+				using var _causalityScope = Infra.Causality.CausalityGuard.Begin ("RowBuilder.BuildDailyRows(day)", openUtc);
 
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (openUtc, nyTz);
 				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
@@ -112,15 +118,60 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				if (exitUtc >= maxExitUtc)
 					continue;
 
+				// Если в минутном пути есть дыра, которая пересекает baseline-окно дня — день нельзя лейблить.
+				// Политика:
+				// - известная дыра: лог + skip day;
+				// - неизвестная: fail, чтобы зафиксировать новый gap в known-реестре.
+				if (sol1mGaps.Count > 0)
+					{
+					bool hasKnownHit = false;
+
+					for (int gi = 0; gi < sol1mGaps.Count; gi++)
+						{
+						var g = sol1mGaps[gi];
+						if (!CandleGapScanner.OverlapsWindow (g, openUtc, exitUtc))
+							continue;
+
+						bool isKnown = CandleDataGaps.TryMatchKnownGap (
+							symbol: Sol1mSymbol,
+							interval: "1m",
+							expectedStartUtc: g.ExpectedStartUtc,
+							actualStartUtc: g.ActualStartUtc,
+							out _);
+
+						sol1mGapJournal.AppendSkipDay (
+							symbol: Sol1mSymbol,
+							interval: "1m",
+							dayUtc: openUtc.ToCausalDateUtc (),
+							windowStartUtc: openUtc,
+							windowEndUtcExclusive: exitUtc,
+							expectedStartUtc: g.ExpectedStartUtc,
+							actualStartUtc: g.ActualStartUtc,
+							missingBars: g.MissingBars1m,
+							isKnown: isKnown);
+
+						if (!isKnown)
+							{
+							throw new InvalidOperationException (
+								$"[RowBuilder] unknown 1m gap intersects day window. " +
+								$"day={openUtc:O}, window=[{openUtc:O}..{exitUtc:O}), " +
+								$"gap=[{g.ExpectedStartUtc:O}..{g.ActualStartUtc:O}), missingBars={g.MissingBars1m}. " +
+								"Добавь gap в CandleDataGaps (known) и повтори прогон.");
+							}
+
+						hasKnownHit = true;
+						}
+
+					if (hasKnownHit)
+						continue;
+					}
+
 				if (!btcIndexByOpen.TryGetValue (openUtc, out int btcIdx))
 					throw new InvalidOperationException ($"[RowBuilder] no BTC 6h candle matching SOL candle at {openUtc:O}.");
 
 				if (!paxgIndexByOpen.TryGetValue (openUtc, out int gIdx))
 					throw new InvalidOperationException ($"[RowBuilder] no PAXG candle for SOL entry {openUtc:O}.");
 
-				// Warm-up: отсекаем ранние дни, где индикаторы/ретёрны не определены.
-				// Это предотвращает "ложные аварии" (dynVol/atr=0 из-за недостатка истории)
-				// и убирает тихие дефолты, которые портят распределение фичей на старте датасета.
 				if (WarmupGuards.ShouldSkipDailyRowWarmup (
 					solIdx: solIdx,
 					btcIdx: btcIdx,
@@ -148,8 +199,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				if (double.IsNaN (solRet1) || double.IsNaN (solRet3) || double.IsNaN (solRet30) ||
 					double.IsNaN (btcRet1) || double.IsNaN (btcRet3) || double.IsNaN (btcRet30))
 					{
-					// Здесь NaN означает "не хватает истории / невалидные цены".
-					// Это не маскируем, но и не рушим пайплайн: просто пропускаем такой день.
 					continue;
 					}
 
@@ -157,7 +206,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				double gapBtcSol1 = btcRet1 - solRet1;
 				double gapBtcSol3 = btcRet3 - solRet3;
 
-				// Убираем FindNearest+default: в датасете лучше не иметь "нулевых" индикаторов из-за ранней истории.
 				if (!solEma50.TryGetValue (openUtc, out double solEma50Val)) continue;
 				if (!solEma200.TryGetValue (openUtc, out double solEma200Val)) continue;
 				if (!btcEma50.TryGetValue (openUtc, out double btcEma50Val)) continue;
@@ -172,7 +220,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 
 				var causalDayUtc = openUtc.ToCausalDateUtc ();
 
-				// 4.2: больше не "тихо дефолтим" — при дырках в рядах хотим явно падать.
 				double fng = Corendicators.PickNearestFng (fngHistory, causalDayUtc);
 				double fngNorm = (fng - 50.0) / 50.0;
 
@@ -200,16 +247,33 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				double btcVs200 = (btcClose - sma200) / sma200;
 
 				if (!solRsi.TryGetValue (openUtc, out double solRsiVal))
+					{
+					// RSI вычисляется по ключам OpenTimeUtc входного ряда. После прогрева отсутствие ключа
+					// означает дыры/рассинхрон сетки, а не "ещё рано".
+					if (solIdx >= RsiPeriod)
+						{
+						var diag = IndicatorSeriesDiagnostics.DescribeMissingKey (
+							series: solRsi,
+							seriesKey: "RSI6h",
+							requiredUtc: openUtc,
+							neighbors: 10);
+
+						throw new InvalidOperationException (
+							$"[RowBuilder] RSI map missing at {openUtc:O} (solIdx={solIdx}, RsiPeriod={RsiPeriod}). {diag}");
+						}
+
+					continue;
+					}
+
+				// RSI-slope по барной сетке: устойчив к "вырезанным выходным", где time-based openUtc-6h*steps
+				// может попадать в timestamp, отсутствующий в RSI-словаре.
+				double rsiSlope3 = Corendicators.GetRsiSlopeByBars (solRsi, solWinTrain, solIdx, RsiSlopeSteps, "RSI6h");
+				if (double.IsNaN (rsiSlope3))
 					continue;
 
 				double solRsiCentered = solRsiVal - 50.0;
-				double rsiSlope3 = Corendicators.GetRsiSlope6h (solRsi, openUtc, 3);
 
 				double dynVol = Corendicators.ComputeDynVol6h (solWinTrain, solIdx, DynVolLookbackWindows);
-
-				// Важно различать warm-up и "сломанные данные":
-				// - warm-up мы уже отсекаем выше;
-				// - здесь 0/NaN почти всегда означает ошибку источника/индикаторов.
 				if (double.IsNaN (dynVol) || double.IsInfinity (dynVol) || dynVol <= 0)
 					throw new InvalidOperationException ($"[RowBuilder] dynVol is non-positive at {openUtc:O}.");
 
@@ -271,8 +335,8 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					solEma50vs200: solEma50vs200,
 					btcEma50vs200: btcEma50vs200);
 
-				causalRows.Add (causal);
-
+				// Создание окна после проверки known gaps выше.
+				// Create(...) дополнительно валидирует, что entryUtc действительно присутствует как минута.
 				var window = Baseline1mWindow.Create (solAll1m, openUtc, exitUtc);
 
 				int firstPassDir;
@@ -297,14 +361,15 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 					else if (Math.Abs (pathDown) > pathUp + 0.001) factMicroDown = true;
 					}
 
+				// Добавляем строки только если день успешно лейблится.
+				causalRows.Add (causal);
+
 				labeledRows.Add (new LabeledCausalRowDto (
 					causal: causal,
 					trueLabel: trueLabel,
 					factMicroUp: factMicroUp,
 					factMicroDown: factMicroDown));
 
-				// Обновляем историю minMove ПОСЛЕ расчёта текущего дня,
-				// чтобы текущий forward не мог повлиять на minMove этого же дня.
 				double realizedAmp = Math.Max (pathUp, Math.Abs (pathDown));
 				if (double.IsNaN (realizedAmp) || double.IsInfinity (realizedAmp) || realizedAmp < 0)
 					throw new InvalidOperationException ($"[RowBuilder] invalid realizedAmp={realizedAmp} at {openUtc:O}.");

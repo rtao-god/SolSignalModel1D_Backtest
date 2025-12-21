@@ -1,6 +1,10 @@
 ﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
@@ -42,44 +46,39 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 				return multi;
 				}
 
+			static DateTime EntryUtc ( BacktestRecord r ) => r.Causal.DateUtc;
+
 			var ordered = allRecords
-				.OrderBy (r => r.ToCausalDateUtc())
+				.OrderBy (EntryUtc)
 				.ToList ();
 
-			// ЕДИНЫЙ контракт сплита train/OOS — baseline-exit.
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.ToCausalDateUtc());
+			var split = boundary.Split (ordered, EntryUtc);
 
 			var trainRecords = split.Train;
 			var oosRecords = split.Oos;
 
 			if (split.Excluded.Count > 0)
 				{
-				// Инвариант: на вход метрик должны приходить только eligible дни.
-				// Excluded (обычно weekend) означает, что выше по пайплайну неправильно сформирован список allRecords.
 				throw new InvalidOperationException (
 					$"[model-stats] Found excluded records (baseline-exit undefined). " +
 					$"ExcludedCount={split.Excluded.Count}. " +
 					$"This is a pipeline bug: filter out excluded days before analytics.");
 				}
 
-			// Full — только “eligible” записи (train+oos), excluded не смешиваем.
 			var fullRecords = new List<BacktestRecord> (trainRecords.Count + oosRecords.Count);
 			fullRecords.AddRange (trainRecords);
 			fullRecords.AddRange (oosRecords);
 
-			var maxDateUtc = fullRecords[^1].ToCausalDateUtc();
+			var maxEntryUtc = EntryUtc (fullRecords[^1]);
 
-			// Recent — также только eligible.
-			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
+			var fromRecentUtc = maxEntryUtc.AddDays (-recentDays);
 			var recentRecords = fullRecords
-				.Where (r => r.ToCausalDateUtc() >= fromRecentUtc)
+				.Where (r => EntryUtc (r) >= fromRecentUtc)
 				.ToList ();
 
 			if (recentRecords.Count == 0)
-				{
 				recentRecords = fullRecords;
-				}
 
 			var meta = multi.Meta;
 			meta.HasOos = oosRecords.Count > 0;

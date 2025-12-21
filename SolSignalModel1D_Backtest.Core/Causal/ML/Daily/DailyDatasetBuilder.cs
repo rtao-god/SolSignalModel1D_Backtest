@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 	{
@@ -43,18 +44,23 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 			{
 			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
 
+			// Убираем вызовы r.ToCausalDateUtc() (ambiguous extension).
+			static DateTime EntryUtc ( LabeledCausalRow r ) => r.Causal.DateUtc;
+			static DateTime DayKeyUtc ( LabeledCausalRow r ) => r.Causal.DateUtc.ToCausalDateUtc ();
+
 			var ordered = allRows
-				.OrderBy (r => r.ToCausalDateUtc ())
+				.OrderBy (EntryUtc)
 				.ToList ();
 
 			var trainRows = ordered
-				.Where (r => r.ToCausalDateUtc () <= trainUntil)
+				.Where (r => EntryUtc (r) <= trainUntil)
 				.ToList ();
 
 			if (datesToExclude != null && datesToExclude.Count > 0)
 				{
+				// datesToExclude обычно хранит day-key (00:00 UTC), поэтому сравниваем по DayKeyUtc.
 				trainRows = trainRows
-					.Where (r => !datesToExclude.Contains (r.ToCausalDateUtc ()))
+					.Where (r => !datesToExclude.Contains (DayKeyUtc (r)))
 					.ToList ();
 				}
 
@@ -79,11 +85,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 
 		private static List<LabeledCausalRow> FilterByBaselineExit ( List<LabeledCausalRow> rows, DateTime trainUntil )
 			{
+			static DateTime EntryUtc ( LabeledCausalRow r ) => r.Causal.DateUtc;
+
 			var result = new List<LabeledCausalRow> (rows.Count);
 
 			foreach (var r in rows)
 				{
-				var entryUtc = r.ToCausalDateUtc ();
+				var entryUtc = EntryUtc (r);
 
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, NyTz);
 				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)

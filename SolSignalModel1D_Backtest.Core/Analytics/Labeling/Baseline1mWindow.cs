@@ -78,6 +78,15 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 					$"minutes=[{allMinutesSortedUtc[0].OpenTimeUtc:O}..{allMinutesSortedUtc[^1].OpenTimeUtc:O}].");
 				}
 
+			// Вход в окно должен попадать ровно на минутную свечу.
+			// Иначе таргет/экстремумы считаются по урезанному пути и становятся недетерминированными.
+			var startT = allMinutesSortedUtc[startIdx].OpenTimeUtc;
+			if (startT != entryUtc)
+				{
+				throw new InvalidOperationException (
+					$"[baseline-1m] entry minute is missing: expected={entryUtc:O}, actual={startT:O}, idx={startIdx}.");
+				}
+
 			if (endIdxExclusive <= startIdx)
 				{
 				throw new InvalidOperationException (

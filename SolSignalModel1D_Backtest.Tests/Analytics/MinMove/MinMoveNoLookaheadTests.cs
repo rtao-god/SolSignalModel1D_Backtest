@@ -2,56 +2,55 @@
 using System.Collections.Generic;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 	{
-	/// <summary>
-	/// Тест на отсутствие lookahead в MinMoveEngine:
-	/// результат ComputeAdaptive(asOfUtc, ...) не должен зависеть от historyRows
-	/// с датами строго > asOfUtc.ToCausalDateUtc().
-	/// </summary>
 	public sealed class MinMoveNoLookaheadTests
 		{
 		[Fact]
 		public void ComputeAdaptive_DoesNotDependOnFuturePathHistory ()
 			{
-			// Строим длинную историю historyRows (400 дней),
-			// так чтобы для asOfUtc была и приличная "прошлая" выборка, и "будущее".
-			var historyBase = new List<BacktestRecord> ();
-			var firstDate = new DateTime (2020, 1, 1, 8, 0, 0, DateTimeKind.Utc);
-			int totalDays = 400;
+			// История по day-key датам (00:00 UTC). В тесте важно:
+			// - asOfUtc лежит внутри суток (проверяем нормализацию к day-key),
+			// - "будущее" относительно asOfDay должно не влиять на результат.
+			var historyBase = new List<MinMoveHistoryRow> ();
+			var firstDay = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+			const int totalDays = 400;
 
 			for (int i = 0; i < totalDays; i++)
 				{
-				var dt = firstDate.AddDays (i);
+				var dayUtc = firstDay.AddDays (i).ToCausalDateUtc ();
 
-				// Path-амплитуды: плавно растущие значения.
-				double up = 0.01 + 0.0001 * i;
-				double down = -0.008 - 0.00005 * i;
+				// Монотонный рост амплитуды даёт нетривиальные квантили/ewma.
+				double amp = 0.01 + 0.0001 * i;
 
-				var row = new BacktestRecord
-					{
-					Date = dt,
-					PathReachedUpPct = up,
-					PathReachedDownPct = down,
-					// Остальные поля BacktestRecord здесь не важны для MinMoveEngine,
-					// но при необходимости могут быть заполнены дефолтами.
-					};
-
-				historyBase.Add (row);
+				historyBase.Add (new MinMoveHistoryRow (
+					DateUtc: dayUtc,
+					RealizedPathAmpPct: amp));
 				}
 
-			// asOfUtc — примерно середина истории.
-			var asOfUtc = firstDate.AddDays (200).AddHours (12);
-
-			// Конфиг и независимые состояния для двух сценариев.
+			// Конфиг фиксируем явно, чтобы будущие правки дефолтов не меняли смысл теста "тихо".
 			var cfg = new MinMoveConfig
 				{
-				// Оставляем дефолтные значения из класса, чтобы тест не зависел от конкретных цифр.
+				MinFloorPct = 0.015,
+				MinCeilPct = 0.08,
+				AtrWeight = 0.6,
+				DynVolWeight = 0.4,
+				EwmaAlpha = 0.15,
+				QuantileStart = 0.6,
+				QuantileLow = 0.5,
+				QuantileHigh = 0.8,
+				QuantileWindowDays = 90,
+				QuantileRetuneEveryDays = 10,
+				RegimeDownMul = 1.2
 				};
 
+			var asOfUtc = firstDay.AddDays (200).AddHours (12);
+			var asOfDay = asOfUtc.ToCausalDateUtc ();
+
+			// Раздельные состояния нужны, чтобы поймать зависимость не только результата,
+			// но и внутренней адаптации (ewma/квантиль/дата ретюна).
 			var stateA = new MinMoveState
 				{
 				EwmaVol = 0.0,
@@ -66,7 +65,6 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				LastQuantileTune = DateTime.MinValue
 				};
 
-			// Сценарий A: базовая история без мутаций.
 			var resultA = MinMoveEngine.ComputeAdaptive (
 				asOfUtc: asOfUtc,
 				regimeDown: false,
@@ -76,28 +74,27 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				cfg: cfg,
 				state: stateA);
 
-			// Сценарий B: копия истории, но "будущее" после asOfUtc.ToCausalDateUtc()
-			// жёстко мутируется (амплитуды path становятся огромными).
-			var historyMutated = new List<BacktestRecord> (historyBase.Count);
+			// Мутируем строго будущую часть истории (day-key > asOfDay).
+			// Если код случайно читает "future", адаптация/результат должны поехать.
+			var historyMutated = new List<MinMoveHistoryRow> (historyBase.Count);
+			bool hasFutureMutation = false;
+
 			foreach (var r in historyBase)
 				{
-				var clone = new BacktestRecord
-					{
-					Date = r.ToCausalDateUtc(),
-					PathReachedUpPct = r.Forward.PathReachedUpPct,
-					PathReachedDownPct = r.Forward.PathReachedDownPct
-					};
+				var amp = r.RealizedPathAmpPct;
 
-				if (clone.ToCausalDateUtc().Date > asOfUtc.ToCausalDateUtc())
+				if (r.DateUtc > asOfDay)
 					{
-					// Сильно увеличиваем амплитуды, чтобы эффект точно был заметен,
-					// если MinMoveEngine вдруг смотрит в будущее.
-					clone.Forward.PathReachedUpPct = 0.5;
-					clone.Forward.PathReachedDownPct = -0.5;
+					amp = 0.5;
+					hasFutureMutation = true;
 					}
 
-				historyMutated.Add (clone);
+				historyMutated.Add (new MinMoveHistoryRow (
+					DateUtc: r.DateUtc,
+					RealizedPathAmpPct: amp));
 				}
+
+			Assert.True (hasFutureMutation);
 
 			var resultB = MinMoveEngine.ComputeAdaptive (
 				asOfUtc: asOfUtc,
@@ -108,17 +105,147 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.MinMove
 				cfg: cfg,
 				state: stateB);
 
-			// Проверяем, что результаты полностью совпадают:
-			// будущее (Date > asOf.ToCausalDateUtc()) не должно влиять на MinMove/Vol/Q.
+			// No-lookahead: идентичность по результату и по состоянию.
 			Assert.Equal (resultA.MinMove, resultB.MinMove, 10);
 			Assert.Equal (resultA.LocalVol, resultB.LocalVol, 10);
 			Assert.Equal (resultA.EwmaVol, resultB.EwmaVol, 10);
 			Assert.Equal (resultA.QuantileUsed, resultB.QuantileUsed, 10);
 
-			// Заодно убеждаемся, что состояние тоже не зависит от future-части.
 			Assert.Equal (stateA.EwmaVol, stateB.EwmaVol, 10);
 			Assert.Equal (stateA.QuantileQ, stateB.QuantileQ, 10);
-			Assert.Equal (stateA.LastQuantileTune.ToCausalDateUtc(), stateB.LastQuantileTune.ToCausalDateUtc());
+			Assert.Equal (stateA.LastQuantileTune.ToCausalDateUtc (), stateB.LastQuantileTune.ToCausalDateUtc ());
+
+			// Контрольная проверка: когда asOf смещается вперёд, часть ранее "future" становится прошлым,
+			// и тогда мутация обязана начать влиять (иначе тест выше может быть ложноположительным).
+			var asOfUtcLater = firstDay.AddDays (240).AddHours (12);
+
+			var stateBaseLater = new MinMoveState
+				{
+				EwmaVol = 0.0,
+				QuantileQ = 0.0,
+				LastQuantileTune = DateTime.MinValue
+				};
+
+			var stateMutLater = new MinMoveState
+				{
+				EwmaVol = 0.0,
+				QuantileQ = 0.0,
+				LastQuantileTune = DateTime.MinValue
+				};
+
+			var resultBaseLater = MinMoveEngine.ComputeAdaptive (
+				asOfUtc: asOfUtcLater,
+				regimeDown: false,
+				atrPct: 0.06,
+				dynVol: 0.06,
+				historyRows: historyBase,
+				cfg: cfg,
+				state: stateBaseLater);
+
+			var resultMutLater = MinMoveEngine.ComputeAdaptive (
+				asOfUtc: asOfUtcLater,
+				regimeDown: false,
+				atrPct: 0.06,
+				dynVol: 0.06,
+				historyRows: historyMutated,
+				cfg: cfg,
+				state: stateMutLater);
+
+			Assert.NotEqual (resultBaseLater.QuantileUsed, resultMutLater.QuantileUsed);
+			Assert.NotEqual (resultBaseLater.MinMove, resultMutLater.MinMove);
+			}
+
+		[Fact]
+		public void ComputeAdaptive_UsesStrictQuantileWindowDays ()
+			{
+			// Этот тест фиксирует границы окна:
+			// window = [asOfDayKey-N .. asOfDayKey-1] ровно N дней.
+			//
+			// Вокруг границ специально кладём "лишние" дни:
+			// - day = asOfDayKey-N-1 (лишний слева),
+			// - day = asOfDayKey (сегодня, его нельзя включать).
+			// Любая off-by-one ошибка изменит size окна (N±1), что детектится по result.Notes.
+			const int N = 90;
+
+			var firstDay = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+			var asOfUtc = firstDay.AddDays (200).AddHours (12);
+			var asOfDayKey = asOfUtc.ToCausalDateUtc ();
+
+			var history = new List<MinMoveHistoryRow> ();
+
+			// Диапазон: [asOfDayKey-(N+1) .. asOfDayKey], это N+2 day-key записей.
+			// Правильное окно внутри этого диапазона должно выбрать ровно N записей:
+			// [asOfDayKey-N .. asOfDayKey-1].
+			for (int i = -(N + 1); i <= 0; i++)
+				{
+				var day = asOfDayKey.AddDays (i).ToCausalDateUtc ();
+
+				// Значения амплитуды не должны быть NaN/Inf/<=0: тест здесь про границы окна.
+				double amp = 0.02 + 0.00001 * (i + (N + 1));
+				history.Add (new MinMoveHistoryRow (day, amp));
+				}
+
+			var cfg = new MinMoveConfig
+				{
+				MinFloorPct = 0.015,
+				MinCeilPct = 0.08,
+				AtrWeight = 0.6,
+				DynVolWeight = 0.4,
+				EwmaAlpha = 0.15,
+
+				QuantileStart = 0.6,
+				QuantileLow = 0.5,
+				QuantileHigh = 0.8,
+
+				QuantileWindowDays = N,
+				QuantileRetuneEveryDays = 1,
+				RegimeDownMul = 1.2
+				};
+
+			var state = new MinMoveState
+				{
+				EwmaVol = 0.0,
+				QuantileQ = 0.0,
+				LastQuantileTune = DateTime.MinValue
+				};
+
+			var result = MinMoveEngine.ComputeAdaptive (
+				asOfUtc: asOfUtc,
+				regimeDown: false,
+				atrPct: 0.02,
+				dynVol: 0.02,
+				historyRows: history,
+				cfg: cfg,
+				state: state);
+
+			// Гарантия, что ретюн реально выполнялся (иначе проверка window-size может оказаться тривиальной).
+			Assert.Contains ("retune=1", result.Notes);
+
+			int window = ExtractWindowCountOrThrow (result.Notes);
+			Assert.Equal (N, window);
+
+			Assert.Equal (asOfDayKey, state.LastQuantileTune.ToCausalDateUtc ());
+			}
+
+		private static int ExtractWindowCountOrThrow ( string notes )
+			{
+			if (notes == null) throw new ArgumentNullException (nameof (notes));
+
+			const string key = "window=";
+			int i = notes.IndexOf (key, StringComparison.Ordinal);
+			if (i < 0)
+				throw new InvalidOperationException ($"[test] 'window=' not found in Notes: '{notes}'.");
+
+			i += key.Length;
+
+			int j = i;
+			while (j < notes.Length && char.IsDigit (notes[j]))
+				j++;
+
+			if (j == i)
+				throw new InvalidOperationException ($"[test] window value not found in Notes: '{notes}'.");
+
+			return int.Parse (notes.Substring (i, j - i));
 			}
 		}
 	}

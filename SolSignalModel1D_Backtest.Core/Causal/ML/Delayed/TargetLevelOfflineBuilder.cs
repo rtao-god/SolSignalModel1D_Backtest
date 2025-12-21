@@ -1,13 +1,13 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
+﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 	{
@@ -24,13 +24,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			IReadOnlyList<Candle1h> sol1h,
 			Dictionary<DateTime, Candle6h> sol6hDict )
 			{
-			var result = new List<TargetLevelSample>((rows?.Count ?? 0) * 2);
+			var result = new List<TargetLevelSample> ((rows?.Count ?? 0) * 2);
 			if (rows == null || rows.Count == 0 || sol1h == null || sol1h.Count == 0)
 				return result;
 
 			foreach (var r in rows)
 				{
-				if (!sol6hDict.TryGetValue (r.ToCausalDateUtc(), out var dayCandle))
+				// dayKey нужен для словаря дневной свечи.
+				var dayKey = r.Causal.DateUtc.ToCausalDateUtc ();
+
+				if (!sol6hDict.TryGetValue (dayKey, out var dayCandle))
 					continue;
 
 				double entryPrice = dayCandle.Close;
@@ -39,16 +42,19 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 				if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
 					{
 					throw new InvalidOperationException (
-						$"[sl-offline] Invalid dayMinMove for entry {r.ToCausalDateUtc():O}. " +
+						$"[sl-offline] Invalid dayMinMove for dayKey={dayKey:O}. " +
 						$"dayMinMove={dayMinMove}. Fix RowBuilder/MinMoveEngine; do not default here.");
 					}
 
-				DateTime entryUtc = r.ToCausalDateUtc();
+				DateTime entryUtc = r.Causal.DateUtc;
 				DateTime endUtc;
-				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
+
+				try
+					{
+					endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
+					}
 				catch (Exception ex)
 					{
-					// Явно ломаемся с понятным сообщением
 					throw new InvalidOperationException (
 						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}. " +
 						"Fix data/windowing logic instead of relying on fallback.",
@@ -59,11 +65,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
 					.OrderBy (h => h.OpenTimeUtc)
 					.ToList ();
+
 				if (dayHours.Count == 0)
 					continue;
 
-				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, true, NyTz);
-				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, false, NyTz);
+				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, goLong: true, NyTz);
+				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, goLong: false, NyTz);
 				}
 
 			return result;
@@ -81,14 +88,17 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 			{
 			bool strongSignal = true;
 
+			DateTime entryUtc = r.Causal.DateUtc;
+			DateTime dayKey = entryUtc.ToCausalDateUtc ();
+
 			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				dayHours, r.ToCausalDateUtc(), goLong, !goLong, entryPrice, dayMinMove, strongSignal, nyTz);
+				dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, nyTz);
 
 			var deepDelayed = DelayedEntryEvaluator.Evaluate (
-				dayHours, r.ToCausalDateUtc(), goLong, !goLong, entryPrice, dayMinMove, strongSignal, DeepDelayFactor, DeepMaxDelayHours);
+				dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, DeepDelayFactor, DeepMaxDelayHours);
 
 			var shDelayed = DelayedEntryEvaluator.Evaluate (
-				dayHours, r.ToCausalDateUtc(), goLong, !goLong, entryPrice, dayMinMove, strongSignal, ShallowDelayFactor, ShallowMaxDelayHours);
+				dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, ShallowDelayFactor, ShallowMaxDelayHours);
 
 			int label = 0;
 			if (deepDelayed.Executed && IsDeepImprovement (baseOutcome, deepDelayed))
@@ -97,13 +107,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 				label = 1;
 
 			var feats = TargetLevelFeatureBuilder.Build (
-				r.ToCausalDateUtc(), goLong, strongSignal, dayMinMove, entryPrice, allHours);
+				dayKey, goLong, strongSignal, dayMinMove, entryPrice, allHours);
 
 			sink.Add (new TargetLevelSample
 				{
 				Label = label,
 				Features = feats,
-				EntryUtc = r.ToCausalDateUtc()
+				EntryUtc = entryUtc
 				});
 			}
 

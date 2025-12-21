@@ -37,7 +37,10 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 				};
 
 			if (candles1h == null || candles1h.Count == 0)
-				return res;
+				{
+				throw new InvalidOperationException (
+					"[DelayedEntryEvaluator] candles1h is null/empty: delayed-entry evaluation requires 1h bars.");
+				}
 
 			// Инвариант: направление должно быть ровно одно.
 			if (goLong == goShort)

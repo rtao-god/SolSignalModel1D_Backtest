@@ -23,20 +23,23 @@
 		/// </param>
 		public static bool IsStrongByMinMove ( double dayMinMove, bool regimeDown, double baseThreshold )
 			{
-			// Любые NaN/отрицательные/нулевые значения считаем "слабый день"
-			// — это безопаснее, чем случайно промаркировать их как сильные.
-			if (double.IsNaN (dayMinMove) || dayMinMove <= 0.0)
-				return false;
+			// NaN/Infinity/неположительные значения здесь означают поломку апстрима:
+			// либо неверный расчёт minMove, либо дырки в данных.
+			// Тихий "false" маскирует проблему и делает диагностику невозможной.
+			if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[sl-strong] dayMinMove is invalid: {dayMinMove}. Expected finite value > 0.");
+				}
 
-			// Если базовый порог не задан, фактически считаем все дни "сильными".
-			// Такой режим можно использовать как деградацию до "старого" поведения.
-			if (baseThreshold <= 0.0)
-				return true;
+			// baseThreshold — конфигурационный инвариант.
+			// Режим "baseThreshold<=0 => true" превращает ошибку конфигурации в молчаливую деградацию.
+			if (double.IsNaN (baseThreshold) || double.IsInfinity (baseThreshold) || baseThreshold <= 0.0)
+				{
+				throw new InvalidOperationException (
+					$"[sl-strong] baseThreshold is invalid: {baseThreshold}. Expected finite value > 0.");
+				}
 
-			// Коридор вокруг базового порога:
-			//   dayMinMove <= 0.8T → явно слабый (очень маленькое ожидаемое движение);
-			//   dayMinMove >= 1.2T → явно сильный (волатильный день);
-			//   между порогами — серая зона, решаем по режиму.
 			double weakCut = baseThreshold * 0.8;
 			double strongCut = baseThreshold * 1.2;
 
@@ -47,8 +50,8 @@
 				return true;
 
 			// Серая зона:
-			// в даун-режиме считаем день "сильным" (риск завышен, хотим аккуратнее обращаться с плечом),
-			// в нормальном режиме — остаёмся консервативными и считаем день "слабым".
+			// в даун-режиме считаем день "сильным" (риск завышен),
+			// в нормальном режиме — консервативно считаем день "слабым".
 			return regimeDown;
 			}
 		}

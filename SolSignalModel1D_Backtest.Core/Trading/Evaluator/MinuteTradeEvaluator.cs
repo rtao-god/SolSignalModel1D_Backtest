@@ -49,7 +49,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 				};
 
 			if (day1m.Count == 0)
-				return outcome;
+				throw new InvalidOperationException ("[minute-eval] day1m is empty: cannot evaluate TP/SL/close without minute data.");
 
 			// Контракт: ровно одно направление.
 			if (goLong == goShort)

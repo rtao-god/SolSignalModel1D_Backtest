@@ -1,10 +1,10 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 	{
@@ -33,6 +33,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
 	public static class MicroDatasetBuilder
 		{
+		private static DateTime DayKeyUtc ( LabeledCausalRow r ) => CausalTimeKey.DayKeyUtc (r);
+
 		public static MicroDataset Build (
 			IReadOnlyList<LabeledCausalRow> allRows,
 			DateTime trainUntilUtc )
@@ -45,19 +47,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 			if (trainUntilUtc.Kind != DateTimeKind.Utc)
 				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
 
-			// Контракт: порядок уже стабилен (бутстрап/RowBuilder).
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.ToCausalDateUtc (), "micro-dataset.allRows");
+			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => DayKeyUtc (r), "micro-dataset.allRows");
 
 			var ordered = allRows as List<LabeledCausalRow> ?? allRows.ToList ();
 
 			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
-			var split = boundary.Split (ordered, r => r.ToCausalDateUtc ());
+			var split = boundary.Split (ordered, r => DayKeyUtc (r));
 
 			if (split.Excluded.Count > 0)
 				{
 				var sample = split.Excluded
 					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (r => r.ToCausalDateUtc ().ToString ("O"));
+					.Select (r => DayKeyUtc (r).ToString ("O"));
 
 				throw new InvalidOperationException (
 					$"[micro-dataset] Found excluded days (baseline-exit undefined). " +
@@ -66,12 +67,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
 			var trainRows = split.Train;
 
-			// Порядок сохраняется фильтрацией.
 			var microRowsList = trainRows
 				.Where (r => r.FactMicroUp || r.FactMicroDown)
 				.ToList ();
 
-			// Замораживаем, чтобы дальше по пайплайну никто не мог "случайно" мутировать выборку.
 			var trainFrozen = (trainRows as List<LabeledCausalRow> ?? trainRows.ToList ()).ToArray ();
 			var microFrozen = microRowsList.ToArray ();
 

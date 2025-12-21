@@ -42,8 +42,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 			if (config == null)
 				throw new ArgumentNullException (nameof (config));
 
-			var fromDate = mornings.Min (r => r.ToCausalDateUtc ());
-			var toDate = mornings.Max (r => r.ToCausalDateUtc ());
+			var fromDate = mornings.Min (r => r.Causal.DateUtc.ToCausalDateUtc ());
+			var toDate = mornings.Max (r => r.Causal.DateUtc.ToCausalDateUtc ());
 
 			var withSlBase = SimulateAllPolicies (policies, records, candles1m, useStopLoss: true, config: config, useAnti: false);
 			var noSlBase = SimulateAllPolicies (policies, records, candles1m, useStopLoss: false, config: config, useAnti: false);

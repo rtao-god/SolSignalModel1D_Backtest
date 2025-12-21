@@ -12,8 +12,6 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		{
 		private static List<Candle6h> BuildTrendingSeries ( int count, double startPrice, double step )
 			{
-			// Простая генерация 6h-рядов:
-			// цена монотонно растёт или падает с заданным шагом.
 			var list = new List<Candle6h> (count);
 			var t = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 			double price = startPrice;
@@ -46,7 +44,6 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			{
 			var arr = BuildTrendingSeries (1, 100.0, 1.0);
 
-			// Для idx=0 и windowsBack=1 нет достаточной истории.
 			double ret = CoreIndicators.Ret6h (arr, 0, 1);
 
 			Assert.True (double.IsNaN (ret));
@@ -59,7 +56,6 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 
 			var atr = CoreIndicators.ComputeAtr6h (arr, period: 14);
 
-			// Должны быть какие-то значения и все они > 0.
 			Assert.NotEmpty (atr);
 			Assert.All (atr.Values, v => Assert.True (v > 0.0));
 			}
@@ -67,12 +63,10 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		[Fact]
 		public void ComputeRsi6h_RespondsToTrendDirection ()
 			{
-			// Ап-тренд: цена растёт, RSI должен быть > 50.
 			var up = BuildTrendingSeries (50, 100.0, +2.0);
 			var rsiUp = CoreIndicators.ComputeRsi6h (up, period: 14);
 			double lastRsiUp = rsiUp.Values.Last ();
 
-			// Даун-тренд: цена падает, RSI должен быть < 50.
 			var down = BuildTrendingSeries (50, 200.0, -2.0);
 			var rsiDown = CoreIndicators.ComputeRsi6h (down, period: 14);
 			double lastRsiDown = rsiDown.Values.Last ();
@@ -89,7 +83,6 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 
 			var ema = CoreIndicators.ComputeEma6h (arr, period: 10);
 
-			// Проверяем, что EMA существует и последняя EMA ближе к последней цене, чем к первой.
 			Assert.NotEmpty (ema);
 
 			double lastPrice = arr.Last ().Close;
@@ -111,8 +104,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 					{ new DateTime (2024, 1, 3, 0, 0, 0, DateTimeKind.Utc), 20 }
 				};
 
-			// На 2024-01-02 нет значения, ожидаем взять 2024-01-01.
-			var asOf = new DateTime (2024, 1, 2, 12, 0, 0, DateTimeKind.Utc);
+			// Важно: PickNearestFng работает по day-key (UTC midnight).
+			var asOf = new DateTime (2024, 1, 2, 0, 0, 0, DateTimeKind.Utc);
 
 			double val = CoreIndicators.PickNearestFng (fng, asOf);
 
@@ -125,13 +118,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var dxy = new Dictionary<DateTime, double> ();
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-			// Через 30 дней DXY вырастает ровно на 10%.
 			dxy[start] = 100.0;
 			dxy[start.AddDays (30)] = 110.0;
 
+			// Аналогично: day-key (UTC midnight).
 			double change = CoreIndicators.GetDxyChange30 (dxy, start.AddDays (30));
 
-			// Ожидается прирост ~0.10.
 			Assert.InRange (change, 0.099, 0.101);
 			}
 		}
