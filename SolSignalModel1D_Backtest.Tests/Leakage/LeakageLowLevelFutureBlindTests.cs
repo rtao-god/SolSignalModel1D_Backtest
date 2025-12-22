@@ -325,8 +325,9 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			while (day <= lastDay)
 				{
 				fngHistory[day] = 50.0;
-				dxySeries[day] = 0.0;
-				day = day.AddDays (1);
+                // Контракт DXY: значение "now" должно быть > 0.
+                dxySeries[day] = 100.0;
+                day = day.AddDays (1);
 				}
 
 			var solAll1hDummy = new List<Candle6h> ();

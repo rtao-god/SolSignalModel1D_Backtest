@@ -22,11 +22,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			// Канон: baseline end в одном месте и одинаково по всему проекту.
 			DateTime expected = Windowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
 
-			DateTime fromRec = rec.Forward.WindowEndUtc;
-			if (fromRec == default)
-				return expected;
+            DateTime fromRec = rec.Forward.WindowEndUtc;
+            if (fromRec == default)
+                throw new InvalidOperationException(
+                    $"[pnl] Forward.WindowEndUtc is default at {dayStartUtc:yyyy-MM-dd}. Forward facts must be initialized.");
 
-			if (fromRec.Kind != DateTimeKind.Utc)
+            if (fromRec.Kind != DateTimeKind.Utc)
 				throw new InvalidOperationException ($"[pnl] Forward.WindowEndUtc must be UTC, got Kind={fromRec.Kind} at {dayStartUtc:yyyy-MM-dd}.");
 
 			if (fromRec <= dayStartUtc)

@@ -1,327 +1,400 @@
-﻿using Microsoft.ML;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.ML;
 using Microsoft.ML.Data;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.ML
-	{
-	/// <summary>
-	/// Ядро PFI:
-	/// - прогоняет датасет через модель;
-	/// - считает базовый AUC;
-	/// - делает permutation feature importance по AUC;
-	/// - считает direction-метрики (mean pos/neg, corr).
-	/// Не печатает в консоль и не хранит состояние.
-	/// </summary>
-	internal static class FeatureImportanceCore
-		{
-		/// <summary>
-		/// Внутренний DTO для чтения данных из IDataView после Transform().
-		/// Важно: этот слой работает только с колонками Label/Features/Score,
-		/// и не должен ссылаться на доменные сущности (BacktestRecord, Causal/Forward).
-		/// </summary>
-		private sealed class BinaryScoredRow
-			{
-			public bool Label { get; set; }
+{
+    /// <summary>
+    /// Ядро PFI:
+    /// - прогоняет датасет через модель;
+    /// - считает базовый AUC;
+    /// - делает permutation feature importance по AUC;
+    /// - считает direction-метрики (mean pos/neg, corr).
+    ///
+    /// Контракт:
+    /// - длина вектора фич фиксирована внутри одного вызова и должна совпадать с featureNames.Length;
+    /// - любые рассинхроны схемы (Label/Features/Score) считаются ошибкой пайплайна и приводят к fail-fast.
+    /// </summary>
+    internal static class FeatureImportanceCore
+    {
+        /// <summary>
+        /// DTO для чтения данных из IDataView после Transform().
+        /// Привязка к колонкам делается через SchemaDefinition, чтобы поддерживать кастомные имена колонок.
+        /// </summary>
+        private sealed class BinaryScoredRow
+        {
+            public bool Label { get; set; }
 
-			[VectorType (MlSchema.FeatureCount)]
-			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
+            /// <summary>
+            /// Вектор фич произвольной фиксированной длины (определяется схемой IDataView).
+            /// </summary>
+            public VBuffer<float> Features { get; set; }
 
-			/// <summary>
-			/// Сырой скор модели (логит / margin).
-			/// Нужен для корреляции "фича ↔ скор".
-			/// </summary>
-			public float Score { get; set; }
-			}
+            /// <summary>
+            /// Сырой скор модели (логит / margin).
+            /// Колонка должна существовать в результате model.Transform(data).
+            /// </summary>
+            public float Score { get; set; }
+        }
 
-		/// <summary>
-		/// Семпл для PFI (Label + Features) без Score.
-		/// Выделен отдельно, чтобы не таскать лишнее в цикле permutation.
-		/// </summary>
-		private sealed class EvalSample
-			{
-			public bool Label { get; set; }
+        /// <summary>
+        /// Семпл для permutation: Label + Features.
+        /// Для LoadFromEnumerable длина вектора фиксируется первой строкой и должна быть одинаковой для всех.
+        /// </summary>
+        private sealed class EvalSample
+        {
+            public bool Label { get; set; }
+            public float[] Features { get; set; } = Array.Empty<float>();
+        }
 
-			[VectorType (MlSchema.FeatureCount)]
-			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
-			}
+        internal static List<FeatureStats> AnalyzeBinaryFeatureImportance(
+            MLContext ml,
+            ITransformer model,
+            IDataView data,
+            string[] featureNames,
+            string tag,
+            out double baselineAuc,
+            string labelColumnName,
+            string featuresColumnName)
+        {
+            if (ml == null) throw new ArgumentNullException(nameof(ml));
+            if (model == null) throw new ArgumentNullException(nameof(model));
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            if (featureNames == null) throw new ArgumentNullException(nameof(featureNames));
+            if (featureNames.Length <= 0)
+                throw new ArgumentException("featureNames must not be empty.", nameof(featureNames));
+            if (string.IsNullOrWhiteSpace(labelColumnName))
+                throw new ArgumentException("labelColumnName must not be empty.", nameof(labelColumnName));
+            if (string.IsNullOrWhiteSpace(featuresColumnName))
+                throw new ArgumentException("featuresColumnName must not be empty.", nameof(featuresColumnName));
 
-		/// <summary>
-		/// Основной метод ядра PFI.
-		/// Возвращает список FeatureStats + out-параметр baselineAuc.
-		/// Никаких snapshot'ов и вывода — только вычисления.
-		/// </summary>
-		internal static List<FeatureStats> AnalyzeBinaryFeatureImportance (
-			MLContext ml,
-			ITransformer model,
-			IDataView data,
-			string[] featureNames,
-			string tag,
-			out double baselineAuc,
-			string labelColumnName,
-			string featuresColumnName )
-			{
-			if (ml == null) throw new ArgumentNullException (nameof (ml));
-			if (model == null) throw new ArgumentNullException (nameof (model));
-			if (data == null) throw new ArgumentNullException (nameof (data));
-			if (featureNames == null) throw new ArgumentNullException (nameof (featureNames));
-			if (featureNames.Length < MlSchema.FeatureCount)
-				throw new ArgumentException ($"featureNames.Length ({featureNames.Length}) < MlSchema.FeatureCount ({MlSchema.FeatureCount})");
+            int featCount = featureNames.Length;
 
-			// 1) Прогоняем data через модель, чтобы получить Score.
-			var scoredBase = model.Transform (data);
+            // 1) Прогоняем data через модель, чтобы получить Score.
+            var scoredBase = model.Transform(data);
 
-			// 2) Базовый ROC-AUC по Score.
-			var baseMetrics = ml.BinaryClassification.Evaluate (
-				scoredBase,
-				labelColumnName: labelColumnName,
-				scoreColumnName: nameof (BinaryScoredRow.Score));
+            // 2) Базовый ROC-AUC по Score.
+            var baseMetrics = ml.BinaryClassification.Evaluate(
+                scoredBase,
+                labelColumnName: labelColumnName,
+                scoreColumnName: nameof(BinaryScoredRow.Score));
 
-			baselineAuc = baseMetrics.AreaUnderRocCurve;
+            baselineAuc = baseMetrics.AreaUnderRocCurve;
 
-			// 3) Материализуем скоренные строки для direction-метрик и PFI.
-			// Важно: здесь должны быть только колонки ML-уровня (Label/Features/Score).
-			var scoredRows = ml.Data.CreateEnumerable<BinaryScoredRow> (
-					scoredBase,
-					reuseRowObject: false)
-				.ToList ();
+            // 3) Материализуем скоренные строки.
+            // Привязываем свойства к фактическим именам колонок.
+            var scoredSchema = SchemaDefinition.Create(typeof(BinaryScoredRow));
+            scoredSchema[nameof(BinaryScoredRow.Label)].ColumnName = labelColumnName;
+            scoredSchema[nameof(BinaryScoredRow.Features)].ColumnName = featuresColumnName;
+            // Score ожидается как "Score" (стандарт ML.NET для binary trainers).
+            scoredSchema[nameof(BinaryScoredRow.Score)].ColumnName = nameof(BinaryScoredRow.Score);
 
-			if (scoredRows.Count == 0)
-				return new List<FeatureStats> ();
+            var scoredRows = ml.Data.CreateEnumerable<BinaryScoredRow>(
+                    scoredBase,
+                    reuseRowObject: false,
+                    schemaDefinition: scoredSchema)
+                .ToList();
 
-			// Для PFI берём только Label + Features.
-			var evalSamples = scoredRows
-				.Select (r => new EvalSample
-					{
-					Label = r.Label,
-					Features = (float[]) r.Features.Clone ()
-					})
-				.ToList ();
+            if (scoredRows.Count == 0)
+                return new List<FeatureStats>();
 
-			// 4) PFI по AUC: для каждой фичи перемешиваем столбец и меряем падение AUC.
-			int featCount = MlSchema.FeatureCount;
-			var deltaAuc = new double[featCount];
-			var rng = new Random (42); // фиксированный seed для воспроизводимости
+            // 3.1) Валидируем длину фич на первом же проходе.
+            for (int i = 0; i < scoredRows.Count; i++)
+            {
+                var vb = scoredRows[i].Features;
+                if (vb.Length != featCount)
+                {
+                    throw new InvalidOperationException(
+                        $"[pfi-core:{tag}] Features length mismatch at row#{i}: " +
+                        $"dataFeaturesLen={vb.Length}, featureNamesLen={featCount}. " +
+                        $"labelColumn='{labelColumnName}', featuresColumn='{featuresColumnName}'.");
+                }
+            }
 
-			for (int j = 0; j < featCount; j++)
-				{
-				// Собираем столбец j.
-				var col = new float[evalSamples.Count];
-				for (int i = 0; i < evalSamples.Count; i++)
-					col[i] = evalSamples[i].Features[j];
+            // Для PFI берём только Label + Features (в массив).
+            var evalSamples = new List<EvalSample>(scoredRows.Count);
+            for (int i = 0; i < scoredRows.Count; i++)
+            {
+                var vb = scoredRows[i].Features;
+                var feats = ToDenseArray(in vb, featCount);
 
-				// Если колонка константная — перемешивание ничего не меняет.
-				bool nonConstant = false;
-				for (int i = 1; i < col.Length; i++)
-					{
-					if (col[i] != col[0])
-						{
-						nonConstant = true;
-						break;
-						}
-					}
+                evalSamples.Add(new EvalSample
+                {
+                    Label = scoredRows[i].Label,
+                    Features = feats
+                });
+            }
 
-				if (!nonConstant)
-					{
-					deltaAuc[j] = 0.0;
-					continue;
-					}
+            // 4) PFI по AUC: для каждой фичи перемешиваем столбец и меряем падение AUC.
+            var deltaAuc = new double[featCount];
+            var rng = new Random(42); // фиксированный seed для воспроизводимости
 
-				// Перемешиваем индексы (Fisher–Yates).
-				var idx = Enumerable.Range (0, col.Length).ToArray ();
-				ShuffleInPlace (rng, idx);
+            // Schema для permData: поддерживаем кастомные имена Label/Features.
+            var permSchema = SchemaDefinition.Create(typeof(EvalSample));
+            permSchema[nameof(EvalSample.Label)].ColumnName = labelColumnName;
+            permSchema[nameof(EvalSample.Features)].ColumnName = featuresColumnName;
 
-				// Собираем пермутированные семплы (меняем только j-ю фичу).
-				var permSamples = new List<EvalSample> (evalSamples.Count);
-				for (int i = 0; i < evalSamples.Count; i++)
-					{
-					var src = evalSamples[i];
+            for (int j = 0; j < featCount; j++)
+            {
+                // Собираем столбец j.
+                var col = new float[evalSamples.Count];
+                for (int i = 0; i < evalSamples.Count; i++)
+                    col[i] = evalSamples[i].Features[j];
 
-					// Клонирование обязательно: permutation не должен мутировать исходные данные.
-					var featCopy = (float[]) src.Features.Clone ();
-					featCopy[j] = col[idx[i]];
+                // Константный столбец: permutation не меняет AUC.
+                bool nonConstant = false;
+                for (int i = 1; i < col.Length; i++)
+                {
+                    if (col[i] != col[0])
+                    {
+                        nonConstant = true;
+                        break;
+                    }
+                }
 
-					permSamples.Add (new EvalSample
-						{
-						Label = src.Label,
-						Features = featCopy
-						});
-					}
+                if (!nonConstant)
+                {
+                    deltaAuc[j] = 0.0;
+                    continue;
+                }
 
-				var permData = ml.Data.LoadFromEnumerable (permSamples);
-				var scoredPerm = model.Transform (permData);
+                // Перемешиваем индексы (Fisher–Yates).
+                var idx = Enumerable.Range(0, col.Length).ToArray();
+                ShuffleInPlace(rng, idx);
 
-				var permMetrics = ml.BinaryClassification.Evaluate (
-					scoredPerm,
-					labelColumnName: labelColumnName,
-					scoreColumnName: nameof (BinaryScoredRow.Score));
+                // Собираем пермутированные семплы (меняем только j-ю фичу).
+                var permSamples = new List<EvalSample>(evalSamples.Count);
+                for (int i = 0; i < evalSamples.Count; i++)
+                {
+                    var src = evalSamples[i];
 
-				double aucPerm = permMetrics.AreaUnderRocCurve;
-				deltaAuc[j] = baselineAuc - aucPerm;
-				}
+                    var featCopy = (float[])src.Features.Clone();
+                    featCopy[j] = col[idx[i]];
 
-			// 5) Direction-метрики (mean pos/neg, корреляции).
-			var stats = ComputeFeatureStats (scoredRows, deltaAuc, featureNames);
-			return stats;
-			}
+                    permSamples.Add(new EvalSample
+                    {
+                        Label = src.Label,
+                        Features = featCopy
+                    });
+                }
 
-		/// <summary>
-		/// Direction-метрики:
-		/// - средние по классам;
-		/// - корреляция с Label и Score;
-		/// - support по классам.
-		/// На входе уже есть deltaAuc по каждой фиче.
-		/// </summary>
-		private static List<FeatureStats> ComputeFeatureStats (
-			List<BinaryScoredRow> rows,
-			double[] deltaAuc,
-			string[] featureNames )
-			{
-			int featCount = MlSchema.FeatureCount;
+                var permData = ml.Data.LoadFromEnumerable(permSamples, permSchema);
+                var scoredPerm = model.Transform(permData);
 
-			var sumPos = new double[featCount];
-			var sumNeg = new double[featCount];
-			var cntPos = new int[featCount];
-			var cntNeg = new int[featCount];
+                var permMetrics = ml.BinaryClassification.Evaluate(
+                    scoredPerm,
+                    labelColumnName: labelColumnName,
+                    scoreColumnName: nameof(BinaryScoredRow.Score));
 
-			var sumX = new double[featCount];
-			var sumX2 = new double[featCount];
+                double aucPerm = permMetrics.AreaUnderRocCurve;
+                deltaAuc[j] = baselineAuc - aucPerm;
+            }
 
-			var sumYLabel = new double[featCount];
-			var sumYLabel2 = new double[featCount];
-			var sumXYLabel = new double[featCount];
+            // 5) Direction-метрики.
+            var stats = ComputeFeatureStats(scoredRows, deltaAuc, featureNames, featCount, tag);
+            return stats;
+        }
 
-			var sumYScore = new double[featCount];
-			var sumYScore2 = new double[featCount];
-			var sumXYScore = new double[featCount];
+        private static List<FeatureStats> ComputeFeatureStats(
+            List<BinaryScoredRow> rows,
+            double[] deltaAuc,
+            string[] featureNames,
+            int featCount,
+            string tag)
+        {
+            var sumPos = new double[featCount];
+            var sumNeg = new double[featCount];
+            var cntPos = new int[featCount];
+            var cntNeg = new int[featCount];
 
-			foreach (var r in rows)
-				{
-				double yLabel = r.Label ? 1.0 : 0.0;
-				double yScore = r.Score;
+            var sumX = new double[featCount];
+            var sumX2 = new double[featCount];
 
-				var f = r.Features;
+            var sumYLabel = new double[featCount];
+            var sumYLabel2 = new double[featCount];
+            var sumXYLabel = new double[featCount];
 
-				// Если тут null — это не "плохие данные", а поломанная схема колонок (ошибка пайплайна).
-				if (f == null)
-					{
-					throw new InvalidOperationException (
-						"[pfi-core] Features is null in scored rows. " +
-						"Это означает несоответствие схемы IDataView ожидаемым колонкам (Label/Features). " +
-						"Исправляй построение IDataView/пайплайн модели, а не глуши это здесь.");
-					}
+            var sumYScore = new double[featCount];
+            var sumYScore2 = new double[featCount];
+            var sumXYScore = new double[featCount];
 
-				int len = Math.Min (f.Length, featCount);
+            float[]? scratchDense = null;
 
-				for (int j = 0; j < len; j++)
-					{
-					double x = f[j];
+            foreach (var r in rows)
+            {
+                double yLabel = r.Label ? 1.0 : 0.0;
+                double yScore = r.Score;
 
-					sumX[j] += x;
-					sumX2[j] += x * x;
+                var vb = r.Features;
+                if (vb.Length != featCount)
+                {
+                    throw new InvalidOperationException(
+                        $"[pfi-core:{tag}] Features length mismatch in scored rows: " +
+                        $"vb.Length={vb.Length}, expected={featCount}.");
+                }
 
-					if (r.Label)
-						{
-						sumPos[j] += x;
-						cntPos[j]++;
-						}
-					else
-						{
-						sumNeg[j] += x;
-						cntNeg[j]++;
-						}
+                ReadOnlySpan<float> fSpan;
 
-					sumYLabel[j] += yLabel;
-					sumYLabel2[j] += yLabel * yLabel;
-					sumXYLabel[j] += x * yLabel;
+                if (vb.IsDense)
+                {
+                    fSpan = vb.GetValues();
+                    if (fSpan.Length != featCount)
+                    {
+                        throw new InvalidOperationException(
+                            $"[pfi-core:{tag}] Dense Features values length mismatch: valuesLen={fSpan.Length}, expected={featCount}.");
+                    }
+                }
+                else
+                {
+                    scratchDense ??= new float[featCount];
+                    Array.Clear(scratchDense, 0, featCount);
 
-					sumYScore[j] += yScore;
-					sumYScore2[j] += yScore * yScore;
-					sumXYScore[j] += x * yScore;
-					}
-				}
+                    var vals = vb.GetValues();
+                    var idx = vb.GetIndices();
 
-			var res = new List<FeatureStats> (featCount);
+                    for (int k = 0; k < vals.Length; k++)
+                    {
+                        int j = idx[k];
+                        if ((uint)j >= (uint)featCount)
+                            throw new InvalidOperationException($"[pfi-core:{tag}] Sparse index out of range: j={j}, featCount={featCount}.");
 
-			for (int j = 0; j < featCount; j++)
-				{
-				int pos = cntPos[j];
-				int neg = cntNeg[j];
-				int total = pos + neg;
+                        scratchDense[j] = vals[k];
+                    }
 
-				double meanPos = pos > 0 ? sumPos[j] / pos : double.NaN;
-				double meanNeg = neg > 0 ? sumNeg[j] / neg : double.NaN;
+                    fSpan = scratchDense;
+                }
 
-				double corrLabel = 0.0;
-				double corrScore = 0.0;
+                for (int j = 0; j < featCount; j++)
+                {
+                    double x = fSpan[j];
 
-				if (total > 1)
-					{
-					double meanX = sumX[j] / total;
+                    sumX[j] += x;
+                    sumX2[j] += x * x;
 
-					// корреляция с Label ∈ {0,1}
-					double meanYLabel = sumYLabel[j] / total;
-					double covXYLabel = (sumXYLabel[j] / total) - meanX * meanYLabel;
-					double varX = (sumX2[j] / total) - meanX * meanX;
-					double varYLabel = (sumYLabel2[j] / total) - meanYLabel * meanYLabel;
+                    if (r.Label)
+                    {
+                        sumPos[j] += x;
+                        cntPos[j]++;
+                    }
+                    else
+                    {
+                        sumNeg[j] += x;
+                        cntNeg[j]++;
+                    }
 
-					if (varX > 0 && varYLabel > 0)
-						corrLabel = covXYLabel / Math.Sqrt (varX * varYLabel);
+                    sumYLabel[j] += yLabel;
+                    sumYLabel2[j] += yLabel * yLabel;
+                    sumXYLabel[j] += x * yLabel;
 
-					// корреляция со Score
-					double meanYScore = sumYScore[j] / total;
-					double covXYScore = (sumXYScore[j] / total) - meanX * meanYScore;
-					double varYScore = (sumYScore2[j] / total) - meanYScore * meanYScore;
+                    sumYScore[j] += yScore;
+                    sumYScore2[j] += yScore * yScore;
+                    sumXYScore[j] += x * yScore;
+                }
+            }
 
-					if (varX > 0 && varYScore > 0)
-						corrScore = covXYScore / Math.Sqrt (varX * varYScore);
-					}
+            var res = new List<FeatureStats>(featCount);
 
-				double dAuc = (j < deltaAuc.Length) ? deltaAuc[j] : 0.0;
-				double importance = Math.Abs (dAuc);
+            for (int j = 0; j < featCount; j++)
+            {
+                int pos = cntPos[j];
+                int neg = cntNeg[j];
+                int total = pos + neg;
 
-				res.Add (new FeatureStats
-					{
-					Index = j,
-					Name = j < featureNames.Length ? featureNames[j] : $"feat_{j}",
-					ImportanceAuc = importance,
-					DeltaAuc = dAuc,
-					MeanPos = meanPos,
-					MeanNeg = meanNeg,
-					CorrLabel = corrLabel,
-					CorrScore = corrScore,
-					CountPos = pos,
-					CountNeg = neg
-					});
-				}
+                double meanPos = pos > 0 ? sumPos[j] / pos : double.NaN;
+                double meanNeg = neg > 0 ? sumNeg[j] / neg : double.NaN;
 
-			// сортируем по важности
-			res.Sort (( a, b ) => b.ImportanceAuc.CompareTo (a.ImportanceAuc));
-			return res;
-			}
+                double corrLabel = 0.0;
+                double corrScore = 0.0;
 
-		/// <summary>
-		/// Усечение имён фич, чтобы таблицы не разъезжались.
-		/// Вынесено сюда, чтобы переиспользовать из принтера/summary.
-		/// </summary>
-		internal static string TruncateName ( string name, int maxLen )
-			{
-			if (string.IsNullOrEmpty (name) || name.Length <= maxLen)
-				return name;
+                if (total > 1)
+                {
+                    double meanX = sumX[j] / total;
 
-			return name.Substring (0, maxLen - 1) + "…";
-			}
+                    double meanYLabel = sumYLabel[j] / total;
+                    double covXYLabel = (sumXYLabel[j] / total) - meanX * meanYLabel;
+                    double varX = (sumX2[j] / total) - meanX * meanX;
+                    double varYLabel = (sumYLabel2[j] / total) - meanYLabel * meanYLabel;
 
-		/// <summary>
-		/// Fisher–Yates shuffle для массива индексов.
-		/// Используется при permute столбца в PFI.
-		/// </summary>
-		internal static void ShuffleInPlace ( Random rng, int[] idx )
-			{
-			for (int i = idx.Length - 1; i > 0; i--)
-				{
-				int j = rng.Next (i + 1);
-				(idx[i], idx[j]) = (idx[j], idx[i]);
-				}
-			}
-		}
-	}
+                    if (varX > 0 && varYLabel > 0)
+                        corrLabel = covXYLabel / Math.Sqrt(varX * varYLabel);
+
+                    double meanYScore = sumYScore[j] / total;
+                    double covXYScore = (sumXYScore[j] / total) - meanX * meanYScore;
+                    double varYScore = (sumYScore2[j] / total) - meanYScore * meanYScore;
+
+                    if (varX > 0 && varYScore > 0)
+                        corrScore = covXYScore / Math.Sqrt(varX * varYScore);
+                }
+
+                double dAuc = (j < deltaAuc.Length) ? deltaAuc[j] : 0.0;
+
+                res.Add(new FeatureStats
+                {
+                    Index = j,
+                    Name = j < featureNames.Length ? featureNames[j] : $"feat_{j}",
+                    ImportanceAuc = Math.Abs(dAuc),
+                    DeltaAuc = dAuc,
+                    MeanPos = meanPos,
+                    MeanNeg = meanNeg,
+                    CorrLabel = corrLabel,
+                    CorrScore = corrScore,
+                    CountPos = pos,
+                    CountNeg = neg
+                });
+            }
+
+            res.Sort((a, b) => b.ImportanceAuc.CompareTo(a.ImportanceAuc));
+            return res;
+        }
+
+        private static float[] ToDenseArray(in VBuffer<float> vb, int expectedLen)
+        {
+            if (vb.Length != expectedLen)
+            {
+                throw new InvalidOperationException(
+                    $"[pfi-core] Features length mismatch while densifying: vb.Length={vb.Length}, expected={expectedLen}.");
+            }
+
+            var dst = new float[expectedLen];
+
+            if (vb.IsDense)
+            {
+                vb.GetValues().CopyTo(dst);
+                return dst;
+            }
+
+            var vals = vb.GetValues();
+            var idx = vb.GetIndices();
+
+            for (int k = 0; k < vals.Length; k++)
+            {
+                int j = idx[k];
+                if ((uint)j >= (uint)expectedLen)
+                    throw new InvalidOperationException($"[pfi-core] Sparse index out of range: j={j}, expectedLen={expectedLen}.");
+
+                dst[j] = vals[k];
+            }
+
+            return dst;
+        }
+
+        internal static string TruncateName(string name, int maxLen)
+        {
+            if (string.IsNullOrEmpty(name) || name.Length <= maxLen)
+                return name;
+
+            return name.Substring(0, maxLen - 1) + "…";
+        }
+
+        internal static void ShuffleInPlace(Random rng, int[] idx)
+        {
+            for (int i = idx.Length - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (idx[i], idx[j]) = (idx[j], idx[i]);
+            }
+        }
+    }
+}

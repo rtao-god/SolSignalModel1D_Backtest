@@ -69,12 +69,7 @@ namespace SolSignalModel1D_Backtest
 			EnsureSortedAndStrictUnique1m (sol1mWeekdays, tag: "weekdays");
 			EnsureSortedAndStrictUnique1m (sol1mWeekends, tag: "weekends");
 
-			sol1m = MergeSortedStrictUnique1m (sol1mWeekdays, sol1mWeekends);
-
-			if (sol1m.Count == 0)
-				throw new InvalidOperationException ($"[init] Нет 1m свечей {TradingSymbols.SolUsdtDisplay} в cache/candles.");
-
-			// ЕДИНСТВЕННАЯ нормализация порядка 1m: дальше строго без OrderBy по 1m.
+			// нормализация порядка 1m: дальше строго без OrderBy по 1m.
 			sol1m = MergeSortedStrictUnique1m (sol1mWeekdays, sol1mWeekends);
 
 			if (sol1m.Count == 0)
@@ -208,7 +203,7 @@ namespace SolSignalModel1D_Backtest
 						next = b[j++];
 					else
 						{
-						// Пересечение weekday/weekend по одному и тому же времени — это именно та проблема, которую ловим.
+						// Пересечение weekday/weekend по одному и тому же времени
 						throw new InvalidOperationException (
 							$"[init][1m] overlap between weekdays/weekends at OpenTimeUtc={ta:O}. " +
 							"Удали пересечения: weekend-файл не должен содержать минуты, которые уже есть в основном 1m.");

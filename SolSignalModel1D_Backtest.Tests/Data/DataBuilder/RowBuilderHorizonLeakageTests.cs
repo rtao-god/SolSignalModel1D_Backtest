@@ -166,12 +166,14 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var entryDay = entryUtc.ToCausalDateUtc ();
 			foreach (var key in fngB.Keys.ToList ())
 				{
-				if (key.ToCausalDateUtc () > entryDay)
-					{
-					fngB[key] = fngB[key] + 100;
-					dxyB[key] = dxyB[key] + 50.0;
-					}
-				}
+                if (key.ToCausalDateUtc() > entryDay)
+                {
+                    // Контракт FNG: 0..100.
+                    fngB[key] = 99.0;
+
+                    dxyB[key] = dxyB[key] + 50.0;
+                }
+            }
 
 			var buildB = RowBuilder.BuildDailyRows (
 				solWinTrain: solAll6h_B,

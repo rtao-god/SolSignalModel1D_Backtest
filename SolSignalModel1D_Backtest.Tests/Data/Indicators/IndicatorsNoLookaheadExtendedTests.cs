@@ -164,43 +164,38 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			Assert.Equal (vBefore, vAfter, 10);
 			}
 
-		// ======================
-		// RSI slope
-		// ======================
+        // ======================
+        // RSI slope
+        // ======================
 
-		[Fact]
-		public void GetRsiSlope6h_UsesOnlyPastRsiValues ()
-			{
-			// Наклон RSI определяется двумя точками: openUtc и openUtc-6h*steps.
-			// Любые значения RSI в будущем не должны участвовать.
-			var t0 = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-			var t1 = t0.AddDays (1);
-			var t2 = t0.AddDays (2);
+        [Fact]
+        public void GetRsiSlope6h_UsesOnlyPastRsiValues()
+        {
+            var tPast = new DateTime(2024, 1, 1, 18, 0, 0, DateTimeKind.Utc);
+            var tNow = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+            var tFuture = new DateTime(2024, 1, 2, 6, 0, 0, DateTimeKind.Utc);
 
-			var rsiMap = new Dictionary<DateTime, double>
-				{
-					{ t0, 40.0 },     // прошлое
-					{ t1, 60.0 },     // целевая точка
-					{ t2, 1_000.0 }   // будущее
-				};
+            var rsiMap = new Dictionary<DateTime, double>
+        {
+            { tPast, 40.0 },
+            { tNow, 60.0 },
+            { tFuture, 1_000.0 }
+        };
 
-			double slopeBefore = CoreIndicators.GetRsiSlope6h (rsiMap, t1, 1);
+            double slopeBefore = CoreIndicators.GetRsiSlope6h(rsiMap, tNow, steps: 1);
+            Assert.InRange(slopeBefore, 19.9, 20.1);
 
-			Assert.InRange (slopeBefore, 19.9, 20.1);
+            rsiMap[tFuture] = -10_000.0;
 
-			// Мутация future-значения не должна менять slope на t1.
-			rsiMap[t2] = -10_000.0;
+            double slopeAfter = CoreIndicators.GetRsiSlope6h(rsiMap, tNow, steps: 1);
+            Assert.Equal(slopeBefore, slopeAfter, 10);
+        }
 
-			double slopeAfter = CoreIndicators.GetRsiSlope6h (rsiMap, t1, 1);
+        // ======================
+        // DXY 30d change
+        // ======================
 
-			Assert.Equal (slopeBefore, slopeAfter, 10);
-			}
-
-		// ======================
-		// DXY 30d change
-		// ======================
-
-		[Fact]
+        [Fact]
 		public void GetDxyChange30_DoesNotDependOnFutureSamples ()
 			{
 			// Для расчёта change30 нужны точки "now" и "past(=now-30d)".
