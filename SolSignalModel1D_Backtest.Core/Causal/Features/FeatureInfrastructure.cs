@@ -1,69 +1,69 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Causal.Features
-	{
-	public interface IFeatureBuilder
-		{
-		void Build ( FeatureContext ctx );
-		}
+﻿using SolSignalModel1D_Backtest.Core.Time;
 
-	public sealed class FeatureContext
-		{
-		public BacktestRecord Row { get; }
-		public List<double> Features { get; }
+namespace SolSignalModel1D_Backtest.Core.Causal.Features
+{
+    public interface IFeatureBuilder<in TRow>
+    {
+        void Build(FeatureContext<TRow> ctx);
+    }
 
-		public FeatureContext ( BacktestRecord row )
-			{
-			Row = row ?? throw new ArgumentNullException (nameof (row));
-			Features = new List<double> (64);
-			}
+    public sealed class FeatureContext<TRow>
+    {
+        public TRow Row { get; }
+        public CausalStamp Stamp { get; }
+        public List<double> Features { get; }
 
-		public void Add ( double v )
-			{
-			if (double.IsNaN (v) || double.IsInfinity (v))
-				throw new InvalidOperationException (
-					$"[features] non-finite value for {Row.DateUtc:O}: {v}");
+        public FeatureContext(TRow row, CausalStamp stamp, int capacity = 64)
+        {
+            Row = row ?? throw new ArgumentNullException(nameof(row));
+            Stamp = stamp;
+            Features = new List<double>(capacity);
+        }
 
-			Features.Add (v);
-			}
+        public void Add(double v)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v))
+                throw new InvalidOperationException($"[features] non-finite value at entry={Stamp.EntryUtc}: {v}");
 
-		public void Add ( double? v )
-			{
-			if (v is null)
-				throw new InvalidOperationException (
-					$"[features] missing value for {Row.DateUtc:O}");
+            Features.Add(v);
+        }
 
-			Add (v.Value);
-			}
+        public void Add(double? v, string name)
+        {
+            if (v is null)
+                throw new InvalidOperationException($"[features] missing '{name}' at entry={Stamp.EntryUtc}");
 
-		public void Add01 ( bool v )
-			{
-			Add (v ? 1.0 : 0.0);
-			}
+            Add(v.Value);
+        }
 
-		public void Add01 ( bool? v )
-			{
-			if (v is null)
-				throw new InvalidOperationException (
-					$"[features] missing bool for {Row.DateUtc:O}");
+        public void Add01(bool v) => Add(v ? 1.0 : 0.0);
 
-			Add01 (v.Value);
-			}
-		}
+        public void Add01(bool? v, string name)
+        {
+            if (v is null)
+                throw new InvalidOperationException($"[features] missing '{name}' at entry={Stamp.EntryUtc}");
 
-	public sealed class FeaturePipeline
-		{
-		private readonly IFeatureBuilder[] _builders;
+            Add01(v.Value);
+        }
+    }
 
-		public FeaturePipeline ( params IFeatureBuilder[] builders )
-			{
-			_builders = builders ?? Array.Empty<IFeatureBuilder> ();
-			}
+    public sealed class FeaturePipeline<TRow>
+    {
+        private readonly IFeatureBuilder<TRow>[] _builders;
 
-		public void Run ( FeatureContext ctx )
-			{
-			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
+        public FeaturePipeline(params IFeatureBuilder<TRow>[] builders)
+        {
+            _builders = builders ?? Array.Empty<IFeatureBuilder<TRow>>();
+        }
 
-			foreach (var b in _builders)
-				b.Build (ctx);
-			}
-		}
-	}
+        public List<double> Run(TRow row, CausalStamp stamp)
+        {
+            var ctx = new FeatureContext<TRow>(row, stamp);
+
+            for (int i = 0; i < _builders.Length; i++)
+                _builders[i].Build(ctx);
+
+            return ctx.Features;
+        }
+    }
+}

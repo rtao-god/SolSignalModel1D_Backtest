@@ -1,5 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	{
@@ -8,7 +7,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 	/// </summary>
 	public static class BacktestModelStatsSnapshotBuilder
 		{
-		private sealed class SlThresholdDay
+        private static DateTime EntryUtc(BacktestRecord r) => r.Causal.DateUtc;
+        private sealed class SlThresholdDay
 			{
 			public bool IsSlDay { get; set; }
 			public double Prob { get; set; }

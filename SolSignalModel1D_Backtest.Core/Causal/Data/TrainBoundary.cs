@@ -1,152 +1,58 @@
-﻿using System.Linq;
-using System.Globalization;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
-	{
-	/// <summary>
-	/// Единый "контракт" разбиения train/OOS.
-	///
-	/// ВАЖНО: правило намеренно основано на baseline-exit, а не на entry-дате.
-	/// Причина: дневной таргет/оценка завязаны на forward-окно до baseline-exit.
-	/// Любой код, который сравнивает entry-даты руками (<=/>), считается архитектурным багом:
-	/// это создаёт несогласованные сегменты и потенциальный boundary leakage.
-	/// </summary>
-	public sealed class TrainBoundary
-		{
-		private readonly DateTime _trainUntilUtc;
-		private readonly TimeZoneInfo _nyTz;
+{
+    public sealed class TrainBoundary
+    {
+        private readonly BaselineExitUtc _trainUntil;
 
-		/// <summary>
-		/// Для логов отдаём строку, чтобы в глубине проекта не было соблазна сравнивать DateTime руками.
-		/// </summary>
-		public string TrainUntilIsoDate => _trainUntilUtc.ToString ("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        public TrainBoundary(BaselineExitUtc trainUntil)
+        {
+            _trainUntil = trainUntil;
+        }
 
-		public TrainBoundary ( DateTime trainUntilUtc, TimeZoneInfo nyTz )
-			{
-			if (trainUntilUtc == default)
-				throw new ArgumentException ("trainUntilUtc must be initialized (non-default).", nameof (trainUntilUtc));
+        public TrainOosSplitStrict<T> SplitStrict<T>(IReadOnlyList<T> items, string tag)
+            where T : IHasCausalStamp
+        {
+            if (items == null) throw new ArgumentNullException(nameof(items));
+            if (string.IsNullOrWhiteSpace(tag))
+                throw new ArgumentException("tag must be non-empty.", nameof(tag));
 
-			if (trainUntilUtc.Kind != DateTimeKind.Utc)
-				throw new ArgumentException ("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof (trainUntilUtc));
+            var train = new List<T>(items.Count);
+            var oos = new List<T>();
 
-			_nyTz = nyTz ?? throw new ArgumentNullException (nameof (nyTz));
-			_trainUntilUtc = trainUntilUtc;
-			}
+            for (int i = 0; i < items.Count; i++)
+            {
+                var it = items[i];
+                var exitUtc = it.Stamp.BaselineExitUtc;
 
-		/// <summary>
-		/// Пытается получить baseline-exit. Для выходных возвращает false (baseline-окна нет по контракту).
-		/// Любые другие ошибки Windowing считаются фатальными: это проблема данных/окна.
-		/// </summary>
-		public bool TryGetBaselineExitUtc ( DateTime entryUtc, out DateTime exitUtc )
-			{
-			if (entryUtc.Kind != DateTimeKind.Utc)
-				throw new ArgumentException ("entryUtc must be UTC (DateTimeKind.Utc).", nameof (entryUtc));
+                if (exitUtc.Value <= _trainUntil.Value)
+                    train.Add(it);
+                else
+                    oos.Add(it);
+            }
 
-			var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, _nyTz);
+            return new TrainOosSplitStrict<T>(new TrainOnly<T>(train, _trainUntil, tag), oos);
+        }
+    }
 
-			if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-				{
-				exitUtc = default;
-				return false;
-				}
+    public sealed class TrainOnly<T>
+    {
+        public IReadOnlyList<T> Items { get; }
+        public BaselineExitUtc TrainUntil { get; }
+        public string Tag { get; }
 
-			exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, _nyTz);
-			return true;
-			}
+        public int Count => Items.Count;
 
-		/// <summary>
-		/// Entry относится к train, если baseline-exit <= TrainUntilUtc.
-		/// </summary>
-		public bool IsTrainEntry ( DateTime entryUtc )
-			{
-			if (!TryGetBaselineExitUtc (entryUtc, out var exitUtc))
-				return false;
+        public TrainOnly(IReadOnlyList<T> items, BaselineExitUtc trainUntil, string tag)
+        {
+            Items = items ?? throw new ArgumentNullException(nameof(items));
+            TrainUntil = trainUntil;
+            Tag = tag;
+        }
+    }
 
-			return exitUtc <= _trainUntilUtc;
-			}
-
-		/// <summary>
-		/// Entry относится к OOS, если baseline-exit > TrainUntilUtc.
-		/// </summary>
-		public bool IsOosEntry ( DateTime entryUtc )
-			{
-			if (!TryGetBaselineExitUtc (entryUtc, out var exitUtc))
-				return false;
-
-			return exitUtc > _trainUntilUtc;
-			}
-
-		/// <summary>
-		/// Единая точка разбиения любых сущностей по entryUtc (BacktestRecord.ToCausalDateUtc(), Record.DateUtc и т.п.).
-		/// Excluded — это дни, для которых baseline-exit не определён (обычно weekend).
-		/// Их важно не "молча" относить ни к train, ни к OOS.
-		/// </summary>
-		public TrainOosSplit<T> Split<T> ( IReadOnlyList<T> items, Func<T, DateTime> entryUtcSelector )
-			{
-			if (items == null) throw new ArgumentNullException (nameof (items));
-			if (entryUtcSelector == null) throw new ArgumentNullException (nameof (entryUtcSelector));
-
-			var train = new List<T> (items.Count);
-			var oos = new List<T> ();
-			var excluded = new List<T> ();
-
-			for (int i = 0; i < items.Count; i++)
-				{
-				var item = items[i];
-				var entryUtc = entryUtcSelector (item);
-
-				if (!TryGetBaselineExitUtc (entryUtc, out var exitUtc))
-					{
-					excluded.Add (item);
-					continue;
-					}
-
-				if (exitUtc <= _trainUntilUtc)
-					train.Add (item);
-				else
-					oos.Add (item);
-				}
-
-			return new TrainOosSplit<T> (train, oos, excluded);
-			}
-
-		public TrainOosSplitStrict<T> SplitStrict<T> (
-			IReadOnlyList<T> items,
-			Func<T, DateTime> entryUtcSelector,
-			string tag )
-			{
-			if (items == null) throw new ArgumentNullException (nameof (items));
-			if (entryUtcSelector == null) throw new ArgumentNullException (nameof (entryUtcSelector));
-			if (string.IsNullOrWhiteSpace (tag))
-				throw new ArgumentException ("tag must be non-empty.", nameof (tag));
-
-			var split = Split (items, entryUtcSelector);
-
-			if (split.Excluded.Count > 0)
-				{
-				var sample = split.Excluded
-					.Take (Math.Min (10, split.Excluded.Count))
-					.Select (x => entryUtcSelector (x).ToString ("O", CultureInfo.InvariantCulture));
-
-				throw new InvalidOperationException (
-					$"[train-boundary:{tag}] Found excluded items (baseline-exit undefined). " +
-					$"count={split.Excluded.Count}. sample=[{string.Join (", ", sample)}].");
-				}
-
-			var trainOnly = new TrainOnly<T> (split.Train, _trainUntilUtc, tag);
-			return new TrainOosSplitStrict<T> (trainOnly, split.Oos);
-			}
-		}
-
-	public sealed class TrainOosSplit<T> ( List<T> train, List<T> oos, List<T> excluded )
-		{
-		/// <summary>
-		/// Списки отдаются как IReadOnlyList, но без AsReadOnly(),
-		/// чтобы вызывающий код мог избежать лишних копий (например, через "as List&lt;T&gt;").
-		/// Инвариант: Split() возвращает свежие списки, которые не шарятся между компонентами.
-		/// </summary>
-		public IReadOnlyList<T> Train { get; } = train ?? throw new ArgumentNullException (nameof (train));
-		public IReadOnlyList<T> Oos { get; } = oos ?? throw new ArgumentNullException (nameof (oos));
-		public IReadOnlyList<T> Excluded { get; } = excluded ?? throw new ArgumentNullException (nameof (excluded));
-		}
-	}
+    public readonly record struct TrainOosSplitStrict<T>(TrainOnly<T> Train, IReadOnlyList<T> Oos);
+}

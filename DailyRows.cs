@@ -91,12 +91,12 @@ namespace SolSignalModel1D_Backtest
 			Console.WriteLine ($"[rows] total built = {rows.Count}");
 			DumpNyHourHistogram (rows);
 
-			var mornings = rows
-				.Where (r => r.Causal.IsMorning)
-				.OrderBy (r => r.Causal.DateUtc)
-				.ToList ();
+            var mornings = rows
+                .Where(r => r.Causal.IsMorning)
+                .OrderBy(r => r.Causal.EntryUtc)
+                .ToList();
 
-			Console.WriteLine ($"[rows] mornings total (all history) = {mornings.Count}");
+            Console.WriteLine ($"[rows] mornings total (all history) = {mornings.Count}");
 
 			var lastSolTime = solWinTrain.Max (c => c.OpenTimeUtc);
 			Console.WriteLine ($"[rows] last SOL 6h = {lastSolTime:O}");
@@ -120,9 +120,9 @@ namespace SolSignalModel1D_Backtest
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-				var entryUtc = rows[i].Causal.DateUtc;
+                var entryUtc = rows[i].Causal.EntryUtc;
 
-				if (entryUtc.Kind != DateTimeKind.Utc)
+                if (entryUtc.Kind != DateTimeKind.Utc)
 					throw new InvalidOperationException ($"[rows] Causal.DateUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
 
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, NyTz);

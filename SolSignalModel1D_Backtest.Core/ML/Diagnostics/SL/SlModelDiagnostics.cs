@@ -55,7 +55,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL
             else
             {
                 var trainer = new SlFirstTrainer();
-                model = trainer.Train(samples, asOf: maxDate);
+                model = trainer.Train(samples, asOfUtc: maxDate);
             }
 
             var ml = new MLContext(seed: 42);

@@ -1,4 +1,8 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -6,61 +10,71 @@ using SolSignalModel1D_Backtest.Core.Utils.Time;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
-	{
-	public partial class Program
-		{
-		/// <summary>
-		/// Строит записи прогнозов дневной модели по утренним точкам.
-		/// Здесь инкапсулируется выбор PredictionEngine и вычисление forward-метрик.
-		/// </summary>
-		private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsync (
-			List<LabeledCausalRow> allRows,
-			List<LabeledCausalRow> mornings,
-			List<Candle6h> solAll6h
-		)
-			{
-			// Локальный хелпер для логирования диапазона дат и day-of-week.
-			static void DumpRange<T> ( string label, IReadOnlyList<T> items, Func<T, DateTime> selector )
-				{
-				if (items == null || items.Count == 0)
-					{
-					Console.WriteLine ($"[{label}] empty");
-					return;
-					}
+{
+    public partial class Program
+    {
+        /// <summary>
+        /// Строит записи прогнозов дневной модели по утренним точкам.
+        /// Здесь инкапсулируется выбор PredictionEngine и сбор forward-метрик.
+        /// </summary>
+        private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsync(
+            List<LabeledCausalRow> allRows,
+            List<LabeledCausalRow> mornings,
+            List<Candle6h> solAll6h
+        )
+        {
+            // Локальный хелпер: печатает диапазон дат и распределение по day-of-week.
+            // selector обязан возвращать "дневной ключ" (DayKeyUtc) или другой стабильный идентификатор.
+            static void DumpRange<T>(string label, IReadOnlyList<T> items, Func<T, DateTime> selector)
+            {
+                // Пустой список логируем отдельно.
+                if (items == null || items.Count == 0)
+                {
+                    Console.WriteLine($"[{label}] empty");
+                    return;
+                }
 
-				var dates = items.Select (selector).ToList ();
-				var min = dates.Min ();
-				var max = dates.Max ();
+                // Собираем значения, чтобы один раз посчитать min/max и гистограмму.
+                var dates = items.Select(selector).ToList();
 
-				Console.WriteLine (
-					$"[{label}] range = [{min:yyyy-MM-dd} ({min.DayOfWeek}); {max:yyyy-MM-dd} ({max.DayOfWeek})], count={items.Count}");
+                var min = dates.Min();
+                var max = dates.Max();
 
-				var dowHist = dates
-					.GroupBy (d => d.DayOfWeek)
-					.OrderBy (g => g.Key)
-					.Select (g => $"{g.Key}={g.Count ()}")
-					.ToArray ();
+                // Даты здесь ожидаются как day-key, чтобы DayOfWeek был интерпретируем.
+                Console.WriteLine(
+                    $"[{label}] range = [{min:yyyy-MM-dd} ({min.DayOfWeek}); {max:yyyy-MM-dd} ({max.DayOfWeek})], count={items.Count}");
 
-				Console.WriteLine ($"[{label}] DayOfWeek hist: {string.Join (", ", dowHist)}");
-				}
+                // Простая гистограмма по дням недели — полезна, чтобы увидеть пропуски/перекосы.
+                var dowHist = dates
+                    .GroupBy(d => d.DayOfWeek)
+                    .OrderBy(g => g.Key)
+                    .Select(g => $"{g.Key}={g.Count()}")
+                    .ToArray();
 
-			// Логируем, какие вообще дни есть в утренних точках.
-			DumpRange ("mornings", mornings, r => CausalTimeKey.DayKeyUtc (r));
+                Console.WriteLine($"[{label}] DayOfWeek hist: {string.Join(", ", dowHist)}");
+            }
 
-			// PredictionEngine создаётся один раз для всей дневной выборки.
-			var engine = CreatePredictionEngineOrFallback (allRows);
+            // Логируем, какие дни реально присутствуют в утренних точках.
+            // Берём DayKeyUtc, а не EntryUtc: это "идентичность дня", а не timestamp.
+            DumpRange("mornings", mornings, r => CausalTimeKey.DayKeyUtc(r));
 
-			// Загрузка forward-метрик по утренним точкам на основе 6h-свечей.
-			var records = await LoadPredictionRecordsAsync (mornings, solAll6h, engine);
+            // PredictionEngine создаётся один раз на весь проход, чтобы не пересоздавать модель на каждый день.
+            var engine = CreatePredictionEngineOrFallback(allRows);
 
-			// Логируем, какие дни в итоге попали в records.
-			DumpRange ("records", records, r => r.DateUtc);
+            // Строим BacktestRecord по утренним точкам:
+            // - causal прогнозы,
+            // - forward-метрики (на основе solAll6h и внутренней логики загрузчика).
+            var records = await LoadPredictionRecordsAsync(mornings, solAll6h, engine);
 
-			DumpDailyPredHistograms (records, _trainUntilUtc);
+            // Логируем результат по day-key (стабильное сопоставление "дней").
+            DumpRange("records", records, r => r.DayKeyUtc);
 
-			Console.WriteLine ($"[records] built = {records.Count}");
+            // Диагностика: распределение предиктов на train/oos (использует внутренние правила разбиения).
+            DumpDailyPredHistograms(records, _trainUntilUtc);
 
-			return records;
-			}
-		}
-	}
+            Console.WriteLine($"[records] built = {records.Count}");
+
+            return records;
+        }
+    }
+}

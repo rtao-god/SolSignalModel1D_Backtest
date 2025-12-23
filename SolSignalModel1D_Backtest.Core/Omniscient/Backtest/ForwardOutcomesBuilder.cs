@@ -1,199 +1,263 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
-	{
-	/// <summary>
-	/// Строит omniscient BacktestRecord из:
-	/// - causal прогнозов,
-	/// - truth (LabeledCausalRow),
-	/// - полного ряда 1m-свечей (forward-факты).
-	///
-	/// Инварианты:
-	/// - allMinutes строго отсортирован по OpenTimeUtc;
-	/// - все свечи валидны (UTC-время, finite-значения, корректный OHLC);
-	/// - отрицательные ходы (maxHigh < entry или minLow > entry) считаются ошибкой данных.
-	/// </summary>
-	public static class ForwardOutcomesBuilder
-		{
-		public static IReadOnlyList<BacktestRecord> Build (
-			IReadOnlyList<CausalPredictionRecord> causalRecords,
-			IReadOnlyList<LabeledCausalRow> truthRows,
-			IReadOnlyList<Candle1m> allMinutes )
-			{
-			if (causalRecords == null) throw new ArgumentNullException (nameof (causalRecords));
-			if (truthRows == null) throw new ArgumentNullException (nameof (truthRows));
-			if (allMinutes == null) throw new ArgumentNullException (nameof (allMinutes));
+{
+    /// <summary>
+    /// Строит omniscient BacktestRecord из:
+    /// - каузальных прогнозов (CausalPredictionRecord),
+    /// - truth (LabeledCausalRow),
+    /// - полного ряда 1m-свечей (forward-факты).
+    ///
+    /// Контракт времени:
+    /// - EntryUtc: момент старта окна (утро/вход) — используется для нарезки минут и Windowing.ComputeBaselineExitUtc.
+    /// - DayKeyUtc: ключ дня (00:00 UTC) — используется для "идентичности дня" и сопоставления truth↔causal.
+    ///
+    /// Инварианты данных:
+    /// - allMinutes строго отсортирован по OpenTimeUtc (UTC) и без дублей;
+    /// - OHLC валидны (finite, > 0, High>=Low, High покрывает Open/Close, Low покрывает Open/Close).
+    /// </summary>
+    public static class ForwardOutcomesBuilder
+    {
+        public static IReadOnlyList<BacktestRecord> Build(
+            IReadOnlyList<CausalPredictionRecord> causalRecords,
+            IReadOnlyList<LabeledCausalRow> truthRows,
+            IReadOnlyList<Candle1m> allMinutes)
+        {
+            // Базовая валидация входов.
+            if (causalRecords == null) throw new ArgumentNullException(nameof(causalRecords));
+            if (truthRows == null) throw new ArgumentNullException(nameof(truthRows));
+            if (allMinutes == null) throw new ArgumentNullException(nameof(allMinutes));
 
-			if (causalRecords.Count == 0)
-				return Array.Empty<BacktestRecord> ();
+            // Пустой набор прогнозов -> пустой результат, без ошибок.
+            if (causalRecords.Count == 0)
+                return Array.Empty<BacktestRecord>();
 
-			if (allMinutes.Count == 0)
-				throw new InvalidOperationException ("[forward] 1m-ряд пуст: невозможно посчитать forward-исходы.");
+            // Минуты обязательны: без них нельзя получить forward-исходы.
+            if (allMinutes.Count == 0)
+                throw new InvalidOperationException("[forward] 1m-ряд пуст: невозможно посчитать forward-исходы.");
 
-			SeriesGuards.EnsureStrictlyAscendingUtc (allMinutes, m => m.OpenTimeUtc, "ForwardOutcomesBuilder.allMinutes");
+            // Глобальная гарантия монотонности минут.
+            SeriesGuards.EnsureStrictlyAscendingUtc(allMinutes, m => m.OpenTimeUtc, "ForwardOutcomesBuilder.allMinutes");
 
-			var truthByDate = new Dictionary<DateTime, LabeledCausalRow> (truthRows.Count);
-			for (int i = 0; i < truthRows.Count; i++)
-				{
-				var t = truthRows[i];
-				if (!truthByDate.TryAdd (t.DateUtc, t))
-					throw new InvalidOperationException ($"[forward] duplicate truth row for date {t.DateUtc:O}.");
-				}
+            // Индексируем truth по DayKeyUtc, чтобы сопоставление было устойчивым к любым "timestamp-деталям".
+            // Дополнительно ниже проверяем, что EntryUtc совпал 1:1 (если нет — это рассинхрон пайплайна).
+            var truthByDayKey = new Dictionary<DateTime, LabeledCausalRow>(truthRows.Count);
+            for (int i = 0; i < truthRows.Count; i++)
+            {
+                var t = truthRows[i];
 
-			// Сортировка каузальных записей по DateUtc.
-			var orderedRecords = causalRecords
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+                // Ключ дня всегда должен быть UTC 00:00.
+                var dayKeyUtc = t.DayKeyUtc;
+                if (dayKeyUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[forward] truth.DayKeyUtc must be UTC: {dayKeyUtc:O}.");
 
-			var result = new List<BacktestRecord> (orderedRecords.Count);
+                // Дубликаты по дню означают повреждение/рассинхрон входных данных.
+                if (!truthByDayKey.TryAdd(dayKeyUtc, t))
+                    throw new InvalidOperationException($"[forward] duplicate truth row for dayKey {dayKeyUtc:O}.");
+            }
 
-			// Скользящий индекс по allMinutes.
-			int minuteIndex = 0;
+            // Стабильный порядок обработки дней: по EntryUtc (реальный момент входа).
+            var orderedRecords = causalRecords
+                .OrderBy(r => r.EntryUtc)
+                .ToList();
 
-			foreach (var causal in orderedRecords)
-				{
-				var dayStart = causal.DateUtc;
+            var result = new List<BacktestRecord>(orderedRecords.Count);
 
-				if (!truthByDate.TryGetValue (dayStart, out var truth))
-					throw new InvalidOperationException ($"[forward] No truth row for causal date {dayStart:O}.");
+            // Скользящий индекс по минутам:
+            // предполагается, что окна идут в возрастающем времени и не "ездят назад".
+            int minuteIndex = 0;
 
-				if (dayStart.Kind != DateTimeKind.Utc)
-					throw new InvalidOperationException ($"[forward] causal.DateUtc must be UTC: {dayStart:O}.");
+            foreach (var causal in orderedRecords)
+            {
+                // EntryUtc — фактическое начало окна (момент входа).
+                var entryUtc = causal.EntryUtc;
 
-				var dayEnd = Windowing.ComputeBaselineExitUtc (dayStart, Windowing.NyTz);
+                // DayKeyUtc — идентичность дня (00:00 UTC).
+                var dayKeyUtc = causal.DayKeyUtc;
 
-				if (dayEnd <= dayStart)
-					throw new InvalidOperationException ($"[forward] Некорректное baseline-окно: start={dayStart:O}, end={dayEnd:O}.");
+                // Каузальная запись обязана быть UTC timestamp.
+                if (entryUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[forward] causal.EntryUtc must be UTC: {entryUtc:O}.");
 
-				// Сдвиг до первой свечи окна (>= dayStart).
-				while (minuteIndex < allMinutes.Count && allMinutes[minuteIndex].OpenTimeUtc < dayStart)
-					minuteIndex++;
+                // Берём truth по ключу дня.
+                if (!truthByDayKey.TryGetValue(dayKeyUtc, out var truth))
+                    throw new InvalidOperationException($"[forward] No truth row for causal dayKey {dayKeyUtc:O} (entry={entryUtc:O}).");
 
-				var dayMinutes = new List<Candle1m> ();
-				int j = minuteIndex;
+                // Жёсткая проверка на рассинхрон момента входа:
+                // если EntryUtc отличается — значит causal и truth описывают разные "утра".
+                if (truth.EntryUtc != entryUtc)
+                {
+                    throw new InvalidOperationException(
+                        $"[forward] truth.EntryUtc != causal.EntryUtc for dayKey {dayKeyUtc:O}. " +
+                        $"truthEntry={truth.EntryUtc:O}, causalEntry={entryUtc:O}.");
+                }
 
-				// Полуоткрытое окно [dayStart; dayEnd).
-				while (j < allMinutes.Count)
-					{
-					var m = allMinutes[j];
-					if (m.OpenTimeUtc >= dayEnd)
-						break;
+                // Конец окна по time-contract Windowing (полуоткрытое окно [entryUtc; windowEndUtc)).
+                var windowEndUtc = Windowing.ComputeBaselineExitUtc(entryUtc, Windowing.NyTz);
 
-					dayMinutes.Add (m);
-					j++;
-					}
+                // Окно обязано быть валидным и иметь положительную длительность.
+                if (windowEndUtc <= entryUtc)
+                    throw new InvalidOperationException(
+                        $"[forward] Invalid baseline window: entry={entryUtc:O}, end={windowEndUtc:O}, dayKey={dayKeyUtc:O}.");
 
-				if (dayMinutes.Count == 0)
-					throw new InvalidOperationException ($"[forward] Не найдены 1m-свечи для окна, начинающегося {dayStart:O}.");
+                // Сдвигаем minuteIndex до первой минуты окна: OpenTimeUtc >= entryUtc.
+                while (minuteIndex < allMinutes.Count && allMinutes[minuteIndex].OpenTimeUtc < entryUtc)
+                    minuteIndex++;
 
-				// Следующий день стартует с конца текущего окна.
-				minuteIndex = j;
+                // Собираем минуты окна в отдельный список.
+                // Здесь не делается никаких сортировок/фильтров по "дням", только по реальному временному окну.
+                var dayMinutes = new List<Candle1m>();
+                int j = minuteIndex;
 
-				// Строгая валидация 1m-свечей окна.
-				for (int k = 0; k < dayMinutes.Count; k++)
-					ValidateMinuteCandle (dayMinutes[k], dayStart);
+                // Полуоткрытое окно [entryUtc; windowEndUtc).
+                while (j < allMinutes.Count)
+                {
+                    var m = allMinutes[j];
 
-				var first = dayMinutes[0];
-				if (!double.IsFinite (first.Open) || first.Open <= 0.0)
-					throw new InvalidOperationException ($"[forward] Entry-цена должна быть finite и > 0 (день {dayStart:O}).");
+                    // Как только вышли за конец окна — останавливаемся.
+                    if (m.OpenTimeUtc >= windowEndUtc)
+                        break;
 
-				double entry = first.Open;
+                    dayMinutes.Add(m);
+                    j++;
+                }
 
-				double maxHigh = double.NegativeInfinity;
-				double minLow = double.PositiveInfinity;
+                // Пустое окно означает "нет минут" для данного entryUtc.
+                if (dayMinutes.Count == 0)
+                    throw new InvalidOperationException(
+                        $"[forward] No 1m candles found for window start {entryUtc:O} (end={windowEndUtc:O}, dayKey={dayKeyUtc:O}).");
 
-				for (int k = 0; k < dayMinutes.Count; k++)
-					{
-					var m = dayMinutes[k];
+                // Следующий день начинаем читать минуты с конца текущего окна.
+                minuteIndex = j;
 
-					if (m.High > maxHigh) maxHigh = m.High;
-					if (m.Low < minLow) minLow = m.Low;
-					}
+                // Строгая валидация минут окна: UTC + валидный OHLC.
+                for (int k = 0; k < dayMinutes.Count; k++)
+                    ValidateMinuteCandle(dayMinutes[k], entryUtc);
 
-				if (!double.IsFinite (maxHigh) || maxHigh <= 0.0)
-					throw new InvalidOperationException ($"[forward] Некорректный maxHigh в baseline-окне {dayStart:O}.");
+                // Entry-цена: используем Open первой минуты окна.
+                var first = dayMinutes[0];
+                if (!double.IsFinite(first.Open) || first.Open <= 0.0)
+                    throw new InvalidOperationException(
+                        $"[forward] Entry price must be finite and > 0 (entry={entryUtc:O}, dayKey={dayKeyUtc:O}).");
 
-				if (!double.IsFinite (minLow) || minLow <= 0.0)
-					throw new InvalidOperationException ($"[forward] Некорректный minLow в baseline-окне {dayStart:O}.");
+                double entry = first.Open;
 
-				var last = dayMinutes[dayMinutes.Count - 1];
-				if (!double.IsFinite (last.Close) || last.Close <= 0.0)
-					throw new InvalidOperationException ($"[forward] Close последней 1m-свечи должен быть finite и > 0 (день {dayStart:O}).");
+                // Проходим окно и снимаем экстремумы.
+                double maxHigh = double.NegativeInfinity;
+                double minLow = double.PositiveInfinity;
 
-				double close24 = last.Close;
+                for (int k = 0; k < dayMinutes.Count; k++)
+                {
+                    var m = dayMinutes[k];
+                    if (m.High > maxHigh) maxHigh = m.High;
+                    if (m.Low < minLow) minLow = m.Low;
+                }
 
-				double upDiff = maxHigh - entry;
-				if (upDiff < 0.0)
-					throw new InvalidOperationException (
-						$"[forward] maxHigh < entry: entry={entry:0.########}, maxHigh={maxHigh:0.########}, day={dayStart:O}.");
+                // Базовые проверки экстремумов.
+                if (!double.IsFinite(maxHigh) || maxHigh <= 0.0)
+                    throw new InvalidOperationException(
+                        $"[forward] Invalid maxHigh in window (entry={entryUtc:O}, dayKey={dayKeyUtc:O}).");
 
-				double downDiff = entry - minLow;
-				if (downDiff < 0.0)
-					throw new InvalidOperationException (
-						$"[forward] minLow > entry: entry={entry:0.########}, minLow={minLow:0.########}, day={dayStart:O}.");
+                if (!double.IsFinite(minLow) || minLow <= 0.0)
+                    throw new InvalidOperationException(
+                        $"[forward] Invalid minLow in window (entry={entryUtc:O}, dayKey={dayKeyUtc:O}).");
 
-				double upMove = upDiff / entry;
-				double downMove = downDiff / entry;
+                // Close окна: Close последней минуты.
+                var last = dayMinutes[dayMinutes.Count - 1];
+                if (!double.IsFinite(last.Close) || last.Close <= 0.0)
+                    throw new InvalidOperationException(
+                        $"[forward] Last Close must be finite and > 0 (entry={entryUtc:O}, dayKey={dayKeyUtc:O}).");
 
-				if (!double.IsFinite (upMove) || !double.IsFinite (downMove))
-					throw new InvalidOperationException ($"[forward] Non-finite move computed for day {dayStart:O}.");
+                double close24 = last.Close;
 
-				double forwardMinMove = Math.Max (upMove, downMove);
+                // Проверяем, что экстремумы совместимы с entry (иначе это неконсистентность данных).
+                double upDiff = maxHigh - entry;
+                if (upDiff < 0.0)
+                    throw new InvalidOperationException(
+                        $"[forward] maxHigh < entry: entry={entry:0.########}, maxHigh={maxHigh:0.########}, entryUtc={entryUtc:O}, dayKey={dayKeyUtc:O}.");
 
-				var forward = new ForwardOutcomes
-					{
-					DateUtc = dayStart,
-					WindowEndUtc = dayEnd,
-					Entry = entry,
-					MaxHigh24 = maxHigh,
-					MinLow24 = minLow,
-					Close24 = close24,
-					DayMinutes = dayMinutes,
-					MinMove = forwardMinMove,
+                double downDiff = entry - minLow;
+                if (downDiff < 0.0)
+                    throw new InvalidOperationException(
+                        $"[forward] minLow > entry: entry={entry:0.########}, minLow={minLow:0.########}, entryUtc={entryUtc:O}, dayKey={dayKeyUtc:O}.");
 
-					TrueLabel = truth.TrueLabel,
-					FactMicroUp = truth.FactMicroUp,
-					FactMicroDown = truth.FactMicroDown
-					};
+                // Нормируем движения относительно entry.
+                double upMove = upDiff / entry;
+                double downMove = downDiff / entry;
 
-				result.Add (new BacktestRecord
-					{
-					Causal = causal,
-					Forward = forward
-					});
-				}
+                if (!double.IsFinite(upMove) || !double.IsFinite(downMove))
+                    throw new InvalidOperationException(
+                        $"[forward] Non-finite move computed (entryUtc={entryUtc:O}, dayKey={dayKeyUtc:O}).");
 
-			return result;
-			}
+                // Итоговая амплитуда окна: максимум из |up| и |down|.
+                double forwardMinMove = Math.Max(upMove, downMove);
 
-		private static void ValidateMinuteCandle ( Candle1m m, DateTime dayStartUtc )
-			{
-			if (m.OpenTimeUtc.Kind != DateTimeKind.Utc)
-				throw new InvalidOperationException ($"[forward] Candle1m.OpenTimeUtc must be UTC (day {dayStartUtc:O}).");
+                // ForwardOutcomes: складываем forward-факты.
+                // Важно: DateUtc здесь трактуем как DayKeyUtc (идентичность дня),
+                // а момент входа хранится в BacktestRecord.Causal.EntryUtc.
+                var forward = new ForwardOutcomes
+                {
+                    DateUtc = dayKeyUtc,
+                    WindowEndUtc = windowEndUtc,
+                    Entry = entry,
+                    MaxHigh24 = maxHigh,
+                    MinLow24 = minLow,
+                    Close24 = close24,
+                    DayMinutes = dayMinutes,
+                    MinMove = forwardMinMove,
 
-			ValidatePrice (m.Open, "Open", dayStartUtc);
-			ValidatePrice (m.High, "High", dayStartUtc);
-			ValidatePrice (m.Low, "Low", dayStartUtc);
-			ValidatePrice (m.Close, "Close", dayStartUtc);
+                    TrueLabel = truth.TrueLabel,
+                    FactMicroUp = truth.FactMicroUp,
+                    FactMicroDown = truth.FactMicroDown
+                };
 
-			if (m.High < m.Low)
-				throw new InvalidOperationException ($"[forward] Candle1m has High < Low (day {dayStartUtc:O}).");
+                // BacktestRecord: каузальная часть + forward-факты.
+                result.Add(new BacktestRecord
+                {
+                    Causal = causal,
+                    Forward = forward
+                });
+            }
 
-			// OHLC-ограничения: High покрывает Open/Close, Low покрывает Open/Close.
-			if (m.High < m.Open || m.High < m.Close)
-				throw new InvalidOperationException ($"[forward] Candle1m has High below Open/Close (day {dayStartUtc:O}).");
+            return result;
+        }
 
-			if (m.Low > m.Open || m.Low > m.Close)
-				throw new InvalidOperationException ($"[forward] Candle1m has Low above Open/Close (day {dayStartUtc:O}).");
-			}
+        private static void ValidateMinuteCandle(Candle1m m, DateTime entryUtc)
+        {
+            // Время свечи обязано быть UTC.
+            if (m.OpenTimeUtc.Kind != DateTimeKind.Utc)
+                throw new InvalidOperationException($"[forward] Candle1m.OpenTimeUtc must be UTC (entry {entryUtc:O}).");
 
-		private static void ValidatePrice ( double v, string name, DateTime dayStartUtc )
-			{
-			if (!double.IsFinite (v) || v <= 0.0)
-				throw new InvalidOperationException ($"[forward] Candle1m.{name} must be finite and > 0 (day {dayStartUtc:O}).");
-			}
-		}
-	}
+            // Цена обязана быть finite и > 0.
+            ValidatePrice(m.Open, "Open", entryUtc);
+            ValidatePrice(m.High, "High", entryUtc);
+            ValidatePrice(m.Low, "Low", entryUtc);
+            ValidatePrice(m.Close, "Close", entryUtc);
+
+            // Базовая консистентность диапазона.
+            if (m.High < m.Low)
+                throw new InvalidOperationException($"[forward] Candle1m has High < Low (entry {entryUtc:O}).");
+
+            // High должен быть >= Open и >= Close.
+            if (m.High < m.Open || m.High < m.Close)
+                throw new InvalidOperationException($"[forward] Candle1m has High below Open/Close (entry {entryUtc:O}).");
+
+            // Low должен быть <= Open и <= Close.
+            if (m.Low > m.Open || m.Low > m.Close)
+                throw new InvalidOperationException($"[forward] Candle1m has Low above Open/Close (entry {entryUtc:O}).");
+        }
+
+        private static void ValidatePrice(double v, string name, DateTime entryUtc)
+        {
+            if (!double.IsFinite(v) || v <= 0.0)
+                throw new InvalidOperationException($"[forward] Candle1m.{name} must be finite and > 0 (entry {entryUtc:O}).");
+        }
+    }
+}

@@ -300,44 +300,44 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 
 				double minMove = mm.MinMove;
 
-				var causal = new CausalDataRowDto (
-					dateUtc: openUtc,
-					regimeDown: isDownRegime,
-					isMorning: isMorning,
-					hardRegime: hardRegime,
-					minMove: minMove,
+                var causal = new CausalDataRowDto(
+                    entryUtc: openUtc,
+                    regimeDown: isDownRegime,
+                    isMorning: isMorning,
+                    hardRegime: hardRegime,
+                    minMove: minMove,
 
-					solRet30: solRet30,
-					btcRet30: btcRet30,
-					solBtcRet30: solBtcRet30,
+                    solRet30: solRet30,
+                    btcRet30: btcRet30,
+                    solBtcRet30: solBtcRet30,
 
-					solRet1: solRet1,
-					solRet3: solRet3,
-					btcRet1: btcRet1,
-					btcRet3: btcRet3,
+                    solRet1: solRet1,
+                    solRet3: solRet3,
+                    btcRet1: btcRet1,
+                    btcRet3: btcRet3,
 
-					fngNorm: fngNorm,
-					dxyChg30: dxyChg30,
-					goldChg30: goldChg30,
+                    fngNorm: fngNorm,
+                    dxyChg30: dxyChg30,
+                    goldChg30: goldChg30,
 
-					btcVs200: btcVs200,
+                    btcVs200: btcVs200,
 
-					solRsiCenteredScaled: solRsiCentered / 100.0,
-					rsiSlope3Scaled: rsiSlope3 / 100.0,
+                    solRsiCenteredScaled: solRsiCentered / 100.0,
+                    rsiSlope3Scaled: rsiSlope3 / 100.0,
 
-					gapBtcSol1: gapBtcSol1,
-					gapBtcSol3: gapBtcSol3,
+                    gapBtcSol1: gapBtcSol1,
+                    gapBtcSol3: gapBtcSol3,
 
-					atrPct: atrPct,
-					dynVol: dynVol,
+                    atrPct: atrPct,
+                    dynVol: dynVol,
 
-					solAboveEma50: solAboveEma50,
-					solEma50vs200: solEma50vs200,
-					btcEma50vs200: btcEma50vs200);
+                    solAboveEma50: solAboveEma50,
+                    solEma50vs200: solEma50vs200,
+                    btcEma50vs200: btcEma50vs200);
 
-				// Создание окна после проверки known gaps выше.
-				// Create(...) дополнительно валидирует, что entryUtc действительно присутствует как минута.
-				var window = Baseline1mWindow.Create (solAll1m, openUtc, exitUtc);
+                // Создание окна после проверки known gaps выше.
+                // Create(...) дополнительно валидирует, что entryUtc действительно присутствует как минута.
+                var window = Baseline1mWindow.Create (solAll1m, openUtc, exitUtc);
 
 				int firstPassDir;
 				DateTime? firstPassTimeUtc;
