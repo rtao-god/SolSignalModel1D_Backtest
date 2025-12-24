@@ -1,177 +1,181 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
+﻿using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
-	{
-	public static class TargetLevelOfflineBuilder
-		{
-		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
-		private const double DeepDelayFactor = 0.35;
-		private const double DeepMaxDelayHours = 4.0;
-		private const double ShallowDelayFactor = 0.15;
-		private const double ShallowMaxDelayHours = 2.0;
+{
+    public static class TargetLevelOfflineBuilder
+    {
+        private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+        private const double DeepDelayFactor = 0.35;
+        private const double DeepMaxDelayHours = 4.0;
+        private const double ShallowDelayFactor = 0.15;
+        private const double ShallowMaxDelayHours = 2.0;
 
-		public static List<TargetLevelSample> Build (
-			List<BacktestRecord> rows,
-			IReadOnlyList<Candle1h> sol1h,
-			Dictionary<DateTime, Candle6h> sol6hDict )
-			{
-			var result = new List<TargetLevelSample> ((rows?.Count ?? 0) * 2);
-			if (rows == null || rows.Count == 0 || sol1h == null || sol1h.Count == 0)
-				return result;
+        public static List<TargetLevelSample> Build(
+            List<BacktestRecord> rows,
+            IReadOnlyList<Candle1h> sol1h,
+            IReadOnlyDictionary<DayKeyUtc, Candle6h> sol6hByDayKey)
+        {
+            var result = new List<TargetLevelSample>((rows?.Count ?? 0) * 2);
+            if (rows == null || rows.Count == 0)
+                return result;
 
-			foreach (var r in rows)
-				{
-				// dayKey нужен для словаря дневной свечи.
-				var dayKey = r.Causal.DateUtc.ToCausalDateUtc ();
+            if (sol1h == null || sol1h.Count == 0)
+                return result;
 
-				if (!sol6hDict.TryGetValue (dayKey, out var dayCandle))
-					continue;
+            if (sol6hByDayKey == null || sol6hByDayKey.Count == 0)
+                return result;
 
-				double entryPrice = dayCandle.Close;
-				double dayMinMove = r.MinMove;
+            foreach (var r in rows)
+            {
+                var dayKey = r.Causal.DayKeyUtc;
 
-				if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[sl-offline] Invalid dayMinMove for dayKey={dayKey:O}. " +
-						$"dayMinMove={dayMinMove}. Fix RowBuilder/MinMoveEngine; do not default here.");
-					}
+                if (!sol6hByDayKey.TryGetValue(dayKey, out var dayCandle))
+                    continue;
 
-				DateTime entryUtc = r.Causal.DateUtc;
-				DateTime endUtc;
+                double entryPrice = dayCandle.Close;
+                double dayMinMove = r.MinMove;
 
-				try
-					{
-					endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
-					}
-				catch (Exception ex)
-					{
-					throw new InvalidOperationException (
-						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}. " +
-						"Fix data/windowing logic instead of relying on fallback.",
-						ex);
-					}
+                if (double.IsNaN(dayMinMove) || double.IsInfinity(dayMinMove) || dayMinMove <= 0.0)
+                {
+                    throw new InvalidOperationException(
+                        $"[target-level-offline] Invalid dayMinMove for dayKey={dayKey:O}. " +
+                        $"dayMinMove={dayMinMove}. Fix RowBuilder/MinMoveEngine; do not default here.");
+                }
 
-				var dayHours = sol1h
-					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
-					.OrderBy (h => h.OpenTimeUtc)
-					.ToList ();
+                var entryUtc = r.Causal.EntryUtc;
+                DateTime endUtc;
 
-				if (dayHours.Count == 0)
-					continue;
+                try
+                {
+                    endUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, NyTz).Value;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to compute baseline exit for entryUtc={entryUtc.Value:O}, tz={NyTz.Id}. " +
+                        "Fix data/NyWindowing logic instead of relying on fallback.",
+                        ex);
+                }
 
-				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, goLong: true, NyTz);
-				BuildForDir (result, r, dayHours, sol1h, entryPrice, dayMinMove, goLong: false, NyTz);
-				}
+                var dayHours = sol1h
+                    .Where(h => h.OpenTimeUtc >= entryUtc.Value && h.OpenTimeUtc < endUtc)
+                    .OrderBy(h => h.OpenTimeUtc)
+                    .ToList();
 
-			return result;
-			}
+                if (dayHours.Count == 0)
+                    continue;
 
-		private static void BuildForDir (
-			List<TargetLevelSample> sink,
-			BacktestRecord r,
-			List<Candle1h> dayHours,
-			IReadOnlyList<Candle1h> allHours,
-			double entryPrice,
-			double dayMinMove,
-			bool goLong,
-			TimeZoneInfo nyTz )
-			{
-			bool strongSignal = true;
+                BuildForDir(result, r, dayHours, sol1h, entryPrice, dayMinMove, goLong: true, NyTz);
+                BuildForDir(result, r, dayHours, sol1h, entryPrice, dayMinMove, goLong: false, NyTz);
+            }
 
-			DateTime entryUtc = r.Causal.DateUtc;
-			DateTime dayKey = entryUtc.ToCausalDateUtc ();
+            return result;
+        }
 
-			var baseOutcome = HourlyTradeEvaluator.EvaluateOne (
-				dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, nyTz);
+        private static void BuildForDir(
+            List<TargetLevelSample> sink,
+            BacktestRecord r,
+            List<Candle1h> dayHours,
+            IReadOnlyList<Candle1h> allHours,
+            double entryPrice,
+            double dayMinMove,
+            bool goLong,
+            TimeZoneInfo nyTz)
+        {
+            bool strongSignal = true;
 
-			var deepDelayed = DelayedEntryEvaluator.Evaluate (
-				dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, DeepDelayFactor, DeepMaxDelayHours);
+            var entryUtc = r.Causal.EntryUtc.Value;
+            var dayKey = r.Causal.DayKeyUtc;
 
-			var shDelayed = DelayedEntryEvaluator.Evaluate (
-				dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, ShallowDelayFactor, ShallowMaxDelayHours);
+            var baseOutcome = HourlyTradeEvaluator.EvaluateOne(
+                dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, nyTz);
 
-			int label = 0;
-			if (deepDelayed.Executed && IsDeepImprovement (baseOutcome, deepDelayed))
-				label = 2;
-			else if (shDelayed.Executed && IsShallowNotWorse (baseOutcome, shDelayed))
-				label = 1;
+            var deepDelayed = DelayedEntryEvaluator.Evaluate(
+                dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, DeepDelayFactor, DeepMaxDelayHours);
 
-			var feats = TargetLevelFeatureBuilder.Build (
-				dayKey, goLong, strongSignal, dayMinMove, entryPrice, allHours);
+            var shDelayed = DelayedEntryEvaluator.Evaluate(
+                dayHours, dayKey, goLong, !goLong, entryPrice, dayMinMove, strongSignal, ShallowDelayFactor, ShallowMaxDelayHours);
 
-			sink.Add (new TargetLevelSample
-				{
-				Label = label,
-				Features = feats,
-				EntryUtc = entryUtc
-				});
-			}
+            int label = 0;
+            if (deepDelayed.Executed && IsDeepImprovement(baseOutcome, deepDelayed))
+                label = 2;
+            else if (shDelayed.Executed && IsShallowNotWorse(baseOutcome, shDelayed))
+                label = 1;
 
-		private static bool IsDeepImprovement ( HourlyTradeOutcome baseOutcome, DelayedEntryResult delayed )
-			{
-			if ((baseOutcome.Result == HourlyTradeResult.SlFirst || baseOutcome.Result == HourlyTradeResult.None) &&
-				delayed.Result == DelayedIntradayResult.TpFirst)
-				return true;
+            var feats = TargetLevelFeatureBuilder.Build(
+                dayKey, goLong, strongSignal, dayMinMove, entryPrice, allHours);
 
-			if (baseOutcome.Result == HourlyTradeResult.TpFirst &&
-				delayed.Result == DelayedIntradayResult.TpFirst)
-				return true;
+            sink.Add(new TargetLevelSample
+            {
+                Label = label,
+                Features = feats,
+                EntryUtc = entryUtc
+            });
+        }
 
-			if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
-				delayed.Result == DelayedIntradayResult.SlFirst &&
-				delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
-				delayed.SlPct < baseOutcome.SlPct)
-				return true;
+        private static bool IsDeepImprovement(HourlyTradeOutcome baseOutcome, DelayedEntryResult delayed)
+        {
+            if ((baseOutcome.Result == HourlyTradeResult.SlFirst || baseOutcome.Result == HourlyTradeResult.None) &&
+                delayed.Result == DelayedIntradayResult.TpFirst)
+                return true;
 
-			return false;
-			}
+            if (baseOutcome.Result == HourlyTradeResult.TpFirst &&
+                delayed.Result == DelayedIntradayResult.TpFirst)
+                return true;
 
-		private static bool IsShallowNotWorse ( HourlyTradeOutcome baseOutcome, DelayedEntryResult delayed )
-			{
-			int baseRank = RankHourly (baseOutcome.Result);
-			int delayedRank = RankDelayed (delayed.Result);
+            if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
+                delayed.Result == DelayedIntradayResult.SlFirst &&
+                delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
+                delayed.SlPct < baseOutcome.SlPct)
+                return true;
 
-			if (delayedRank < baseRank) return false;
+            return false;
+        }
 
-			if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
-				delayed.Result == DelayedIntradayResult.SlFirst &&
-				delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
-				delayed.SlPct < baseOutcome.SlPct)
-				return true;
+        private static bool IsShallowNotWorse(HourlyTradeOutcome baseOutcome, DelayedEntryResult delayed)
+        {
+            int baseRank = RankHourly(baseOutcome.Result);
+            int delayedRank = RankDelayed(delayed.Result);
 
-			if (delayed.Result == DelayedIntradayResult.None &&
-				baseOutcome.Result == HourlyTradeResult.SlFirst)
-				return true;
+            if (delayedRank < baseRank) return false;
 
-			return delayedRank >= baseRank;
-			}
+            if (baseOutcome.Result == HourlyTradeResult.SlFirst &&
+                delayed.Result == DelayedIntradayResult.SlFirst &&
+                delayed.SlPct > 0 && baseOutcome.SlPct > 0 &&
+                delayed.SlPct < baseOutcome.SlPct)
+                return true;
 
-		private static int RankHourly ( HourlyTradeResult res ) => res switch
-			{
-				HourlyTradeResult.TpFirst => 3,
-				HourlyTradeResult.None => 2,
-				HourlyTradeResult.Ambiguous => 2,
-				HourlyTradeResult.SlFirst => 0,
-				_ => 0
-				};
+            if (delayed.Result == DelayedIntradayResult.None &&
+                baseOutcome.Result == HourlyTradeResult.SlFirst)
+                return true;
 
-		private static int RankDelayed ( DelayedIntradayResult res ) => res switch
-			{
-				DelayedIntradayResult.TpFirst => 3,
-				DelayedIntradayResult.None => 2,
-				DelayedIntradayResult.Ambiguous => 2,
-				DelayedIntradayResult.SlFirst => 0,
-				_ => 0
-				};
-		}
-	}
+            return delayedRank >= baseRank;
+        }
+
+        private static int RankHourly(HourlyTradeResult res) => res switch
+        {
+            HourlyTradeResult.TpFirst => 3,
+            HourlyTradeResult.None => 2,
+            HourlyTradeResult.Ambiguous => 2,
+            HourlyTradeResult.SlFirst => 0,
+            _ => 0
+        };
+
+        private static int RankDelayed(DelayedIntradayResult res) => res switch
+        {
+            DelayedIntradayResult.TpFirst => 3,
+            DelayedIntradayResult.None => 2,
+            DelayedIntradayResult.Ambiguous => 2,
+            DelayedIntradayResult.SlFirst => 0,
+            _ => 0
+        };
+    }
+}

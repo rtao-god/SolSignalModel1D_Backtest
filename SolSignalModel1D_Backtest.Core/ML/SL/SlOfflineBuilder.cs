@@ -46,7 +46,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				{
 				DateTime entryUtc = r.Forward.DateUtc;
 
-				if (!Windowing.IsNyMorning (entryUtc, nyTz: TimeZones.NewYork))
+				if (!NyWindowing.IsNyMorning (entryUtc, nyTz: TimeZones.NewYork))
 					continue;
 
 				hasAnyMorning = true;
@@ -79,7 +79,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 				DateTime exitUtcExclusive;
 				try
 					{
-					exitUtcExclusive = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz: TimeZones.NewYork);
+					exitUtcExclusive = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz: TimeZones.NewYork);
 					}
 				catch (Exception ex)
 					{

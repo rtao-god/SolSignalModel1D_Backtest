@@ -43,7 +43,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 			TimeZoneInfo nyTz )
 			{
 			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
-			var exitUtcExclusive = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtcExclusive = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			return Create (allMinutesSortedUtc, entryUtc, exitUtcExclusive);
 			}
 

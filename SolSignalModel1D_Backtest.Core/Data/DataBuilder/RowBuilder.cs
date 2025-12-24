@@ -4,11 +4,11 @@ using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.Indicators;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Indicators;
 using CausalDataRowDto = SolSignalModel1D_Backtest.Core.Causal.Data.CausalDataRow;
 using Corendicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
 using LabeledCausalRowDto = SolSignalModel1D_Backtest.Core.Causal.Data.LabeledCausalRow;
 
 namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
@@ -110,11 +110,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 
 				using var _causalityScope = Infra.Causality.CausalityGuard.Begin ("RowBuilder.BuildDailyRows(day)", openUtc);
 
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (openUtc, nyTz);
-				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-					continue;
+                if (NyWindowing.IsWeekendInNy(new EntryUtc(openUtc), nyTz))
+                    continue;
 
-				DateTime exitUtc = CoreWindowing.ComputeBaselineExitUtc (openUtc, nyTz);
+                DateTime exitUtc = NyWindowing.ComputeBaselineExitUtc (openUtc, nyTz);
 				if (exitUtc >= maxExitUtc)
 					continue;
 
@@ -287,9 +286,11 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 
 				bool isDownRegime = solRet30 < DownSol30Thresh || btcRet30 < DownBtc30Thresh;
 				int hardRegime = Math.Abs (solRet30) > 0.10 || atrPct > 0.035 ? 2 : 1;
-				bool isMorning = CoreWindowing.IsNyMorning (openUtc, nyTz);
+                var entryUtc = new EntryUtc(openUtc);
 
-				var mm = MinMoveEngine.ComputeAdaptive (
+                bool isMorning = NyWindowing.IsNyMorning(entryUtc, nyTz);
+
+                var mm = MinMoveEngine.ComputeAdaptive (
 					asOfUtc: openUtc,
 					regimeDown: isDownRegime,
 					atrPct: atrPct,
@@ -301,7 +302,7 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
 				double minMove = mm.MinMove;
 
                 var causal = new CausalDataRowDto(
-                    entryUtc: openUtc,
+                    entryUtc: new EntryUtc(openUtc),
                     regimeDown: isDownRegime,
                     isMorning: isMorning,
                     hardRegime: hardRegime,

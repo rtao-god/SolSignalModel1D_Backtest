@@ -1,5 +1,5 @@
 ﻿namespace SolSignalModel1D_Backtest.Core.Data.Windowing
-	{
+{
 	/// <summary>
 	/// Полуоткрытый UTC-интервал [StartUtc; EndUtcExclusive).
 	/// Нужен как типовой контракт, чтобы не плодить "<=/</+1m" по коду.

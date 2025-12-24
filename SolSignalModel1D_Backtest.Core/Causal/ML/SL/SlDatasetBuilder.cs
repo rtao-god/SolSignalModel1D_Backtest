@@ -63,7 +63,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 				if (r.Causal.IsMorning != true)
 					continue;
 
-				if (!Windowing.TryComputeBaselineExitUtc (r.DateUtc, NyTz, out var exitUtc))
+				if (!NyWindowing.TryComputeBaselineExitUtc (r.DateUtc, NyTz, out var exitUtc))
 					continue;
 
 				if (exitUtc <= trainUntilUtc)
@@ -105,7 +105,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 
 			foreach (var s in allSamples)
 				{
-				var exitUtc = Windowing.ComputeBaselineExitUtc (s.EntryUtc, NyTz);
+				var exitUtc = NyWindowing.ComputeBaselineExitUtc (s.EntryUtc, NyTz);
 				if (exitUtc <= trainUntilUtc)
 					filteredSamples.Add (s);
 				}

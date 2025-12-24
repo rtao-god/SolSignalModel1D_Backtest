@@ -1,6 +1,7 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 	{
@@ -68,12 +69,12 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 					nameof (dayMinMove),
 					dayMinMove,
 					"[MinuteDelayedEntryEvaluator] dayMinMove must be finite and > 0. " +
-					"Non-positive/NaN/Inf dayMinMove indicates a pipeline bug (invalid MinMove computation/windowing/features).");
+					"Non-positive/NaN/Inf dayMinMove indicates a pipeline bug (invalid MinMove computation/NyWindowing/features).");
 
 			if (dayMinMove < MinDayTradeable)
 				return res;
 
-			DateTime exitUtc = Windowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
+			DateTime exitUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(dayStartUtc), nyTz).Value;
 
 			var dayMinutes = day1m
 				.Where (m => m.OpenTimeUtc >= dayStartUtc && m.OpenTimeUtc < exitUtc)

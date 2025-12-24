@@ -63,7 +63,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			if (dayMinMove < MinDayTradeable)
 				return outcome;
 
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 
 			var window = day1m
 				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)

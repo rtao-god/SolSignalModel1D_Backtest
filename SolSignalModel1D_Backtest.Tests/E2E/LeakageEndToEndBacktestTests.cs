@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				fngHistory: fngHistory,
 				dxySeries: dxyHistory,
 				extraDaily: null,
-				nyTz: Windowing.NyTz);
+				nyTz: NyWindowing.NyTz);
 
 			var rowsAAll = buildA0.LabeledRows
 				.OrderBy (r => r.DateUtc)
@@ -91,7 +91,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				fngHistory: fngHistory,
 				dxySeries: dxyHistory,
 				extraDaily: null,
-				nyTz: Windowing.NyTz);
+				nyTz: NyWindowing.NyTz);
 
 			var rowsBAll = buildB0.LabeledRows
 				.OrderBy (r => r.DateUtc)

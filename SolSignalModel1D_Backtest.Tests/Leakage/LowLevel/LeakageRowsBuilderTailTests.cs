@@ -47,7 +47,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				fngHistory: fngHistory,
 				dxySeries: dxyHistory,
 				extraDaily: null,
-				nyTz: Windowing.NyTz);
+				nyTz: NyWindowing.NyTz);
 
 			var rowsA = resA.LabeledRows
 				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))
@@ -77,7 +77,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				fngHistory: fngHistory,
 				dxySeries: dxyHistory,
 				extraDaily: null,
-				nyTz: Windowing.NyTz);
+				nyTz: NyWindowing.NyTz);
 
 			var rowsB = resB.LabeledRows
 				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))

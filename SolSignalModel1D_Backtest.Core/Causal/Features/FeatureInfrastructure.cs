@@ -1,8 +1,12 @@
-﻿using SolSignalModel1D_Backtest.Core.Time;
+﻿using System;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Features
 {
-    public interface IFeatureBuilder<in TRow>
+    // Invariant: TRow is part of FeatureContext public surface (Row getter),
+    // therefore variance is not allowed here.
+    public interface IFeatureBuilder<TRow>
     {
         void Build(FeatureContext<TRow> ctx);
     }
@@ -15,7 +19,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Features
 
         public FeatureContext(TRow row, CausalStamp stamp, int capacity = 64)
         {
-            Row = row ?? throw new ArgumentNullException(nameof(row));
+            if (row is null) throw new ArgumentNullException(nameof(row));
+            Row = row;
             Stamp = stamp;
             Features = new List<double>(capacity);
         }
@@ -54,6 +59,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Features
         public FeaturePipeline(params IFeatureBuilder<TRow>[] builders)
         {
             _builders = builders ?? Array.Empty<IFeatureBuilder<TRow>>();
+
+            for (int i = 0; i < _builders.Length; i++)
+            {
+                if (_builders[i] is null)
+                    throw new ArgumentNullException(nameof(builders), "builders contains null item.");
+            }
         }
 
         public List<double> Run(TRow row, CausalStamp stamp)

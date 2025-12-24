@@ -4,7 +4,7 @@ namespace SolSignalModel1D_Backtest.Tests.TestUtils
 	{
 	internal static class NyTestDates
 		{
-		internal static readonly TimeZoneInfo NyTz = Windowing.NyTz;
+		internal static readonly TimeZoneInfo NyTz = NyWindowing.NyTz;
 
 		internal static DateTime NyLocal ( int year, int month, int day, int hour, int minute = 0 )
 			{

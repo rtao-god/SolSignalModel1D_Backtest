@@ -2,7 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		[Fact]
 		public void Features_DoNotChange_WhenFutureMacroSeriesAreMutated ()
 			{
-			var tz = CoreWindowing.NyTz;
+			var tz = CoreNyWindowing.NyTz;
 
 			const int days = 260;
 

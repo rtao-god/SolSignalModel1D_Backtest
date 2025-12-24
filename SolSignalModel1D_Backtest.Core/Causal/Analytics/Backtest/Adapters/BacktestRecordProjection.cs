@@ -1,13 +1,10 @@
 ﻿using System;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters
 {
-    /// <summary>
-    /// Адаптер слоя домена (BacktestRecord) к минимальному контракту аналитики.
-    /// Здесь допустима зависимость от BacktestRecord; дальше по цепочке — нет.
-    /// </summary>
     public static class BacktestRecordProjection
     {
         public static BacktestAggRow ToAggRow(this BacktestRecord r)
@@ -17,32 +14,34 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters
             if (r.PredMicroUp && r.PredMicroDown)
             {
                 throw new InvalidOperationException(
-                    $"[proj] Invalid micro prediction flags: both PredMicroUp and PredMicroDown are true for {r.Causal.DateUtc:O}.");
+                    $"[proj] Invalid micro prediction flags: both PredMicroUp and PredMicroDown are true for {r.EntryUtc:O}.");
             }
 
             if (r.FactMicroUp && r.FactMicroDown)
             {
                 throw new InvalidOperationException(
-                    $"[proj] Invalid micro fact flags: both FactMicroUp and FactMicroDown are true for {r.Causal.DateUtc:O}.");
+                    $"[proj] Invalid micro fact flags: both FactMicroUp and FactMicroDown are true for {r.EntryUtc:O}.");
             }
 
             if (r.SlProb is not double slProb)
             {
                 throw new InvalidOperationException(
-                    $"[proj] SlProb is null for {r.Causal.DateUtc:O}. " +
+                    $"[proj] SlProb is null for {r.EntryUtc:O}. " +
                     "Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
             }
 
             if (r.SlHighDecision is not bool slHighDecision)
             {
                 throw new InvalidOperationException(
-                    $"[proj] SlHighDecision is null for {r.Causal.DateUtc:O}. " +
+                    $"[proj] SlHighDecision is null for {r.EntryUtc:O}. " +
                     "Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
             }
 
+            var dayUtc = CausalTimeKey.DayKeyUtc(r);
+
             return new BacktestAggRow
             {
-                DateUtc = r.Causal.DateUtc,
+                DayUtc = dayUtc,
                 TrueLabel = r.TrueLabel,
 
                 PredLabel_Day = r.PredLabel_Day,

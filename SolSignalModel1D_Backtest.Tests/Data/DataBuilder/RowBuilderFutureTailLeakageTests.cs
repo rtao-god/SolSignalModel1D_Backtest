@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -84,7 +84,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			var entryUtc = solAll6h_A[entryIdx].OpenTimeUtc;
 			var entryDate = entryUtc.ToCausalDateUtc ();
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, tz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, tz);
 
 			for (int i = 0; i < solAll6h_B.Count; i++)
 				{

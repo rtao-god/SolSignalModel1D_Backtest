@@ -2,6 +2,12 @@
 
 namespace SolSignalModel1D_Backtest.Core.Time
 {
+    /// <summary>
+    /// Фабрика causal stamp для NY-дневного контракта.
+    /// Контракт:
+    /// - weekend entry по NY локальному времени => stamp не создаётся (TryCreate=false);
+    /// - non-morning entry (не 07/08 NY local) => ошибка контракта (throw).
+    /// </summary>
     public sealed class CausalStampFactory
     {
         private readonly TimeZoneInfo _nyTz;
@@ -13,16 +19,20 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
         public bool TryCreate(EntryUtc entryUtc, out CausalStamp stamp)
         {
-            var nyLocal = TimeZoneInfo.ConvertTimeFromUtc(entryUtc.Value, _nyTz);
-
-            if (nyLocal.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            if (NyWindowing.IsWeekendInNy(entryUtc, _nyTz))
             {
                 stamp = default;
                 return false;
             }
 
-            var nyDay = new NyTradingDay(DateOnly.FromDateTime(nyLocal));
-            var exitUtc = ComputeBaselineExitUtc(entryUtc);
+            if (!NyWindowing.IsNyMorning(entryUtc, _nyTz))
+            {
+                throw new InvalidOperationException(
+                    $"[time] Non-morning entryUtc passed where NY-morning expected: {entryUtc.Value:O}.");
+            }
+
+            var nyDay = NyWindowing.GetNyTradingDayOrThrow(entryUtc, _nyTz);
+            var exitUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, _nyTz);
 
             stamp = new CausalStamp(entryUtc, nyDay, exitUtc);
             return true;
@@ -30,11 +40,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
         public BaselineExitUtc ComputeBaselineExitUtc(EntryUtc entryUtc)
         {
-            // Контракт baseline-exit — единое место. Реализация NY/DST — здесь.
-            // Внешний код не пересчитывает окна руками.
-
-            // В реальном коде: точное правило 07/08 + -2min и т.д., но строго внутри этого типа.
-            throw new NotImplementedException("Implement NY baseline-exit contract here.");
+            return NyWindowing.ComputeBaselineExitUtc(entryUtc, _nyTz);
         }
     }
 }

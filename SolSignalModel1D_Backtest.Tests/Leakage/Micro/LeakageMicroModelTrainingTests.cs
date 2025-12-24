@@ -15,7 +15,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 		[Fact]
 		public void MicroDataset_IsFutureBlind_ToOosTailMutation_ByTrainBoundary ()
 			{
-			var nyTz = Windowing.NyTz;
+			var nyTz = NyWindowing.NyTz;
 
 			// Строим NY-weekday входы; weekend запрещён контрактом TrainBoundary/MicroDatasetBuilder.
 			var datesUtc = BuildNyWeekdayEntriesUtc (
@@ -27,7 +27,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 
 			// trainUntil берём как baseline-exit близко к концу ряда.
 			var pivotEntry = datesUtc[^40];
-			var pivotExit = Windowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
+			var pivotExit = NyWindowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
 			var trainUntilUtc = pivotExit.AddMinutes (1);
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);

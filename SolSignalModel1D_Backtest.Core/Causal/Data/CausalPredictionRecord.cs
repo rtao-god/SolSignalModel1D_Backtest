@@ -1,11 +1,10 @@
 ﻿using System;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 {
     /// <summary>
-    /// Результат каузального inference для одного дня:
-    /// вероятности слоёв (Day / Day+Micro) и итоговые вероятности после runtime-оверлеев (SL/Delayed и т.п.).
+    /// Результат каузального inference для одного дня.
     ///
     /// Контракт времени:
     /// - EntryUtc: момент принятия решения/входа (UTC timestamp, не day-key).
@@ -13,33 +12,35 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
     /// </summary>
     public sealed class CausalPredictionRecord
     {
-        private DateTime _entryUtc;
+        private EntryUtc _entryUtc;
 
-        public DateTime EntryUtc
+        public EntryUtc EntryUtc
         {
             get => _entryUtc;
             init
             {
-                if (value.Kind != DateTimeKind.Utc)
-                    throw new InvalidOperationException(
-                        $"[causal] EntryUtc must be UTC. Got Kind={value.Kind}, t={value:O}.");
+                if (value.Equals(default(EntryUtc)))
+                    throw new InvalidOperationException("[causal] EntryUtc must be initialized (non-default).");
 
                 _entryUtc = value;
             }
         }
 
-        public DateTime DayKeyUtc => EntryUtc.ToCausalDateUtc();
+        public DayKeyUtc DayKeyUtc
+        {
+            get
+            {
+                var dayStampUtc = DateTime.SpecifyKind(EntryUtc.Value.Date, DateTimeKind.Utc);
+                return DayKeyUtc.FromUtcOrThrow(dayStampUtc);
+            }
+        }
 
         // ===== ML feature vector (канонический вход для ML.NET) =====
-        // Длина обязана соответствовать MlSchema.FeatureCount (проверяется в MlTrainingUtils.ToFloatFixed).
         public ReadOnlyMemory<double> FeaturesVector { get; init; }
 
         // ===== Feature set (входы/контекст) =====
-        // null = фичи не собирались или отсутствуют (например, нет истории).
         public CausalFeatures? Features { get; init; }
 
-        // Прокси-свойства для обратной совместимости (Features?.X).
-        // Missing остаётся null.
         public double? AtrPct => Features?.AtrPct;
         public double? DynVol => Features?.DynVol;
 
@@ -76,8 +77,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public int PredLabel { get; init; }
         public int PredLabel_Day { get; init; }
         public int PredLabel_DayMicro { get; init; }
-
-        // Total - runtime слой: может пересчитываться оверлеями.
         public int PredLabel_Total { get; set; }
 
         // ===== Вероятности Day =====
@@ -124,39 +123,38 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public double? DelayedIntradaySlPct { get; set; }
         public int? TargetLevelClass { get; set; }
 
-        // ===== Явные "OrThrow" аксессоры =====
         public double GetSlProbOrThrow()
         {
             if (SlProb is null)
-                throw new InvalidOperationException($"[causal] SL not evaluated for {EntryUtc:O}, but SlProb requested.");
+                throw new InvalidOperationException($"[causal] SL not evaluated for {EntryUtc.Value:O}, but SlProb requested.");
             return SlProb.Value;
         }
 
         public bool GetSlHighDecisionOrThrow()
         {
             if (SlHighDecision is null)
-                throw new InvalidOperationException($"[causal] SL not evaluated for {EntryUtc:O}, but SlHighDecision requested.");
+                throw new InvalidOperationException($"[causal] SL not evaluated for {EntryUtc.Value:O}, but SlHighDecision requested.");
             return SlHighDecision.Value;
         }
 
         public (double TpPct, double SlPct) GetDelayedTpSlOrThrow()
         {
             if (DelayedIntradayTpPct is null || DelayedIntradaySlPct is null)
-                throw new InvalidOperationException($"[causal] Delayed not evaluated for {EntryUtc:O}, but TP/SL requested.");
+                throw new InvalidOperationException($"[causal] Delayed not evaluated for {EntryUtc.Value:O}, but TP/SL requested.");
             return (DelayedIntradayTpPct.Value, DelayedIntradaySlPct.Value);
         }
 
         public double GetFeatureOrThrow(double? v, string featureName)
         {
             if (v is null)
-                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for {EntryUtc:O}.");
+                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for {EntryUtc.Value:O}.");
             return v.Value;
         }
 
         public bool GetFeatureOrThrow(bool? v, string featureName)
         {
             if (v is null)
-                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for {EntryUtc:O}.");
+                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for {EntryUtc.Value:O}.");
             return v.Value;
         }
     }

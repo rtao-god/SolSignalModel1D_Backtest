@@ -14,7 +14,7 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.Labeling
 			var nyTz = TimeZones.NewYork;
 
 			var entryUtc = new DateTime (2020, 2, 24, 15, 0, 0, DateTimeKind.Utc);
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 
 			double entryPrice = 100.0;
 			double minMove = 0.02;

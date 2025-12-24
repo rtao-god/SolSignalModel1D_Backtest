@@ -16,7 +16,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
     /// - полного ряда 1m-свечей (forward-факты).
     ///
     /// Контракт времени:
-    /// - EntryUtc: момент старта окна (утро/вход) — используется для нарезки минут и Windowing.ComputeBaselineExitUtc.
+    /// - EntryUtc: момент старта окна (утро/вход) — используется для нарезки минут и NyWindowing.ComputeBaselineExitUtc.
     /// - DayKeyUtc: ключ дня (00:00 UTC) — используется для "идентичности дня" и сопоставления truth↔causal.
     ///
     /// Инварианты данных:
@@ -99,8 +99,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
                         $"truthEntry={truth.EntryUtc:O}, causalEntry={entryUtc:O}.");
                 }
 
-                // Конец окна по time-contract Windowing (полуоткрытое окно [entryUtc; windowEndUtc)).
-                var windowEndUtc = Windowing.ComputeBaselineExitUtc(entryUtc, Windowing.NyTz);
+                // Конец окна по time-contract NyWindowing (полуоткрытое окно [entryUtc; windowEndUtc)).
+                var windowEndUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, NyWindowing.NyTz);
 
                 // Окно обязано быть валидным и иметь положительную длительность.
                 if (windowEndUtc <= entryUtc)

@@ -6,7 +6,7 @@ using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 		[Fact]
 		public void Features_DoNotChange_WhenBaselineExitCloseChanges ()
 			{
-			var tz = CoreWindowing.NyTz;
+			var tz = CoreNyWindowing.NyTz;
 
 			const int total6h = 300;
 			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
@@ -133,7 +133,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var entryUtc = rowsA0[rowsA0.Count / 3].Causal.DateUtc;
 
 			// Находим baseline-exit и 6h-свечу, которая его покрывает в B-сценарии.
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, tz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, tz);
 
 			int exitIdx = -1;
 			for (int i = 0; i < solAll6h_B.Count; i++)

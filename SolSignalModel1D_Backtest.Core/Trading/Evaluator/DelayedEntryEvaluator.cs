@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 	{
@@ -18,7 +19,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 		private const double WeakTpFloor = 0.017;
 		private const double WeakSlFloor = 0.008;
 
-		public static DelayedEntryResult Evaluate (
+		public static DelayedEntryResult Evaluate(
 			IReadOnlyList<Candle1h> candles1h,
 			DateTime dayStartUtc,
 			bool goLong,
@@ -27,8 +28,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			double dayMinMove,
 			bool strongSignal,
 			double delayFactor,
-			double maxDelayHours )
-			{
+			double maxDelayHours)
+		{
 			var res = new DelayedEntryResult
 				{
 				Used = true,
@@ -64,7 +65,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			if (double.IsNaN (maxDelayHours) || double.IsInfinity (maxDelayHours) || maxDelayHours <= 0.0)
 				throw new ArgumentOutOfRangeException (nameof (maxDelayHours), maxDelayHours, "[DelayedEntryEvaluator] maxDelayHours must be finite and positive.");
 
-			DateTime endUtc = Windowing.ComputeBaselineExitUtc (dayStartUtc, Windowing.NyTz);
+			DateTime endUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(dayStartUtc), NyWindowing.NyTz).Value;
 
 			var dayBars = candles1h
 				.Where (c => c.OpenTimeUtc >= dayStartUtc && c.OpenTimeUtc < endUtc)

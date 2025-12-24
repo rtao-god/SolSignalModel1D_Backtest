@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Windowing.NyTz
+namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing.NyTz
 	{
 	/// <summary>
 	/// Резолвер таймзоны Нью-Йорка для тестов.

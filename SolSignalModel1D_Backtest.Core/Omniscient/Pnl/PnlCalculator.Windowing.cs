@@ -20,7 +20,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 		private static DateTime GetBaselineWindowEndUtcOrFail ( BacktestRecord rec, DateTime dayStartUtc, TimeZoneInfo nyTz )
 			{
 			// Канон: baseline end в одном месте и одинаково по всему проекту.
-			DateTime expected = Windowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
+			DateTime expected = NyWindowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
 
             DateTime fromRec = rec.Forward.WindowEndUtc;
             if (fromRec == default)
@@ -36,7 +36,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 			if (fromRec != expected)
 				throw new InvalidOperationException (
 					$"[pnl] Baseline end mismatch: Forward.WindowEndUtc={fromRec:O}, expected={expected:O} at {dayStartUtc:yyyy-MM-dd}. " +
-					"Fix Windowing/RowBuilder to produce canonical window end; do not patch it in PnL.");
+					"Fix NyWindowing/RowBuilder to produce canonical window end; do not patch it in PnL.");
 
 			return expected;
 			}

@@ -1,26 +1,30 @@
 ﻿using System;
-using SolSignalModel1D_Backtest.Core;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Features
-	{
-	public sealed class MarketFeatures : IFeatureBuilder
-		{
-		public void Build ( FeatureContext ctx )
-			{
-			var r = ctx.Row;
+{
+    public sealed class MarketFeatures : IFeatureBuilder<CausalDataRow>
+    {
+        public void Build(FeatureContext<CausalDataRow> ctx)
+        {
+            if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-			// FNG: 0 — валидное значение индекса, поэтому "0 => 50" недопустимо.
-			// Если источника нет — это null, и это должны увидеть явно.
-			double fng = r.Causal.GetFeatureOrThrow (r.Causal.Fng, nameof (r.Causal.Fng));
-			var fngNorm = (fng - 50.0) / 50.0;
-			ctx.Add (fngNorm);
+            var r = ctx.Row;
 
-			ctx.Add (r.Causal.GetFeatureOrThrow (r.Causal.DxyChg30, nameof (r.Causal.DxyChg30)));
-			ctx.Add (r.Causal.GetFeatureOrThrow (r.Causal.GoldChg30, nameof (r.Causal.GoldChg30)));
+            // FNG: 0 — валидное значение индекса. Отсутствие должно быть null (и падать fail-fast).
+            var fng = r.Fng ?? throw new InvalidOperationException($"[features] missing '{nameof(r.Fng)}' at entry={ctx.Stamp.EntryUtc:O}");
+            var fngNorm = (fng - 50.0) / 50.0;
+            ctx.Add(fngNorm);
 
-			// Эти метрики уже нормализуются как у тебя.
-			ctx.Add (r.Causal.GetFeatureOrThrow (r.Causal.SolRsiCentered, nameof (r.Causal.SolRsiCentered)) / 100.0);
-			ctx.Add (r.Causal.GetFeatureOrThrow (r.Causal.RsiSlope3, nameof (r.Causal.RsiSlope3)) / 100.0);
-			}
-		}
-	}
+            ctx.Add(r.DxyChg30, nameof(r.DxyChg30));
+            ctx.Add(r.GoldChg30, nameof(r.GoldChg30));
+
+            ctx.Add(r.SolRsiCentered, nameof(r.SolRsiCentered));
+            ctx.Add(r.RsiSlope3, nameof(r.RsiSlope3));
+
+            // Нормализация (как у тебя было): делим на 100.
+            ctx.Features[^2] /= 100.0; // SolRsiCentered
+            ctx.Features[^1] /= 100.0; // RsiSlope3
+        }
+    }
+}

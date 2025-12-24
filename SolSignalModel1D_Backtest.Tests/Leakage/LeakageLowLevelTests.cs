@@ -17,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var nyTz = TimeZones.NewYork;
 			var nyLocal = new DateTime (2025, 1, 6, 8, 0, 0, DateTimeKind.Unspecified);
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (nyLocal, nyTz);
-			var endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var endUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 
 			double entryPrice = 100.0;
 			double minMove = 0.02;
@@ -157,7 +157,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var nyTz = TimeZones.NewYork;
 
 			var dayStartUtc = new DateTime (2025, 5, 20, 1, 0, 0, DateTimeKind.Utc);
-			var baselineExit = Windowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
+			var baselineExit = NyWindowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
 
 			double entryPrice = 100.0;
 			double dayMinMove = 0.03;

@@ -1,52 +1,39 @@
 ﻿using System;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Utils.Time
 {
-    /// <summary>
-    /// Единый явный контракт времени для каузального пайплайна.
-    ///
-    /// Важно различать:
-    /// - EntryUtc: реальный момент входа (timestamp), используется для окон (1h/1m), словарей по OpenTimeUtc и т.п.
-    /// - DayKeyUtc: ключ дня (date-only в UTC), используется для Train/OOS границ, агрегаций и сопоставления дней.
-    /// </summary>
     public static class CausalTimeKey
     {
-        public static DateTime EntryUtc(BacktestRecord r)
+        public static EntryUtc EntryUtc(BacktestRecord r)
         {
             if (r == null) throw new ArgumentNullException(nameof(r));
             if (r.Causal == null)
                 throw new InvalidOperationException("[time] BacktestRecord.Causal is null (invalid record).");
 
             var t = r.Causal.EntryUtc;
-            if (t.Kind != DateTimeKind.Utc)
-                throw new InvalidOperationException($"[time] BacktestRecord.Causal.EntryUtc must be UTC. Got Kind={t.Kind}, t={t:O}.");
+            if (t.Equals(default(EntryUtc)))
+                throw new InvalidOperationException("[time] BacktestRecord.Causal.EntryUtc is default (invalid record).");
 
             return t;
         }
 
-        public static DateTime EntryUtc(LabeledCausalRow r)
+        public static NyTradingEntryUtc EntryUtc(LabeledCausalRow r)
         {
             if (r == null) throw new ArgumentNullException(nameof(r));
             if (r.Causal == null)
                 throw new InvalidOperationException("[time] LabeledCausalRow.Causal is null (invalid row).");
 
             var t = r.Causal.EntryUtc;
-            if (t.Kind != DateTimeKind.Utc)
-                throw new InvalidOperationException($"[time] LabeledCausalRow.Causal.EntryUtc must be UTC. Got Kind={t.Kind}, t={t:O}.");
+            if (t.Equals(default(NyTradingEntryUtc)))
+                throw new InvalidOperationException("[time] LabeledCausalRow.Causal.EntryUtc is default (invalid row).");
 
             return t;
         }
 
-        public static DateTime DayKeyUtc(BacktestRecord r)
-        {
-            return EntryUtc(r).ToCausalDateUtc();
-        }
-
-        public static DateTime DayKeyUtc(LabeledCausalRow r)
-        {
-            return EntryUtc(r).ToCausalDateUtc();
-        }
+        public static DayKeyUtc DayKeyUtc(BacktestRecord r) => r.Causal.DayKeyUtc;
+        public static DayKeyUtc DayKeyUtc(LabeledCausalRow r) => r.Causal.DayKeyUtc;
     }
 }

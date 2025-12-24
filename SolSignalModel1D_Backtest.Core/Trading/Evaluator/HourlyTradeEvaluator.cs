@@ -1,9 +1,14 @@
 ﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
-	{
+{
 	public sealed class HourlyTpSlReport
-		{
+	{
 		public double TotalPnlPct { get; set; }
 		public double TotalPnlMultiplier { get; set; }
 		public double MaxDrawdownPct { get; set; }
@@ -12,26 +17,25 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 		public int TpFirst { get; set; }
 		public int SlFirst { get; set; }
 		public int Ambiguous { get; set; }
-		}
+	}
 
 	public enum HourlyTradeResult
-		{
+	{
 		None = 0,
 		TpFirst = 1,
 		SlFirst = 2,
 		Ambiguous = 3
-		}
+	}
 
 	public sealed class HourlyTradeOutcome
-		{
+	{
 		public HourlyTradeResult Result { get; set; }
 		public double TpPct { get; set; }
 		public double SlPct { get; set; }
-		}
+	}
 
 	public static class HourlyTradeEvaluator
-		{
-		// Дни с minMove ниже порога считаются неторгуемым шумом: это бизнес-правило,
+	{
 		private const double MinDayTradeable = 0.018;
 
 		private const double StrongTpMul = 1.25;
@@ -44,10 +48,7 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 		private const double WeakTpFloor = 0.017;
 		private const double WeakSlFloor = 0.008;
 
-		/// <summary>
-		/// Для "не применимо" (нет направления, minMove ниже порога, нет баров) вернёт None.
-		/// </summary>
-		public static HourlyTradeOutcome EvaluateOne (
+		public static HourlyTradeOutcome EvaluateOne(
 			IReadOnlyList<Candle1h> candles1h,
 			DateTime entryUtc,
 			bool goLong,
@@ -55,9 +56,9 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			double entryPrice,
 			double dayMinMove,
 			bool strongSignal,
-			TimeZoneInfo nyTz )
-			{
-			if (!TryEvaluateOne (
+			TimeZoneInfo nyTz)
+		{
+			if (!TryEvaluateOne(
 					candles1h: candles1h,
 					entryUtc: entryUtc,
 					goLong: goLong,
@@ -67,20 +68,14 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 					strongSignal: strongSignal,
 					nyTz: nyTz,
 					out var outcome))
-				{
-				// "Не применимо" — это не ошибка пайплайна, это отсутствие сделки/окна.
+			{
 				return outcome;
-				}
-
-			return outcome;
 			}
 
-		/// <summary>
-		/// "Try" вариант:
-		/// - Возвращает false, если оценка не применима (нет направления, minMove ниже порога, нет баров в окне).
-		/// - Бросает исключение, если нарушены контракты/данные неконсистентны (null/empty свечи, NaN, weekend-окно и т.п.).
-		/// </summary>
-		public static bool TryEvaluateOne (
+			return outcome;
+		}
+
+		public static bool TryEvaluateOne(
 			IReadOnlyList<Candle1h> candles1h,
 			DateTime entryUtc,
 			bool goLong,
@@ -89,360 +84,322 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			double dayMinMove,
 			bool strongSignal,
 			TimeZoneInfo nyTz,
-			out HourlyTradeOutcome outcome )
-			{
+			out HourlyTradeOutcome outcome)
+		{
 			outcome = new HourlyTradeOutcome
-				{
+			{
 				Result = HourlyTradeResult.None,
 				TpPct = 0.0,
 				SlPct = 0.0
-				};
+			};
 
 			if (candles1h == null)
-				throw new ArgumentNullException (nameof (candles1h), "[hourly] candles1h is required.");
+				throw new ArgumentNullException(nameof(candles1h), "[hourly] candles1h is required.");
 
 			if (candles1h.Count == 0)
-				throw new InvalidOperationException ("[hourly] candles1h is empty: cannot evaluate.");
+				throw new InvalidOperationException("[hourly] candles1h is empty: cannot evaluate.");
 
 			if (nyTz == null)
-				throw new ArgumentNullException (nameof (nyTz));
+				throw new ArgumentNullException(nameof(nyTz));
 
 			if (entryUtc.Kind != DateTimeKind.Utc)
-				throw new InvalidOperationException ($"[hourly] entryUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
+				throw new InvalidOperationException($"[hourly] entryUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
 
-			// Контракт направления:
-			// - goLong XOR goShort => ок
-			// - оба false => "нет сделки" (не применимо)
-			// - оба true => ошибка (противоречие сигнала)
 			if (goLong == goShort)
-				{
+			{
 				if (!goLong)
 					return false;
 
-				throw new InvalidOperationException ("[hourly] Invalid direction: expected goLong XOR goShort.");
-				}
+				throw new InvalidOperationException("[hourly] Invalid direction: expected goLong XOR goShort.");
+			}
 
-			if (entryPrice <= 0.0 || double.IsNaN (entryPrice) || double.IsInfinity (entryPrice))
-				throw new ArgumentOutOfRangeException (nameof (entryPrice), entryPrice, "[hourly] entryPrice must be finite and > 0.");
+			if (entryPrice <= 0.0 || double.IsNaN(entryPrice) || double.IsInfinity(entryPrice))
+				throw new ArgumentOutOfRangeException(nameof(entryPrice), entryPrice, "[hourly] entryPrice must be finite and > 0.");
 
-			if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
-				{
-				throw new ArgumentOutOfRangeException (
-					nameof (dayMinMove),
+			if (double.IsNaN(dayMinMove) || double.IsInfinity(dayMinMove) || dayMinMove <= 0.0)
+			{
+				throw new ArgumentOutOfRangeException(
+					nameof(dayMinMove),
 					dayMinMove,
 					"[hourly] dayMinMove must be finite and > 0. " +
-					"Non-positive/NaN/Inf dayMinMove indicates an upstream bug (windowing/features/labeling).");
-				}
+					"Non-positive/NaN/Inf dayMinMove indicates an upstream bug (NyWindowing/features/labeling).");
+			}
 
 			if (dayMinMove < MinDayTradeable)
 				return false;
 
-			EnsureStrictlyAscendingUtc (candles1h, c => c.OpenTimeUtc, "hourly.candles1h");
+			EnsureStrictlyAscendingUtc(candles1h, c => c.OpenTimeUtc, "hourly.candles1h");
 
 			DateTime endUtc;
 			try
-				{
-				endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
-				}
+			{
+				endUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz);
+			}
 			catch (Exception ex)
-				{
-				throw new InvalidOperationException (
+			{
+				throw new InvalidOperationException(
 					$"[hourly] Failed to compute baseline-exit for entry {entryUtc:O}. " +
 					"Weekend entries must not reach HourlyTradeEvaluator by contract.",
 					ex);
-				}
+			}
 
 			if (endUtc <= entryUtc)
-				throw new InvalidOperationException ($"[hourly] Invalid baseline window: endUtc<=entryUtc for {entryUtc:O}, end={endUtc:O}.");
+				throw new InvalidOperationException($"[hourly] Invalid baseline window: endUtc<=entryUtc for {entryUtc:O}, end={endUtc:O}.");
 
-			int startIdx = LowerBoundOpenTimeUtc (candles1h, entryUtc);
-			int endIdxExclusive = LowerBoundOpenTimeUtc (candles1h, endUtc);
+			int startIdx = LowerBoundOpenTimeUtc(candles1h, entryUtc);
+			int endIdxExclusive = LowerBoundOpenTimeUtc(candles1h, endUtc);
 
 			if (endIdxExclusive <= startIdx)
-				return false; // нет 1h-баров в окне — "не применимо"
+				return false;
 
-			ComputeTpSlPct (dayMinMove, strongSignal, out double tpPct, out double slPct);
+			ComputeTpSlPct(dayMinMove, strongSignal, out double tpPct, out double slPct);
 			outcome.TpPct = tpPct;
 			outcome.SlPct = slPct;
 
 			double tpPrice, slPrice;
 			if (goLong)
-				{
+			{
 				tpPrice = entryPrice * (1.0 + tpPct);
 				slPrice = entryPrice * (1.0 - slPct);
-				}
+			}
 			else
-				{
+			{
 				tpPrice = entryPrice * (1.0 - tpPct);
 				slPrice = entryPrice * (1.0 + slPct);
-				}
+			}
 
 			for (int i = startIdx; i < endIdxExclusive; i++)
-				{
+			{
 				var bar = candles1h[i];
 
 				if (goLong)
-					{
+				{
 					bool tpInBar = bar.High >= tpPrice;
 					bool slInBar = bar.Low <= slPrice;
 
-					if (tpInBar && slInBar)
-						{
-						outcome.Result = HourlyTradeResult.Ambiguous;
-						return true;
-						}
-
-					if (tpInBar)
-						{
-						outcome.Result = HourlyTradeResult.TpFirst;
-						return true;
-						}
-
-					if (slInBar)
-						{
-						outcome.Result = HourlyTradeResult.SlFirst;
-						return true;
-						}
-					}
+					if (tpInBar && slInBar) { outcome.Result = HourlyTradeResult.Ambiguous; return true; }
+					if (tpInBar) { outcome.Result = HourlyTradeResult.TpFirst; return true; }
+					if (slInBar) { outcome.Result = HourlyTradeResult.SlFirst; return true; }
+				}
 				else
-					{
+				{
 					bool tpInBar = bar.Low <= tpPrice;
 					bool slInBar = bar.High >= slPrice;
 
-					if (tpInBar && slInBar)
-						{
-						outcome.Result = HourlyTradeResult.Ambiguous;
-						return true;
-						}
-
-					if (tpInBar)
-						{
-						outcome.Result = HourlyTradeResult.TpFirst;
-						return true;
-						}
-
-					if (slInBar)
-						{
-						outcome.Result = HourlyTradeResult.SlFirst;
-						return true;
-						}
-					}
+					if (tpInBar && slInBar) { outcome.Result = HourlyTradeResult.Ambiguous; return true; }
+					if (tpInBar) { outcome.Result = HourlyTradeResult.TpFirst; return true; }
+					if (slInBar) { outcome.Result = HourlyTradeResult.SlFirst; return true; }
 				}
+			}
 
 			outcome.Result = HourlyTradeResult.None;
 			return true;
-			}
+		}
 
-		/// <summary>
-		/// Прогон по всем сделкам.
-		/// </summary>
-		public static HourlyTpSlReport Evaluate (
+		public static HourlyTpSlReport Evaluate(
 			IReadOnlyList<BacktestRecord> records,
 			IReadOnlyList<Candle1h> candles1h,
-			TimeZoneInfo nyTz )
-			{
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (candles1h == null) throw new ArgumentNullException (nameof (candles1h));
-			if (candles1h.Count == 0) throw new InvalidOperationException ("[hourly] candles1h is empty: cannot evaluate report.");
-			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+			TimeZoneInfo nyTz)
+		{
+			if (records == null) throw new ArgumentNullException(nameof(records));
+			if (candles1h == null) throw new ArgumentNullException(nameof(candles1h));
+			if (candles1h.Count == 0) throw new InvalidOperationException("[hourly] candles1h is empty: cannot evaluate report.");
+			if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-			EnsureStrictlyAscendingUtc (candles1h, c => c.OpenTimeUtc, "hourly.candles1h");
-			EnsureStrictlyAscendingUtc (records, r => r.DateUtc, "hourly.records");
+			EnsureStrictlyAscendingUtc(candles1h, c => c.OpenTimeUtc, "hourly.candles1h");
+			EnsureStrictlyAscendingUtc(records, r => r.Causal.EntryUtc.Value, "hourly.records");
 
-			var report = new HourlyTpSlReport ();
+			var report = new HourlyTpSlReport();
 
 			double equity = 1.0;
 			double peak = 1.0;
 			double maxDd = 0.0;
 
 			for (int ri = 0; ri < records.Count; ri++)
-				{
+			{
 				var rec = records[ri];
 
 				bool goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
 				bool goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
 
-				// "нет сделки" — штатная ситуация.
 				if (!goLong && !goShort)
 					continue;
 
-				// Противоречивый сигнал — это ошибка (внутренний инвариант модели/агрегации).
 				if (goLong && goShort)
-					{
-					throw new InvalidOperationException (
-						$"[hourly] Conflicting direction for day={rec.DateUtc:O}: goLong=true and goShort=true. " +
+				{
+					throw new InvalidOperationException(
+						$"[hourly] Conflicting direction for entry={rec.Causal.EntryUtc.Value:O} dayKey={rec.Causal.DayKeyUtc.Value:O}: goLong=true and goShort=true. " +
 						"Fix the upstream label aggregation (PredLabel/Micro flags).");
-					}
+				}
 
 				double dayMinMove = rec.MinMove;
-				if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[hourly] Invalid rec.MinMove={dayMinMove} for day={rec.DateUtc:O}. " +
-						"MinMove must be finite and > 0. Fix the upstream MinMove computation/windowing.");
-					}
+				if (double.IsNaN(dayMinMove) || double.IsInfinity(dayMinMove) || dayMinMove <= 0.0)
+				{
+					throw new InvalidOperationException(
+						$"[hourly] Invalid rec.MinMove={dayMinMove} for entry={rec.Causal.EntryUtc.Value:O}. " +
+						"MinMove must be finite and > 0. Fix the upstream MinMove computation/NyWindowing.");
+				}
 
 				if (dayMinMove < MinDayTradeable)
 					continue;
 
 				double entry = rec.Entry;
-				if (entry <= 0.0 || double.IsNaN (entry) || double.IsInfinity (entry))
-					throw new InvalidOperationException ($"[hourly] Invalid rec.Entry={entry} for day={rec.DateUtc:O}.");
+				if (entry <= 0.0 || double.IsNaN(entry) || double.IsInfinity(entry))
+					throw new InvalidOperationException($"[hourly] Invalid rec.Entry={entry} for entry={rec.Causal.EntryUtc.Value:O}.");
 
 				bool strongSignal = rec.PredLabel == 0 || rec.PredLabel == 2;
 
-				DateTime start = rec.DateUtc;
+				DateTime start = rec.Causal.EntryUtc.Value;
 
 				DateTime end;
 				try
-					{
-					end = Windowing.ComputeBaselineExitUtc (start, nyTz);
-					}
+				{
+					end = NyWindowing.ComputeBaselineExitUtc(rec.Causal.EntryUtc, nyTz);
+				}
 				catch (Exception ex)
-					{
-					throw new InvalidOperationException (
-						$"[hourly] Failed to compute baseline-exit for record day={start:O}. " +
+				{
+					throw new InvalidOperationException(
+						$"[hourly] Failed to compute baseline-exit for entry={start:O}. " +
 						"Weekend entries must not exist here by contract.",
 						ex);
-					}
+				}
 
-				int startIdx = LowerBoundOpenTimeUtc (candles1h, start);
-				int endIdxExclusive = LowerBoundOpenTimeUtc (candles1h, end);
+				int startIdx = LowerBoundOpenTimeUtc(candles1h, start);
+				int endIdxExclusive = LowerBoundOpenTimeUtc(candles1h, end);
 				if (endIdxExclusive <= startIdx)
-					continue; // нет баров в окне — штатно пропускаем сделку
+					continue;
 
 				report.Trades++;
 
-				ComputeTpSlPct (dayMinMove, strongSignal, out double tpPct, out double slPct);
+				ComputeTpSlPct(dayMinMove, strongSignal, out double tpPct, out double slPct);
 
 				double tpPrice, slPrice;
 				if (goLong)
-					{
+				{
 					tpPrice = entry * (1.0 + tpPct);
 					slPrice = entry * (1.0 - slPct);
-					}
+				}
 				else
-					{
+				{
 					tpPrice = entry * (1.0 - tpPct);
 					slPrice = entry * (1.0 + slPct);
-					}
+				}
 
 				bool hitTp = false;
 				bool hitSl = false;
 				bool isAmb = false;
 
 				for (int i = startIdx; i < endIdxExclusive; i++)
-					{
+				{
 					var bar = candles1h[i];
 
 					if (goLong)
-						{
+					{
 						bool tpInBar = bar.High >= tpPrice;
 						bool slInBar = bar.Low <= slPrice;
 
 						if (tpInBar && slInBar) { isAmb = true; break; }
 						if (tpInBar) { hitTp = true; break; }
 						if (slInBar) { hitSl = true; break; }
-						}
+					}
 					else
-						{
+					{
 						bool tpInBar = bar.Low <= tpPrice;
 						bool slInBar = bar.High >= slPrice;
 
 						if (tpInBar && slInBar) { isAmb = true; break; }
 						if (tpInBar) { hitTp = true; break; }
 						if (slInBar) { hitSl = true; break; }
-						}
 					}
+				}
 
 				if (isAmb)
-					{
+				{
 					report.Ambiguous++;
-					continue; // неоднозначность не включаем в PnL (консервативное правило)
-					}
+					continue;
+				}
 
 				double tradeRet;
 				if (hitTp)
-					{
+				{
 					report.TpFirst++;
 					tradeRet = tpPct;
-					}
+				}
 				else if (hitSl)
-					{
+				{
 					report.SlFirst++;
 					tradeRet = -slPct;
-					}
+				}
 				else
-					{
-					// Ни TP ни SL до t_exit: закрываемся по Close последней 1h свечи окна.
+				{
 					double closePrice = candles1h[endIdxExclusive - 1].Close;
 
 					if (goLong)
 						tradeRet = (closePrice - entry) / entry;
 					else
 						tradeRet = (entry - closePrice) / entry;
-					}
+				}
 
 				equity *= 1.0 + tradeRet;
 				if (equity > peak) peak = equity;
 
 				double dd = (peak - equity) / peak;
 				if (dd > maxDd) maxDd = dd;
-				}
+			}
 
 			report.TotalPnlMultiplier = equity;
 			report.TotalPnlPct = (equity - 1.0) * 100.0;
 			report.MaxDrawdownPct = maxDd * 100.0;
 
 			return report;
-			}
+		}
 
-		private static void ComputeTpSlPct ( double dayMinMove, bool strongSignal, out double tpPct, out double slPct )
-			{
+		private static void ComputeTpSlPct(double dayMinMove, bool strongSignal, out double tpPct, out double slPct)
+		{
 			if (strongSignal)
-				{
-				tpPct = Math.Max (StrongTpFloor, dayMinMove * StrongTpMul);
-				slPct = Math.Max (StrongSlFloor, dayMinMove * StrongSlMul);
-				}
-			else
-				{
-				tpPct = Math.Max (WeakTpFloor, dayMinMove * WeakTpMul);
-				slPct = Math.Max (WeakSlFloor, dayMinMove * WeakSlMul);
-				}
-			}
-
-		private static int LowerBoundOpenTimeUtc ( IReadOnlyList<Candle1h> all, DateTime t )
 			{
+				tpPct = Math.Max(StrongTpFloor, dayMinMove * StrongTpMul);
+				slPct = Math.Max(StrongSlFloor, dayMinMove * StrongSlMul);
+			}
+			else
+			{
+				tpPct = Math.Max(WeakTpFloor, dayMinMove * WeakTpMul);
+				slPct = Math.Max(WeakSlFloor, dayMinMove * WeakSlMul);
+			}
+		}
+
+		private static int LowerBoundOpenTimeUtc(IReadOnlyList<Candle1h> all, DateTime t)
+		{
 			int lo = 0;
 			int hi = all.Count;
 
 			while (lo < hi)
-				{
+			{
 				int mid = lo + ((hi - lo) >> 1);
 				if (all[mid].OpenTimeUtc < t) lo = mid + 1;
 				else hi = mid;
-				}
-
-			return lo;
 			}
 
-		private static void EnsureStrictlyAscendingUtc<T> ( IReadOnlyList<T> list, Func<T, DateTime> key, string name )
-			{
-			if (list == null) throw new ArgumentNullException (nameof (list));
-			if (key == null) throw new ArgumentNullException (nameof (key));
+			return lo;
+		}
+
+		private static void EnsureStrictlyAscendingUtc<T>(IReadOnlyList<T> list, Func<T, DateTime> key, string name)
+		{
+			if (list == null) throw new ArgumentNullException(nameof(list));
+			if (key == null) throw new ArgumentNullException(nameof(key));
 
 			for (int i = 1; i < list.Count; i++)
-				{
-				var prev = key (list[i - 1]);
-				var cur = key (list[i]);
+			{
+				var prev = key(list[i - 1]);
+				var cur = key(list[i]);
 
 				if (cur <= prev)
-					{
-					throw new InvalidOperationException (
+				{
+					throw new InvalidOperationException(
 						$"[{name}] Series must be strictly ascending by time. " +
 						$"i={i}, prev={prev:O}, cur={cur:O}.");
-					}
 				}
 			}
 		}
 	}
+}

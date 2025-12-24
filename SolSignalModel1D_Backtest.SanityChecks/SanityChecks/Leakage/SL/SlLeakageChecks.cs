@@ -72,7 +72,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 						Success = false,
 						Summary = $"[sl] invalid Causal.MinMove={dayMinMove:0.######} for day={c.DateUtc:O}."
 						};
-					bad.Errors.Add ("[sl] Causal.MinMove must be finite and > 0. Fix upstream MinMove computation/windowing.");
+					bad.Errors.Add ("[sl] Causal.MinMove must be finite and > 0. Fix upstream MinMove computation/NyWindowing.");
 					return bad;
 					}
 

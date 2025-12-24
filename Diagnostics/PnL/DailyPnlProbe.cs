@@ -4,207 +4,203 @@ using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
-	{
-	/// <summary>
-	/// Простейший PnL-пробник по BacktestRecord:
-	/// - делит записи на train/OOS по TrainBoundary (baseline-exit);
-	/// - строит "наивный" PnL без плеча, SL, delayed и Anti-D;
-	/// - печатает метрики отдельно для train и OOS.
-	/// </summary>
-	public static class DailyPnlProbe
-		{
-		public static void RunSimpleProbe (
-			IReadOnlyList<BacktestRecord> records,
-			DateTime trainUntilUtc,
-			TimeZoneInfo nyTz )
-			{
-			if (records == null || records.Count == 0)
-				{
-				Console.WriteLine ("[pnl-probe] records is null or empty – nothing to compute.");
-				return;
-				}
+{
+    public static class DailyPnlProbe
+    {
+        public static void RunSimpleProbe(
+            IReadOnlyList<BacktestRecord> records,
+            DateTime trainUntilUtc,
+            TimeZoneInfo nyTz)
+        {
+            if (records == null || records.Count == 0)
+            {
+                Console.WriteLine("[pnl-probe] records is null or empty – nothing to compute.");
+                return;
+            }
 
-			if (trainUntilUtc == default)
-				{
-				Console.WriteLine ("[pnl-probe] trainUntilUtc is default(DateTime) – nothing to compute.");
-				return;
-				}
+            if (trainUntilUtc == default)
+            {
+                Console.WriteLine("[pnl-probe] trainUntilUtc is default(DateTime) – nothing to compute.");
+                return;
+            }
 
-			if (nyTz == null)
-				{
-				Console.WriteLine ("[pnl-probe] nyTz is null – nothing to compute.");
-				return;
-				}
+            if (nyTz == null)
+            {
+                Console.WriteLine("[pnl-probe] nyTz is null – nothing to compute.");
+                return;
+            }
 
-			// Стабильный порядок по entryUtc.
-			var ordered = records
-				.OrderBy (r => r.Causal.DateUtc.ToCausalDateUtc())
-				.ToList ();
+            var ordered = records
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
 
-			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc.ToCausalDateUtc());
+            var boundary = new TrainBoundary(trainUntilUtc, nyTz);
+            var split = boundary.Split(ordered, r => r.Causal.EntryUtc.Value);
 
-			var train = split.Train;
-			var oos = split.Oos;
+            var train = split.Train;
+            var oos = split.Oos;
 
-			Console.WriteLine (
-				$"[pnl-probe] trainUntil(baseline-exit) = {boundary.TrainUntilIsoDate}, " +
-				$"totalRecords={ordered.Count}, train={train.Count}, oos={oos.Count}, excluded={split.Excluded.Count}");
+            Console.WriteLine(
+                $"[pnl-probe] trainUntil(baseline-exit) = {boundary.TrainUntilIsoDate}, " +
+                $"totalRecords={ordered.Count}, train={train.Count}, oos={oos.Count}, excluded={split.Excluded.Count}");
 
-			if (train.Count == 0 || oos.Count == 0)
-				{
-				Console.WriteLine ("[pnl-probe] WARNING: one of splits (train/OOS) is empty – results may be uninformative.");
-				}
+            if (train.Count == 0 || oos.Count == 0)
+            {
+                Console.WriteLine("[pnl-probe] WARNING: one of splits (train/OOS) is empty – results may be uninformative.");
+            }
 
-			if (split.Excluded.Count > 0)
-				{
-				Console.WriteLine ("[pnl-probe] WARNING: excluded days exist (baseline-exit undefined). They are ignored.");
-				}
+            if (split.Excluded.Count > 0)
+            {
+                Console.WriteLine("[pnl-probe] WARNING: excluded days exist (baseline-exit undefined). They are ignored.");
+            }
 
-			var trainStats = ComputeSimplePnlStats (train);
-			var oosStats = ComputeSimplePnlStats (oos);
+            var trainStats = ComputeSimplePnlStats(train);
+            var oosStats = ComputeSimplePnlStats(oos);
 
-			PrintStats ("[pnl-probe] TRAIN", trainStats);
-			PrintStats ("[pnl-probe] OOS  ", oosStats);
-			}
+            PrintStats("[pnl-probe] TRAIN", trainStats);
+            PrintStats("[pnl-probe] OOS  ", oosStats);
+        }
 
-		private static SimplePnlStats ComputeSimplePnlStats ( IReadOnlyList<BacktestRecord> records )
-			{
-			if (records == null || records.Count == 0)
-				{
-				return SimplePnlStats.Empty;
-				}
+        private static SimplePnlStats ComputeSimplePnlStats(IReadOnlyList<BacktestRecord> records)
+        {
+            if (records == null || records.Count == 0)
+            {
+                return SimplePnlStats.Empty;
+            }
 
-			int trades = 0;
-			int wins = 0;
+            int trades = 0;
+            int wins = 0;
 
-			var returns = new List<double> (records.Count);
+            var returns = new List<double>(records.Count);
 
-			double equity = 1.0;
-			double peakEquity = 1.0;
-			double maxDrawdown = 0.0;
+            double equity = 1.0;
+            double peakEquity = 1.0;
+            double maxDrawdown = 0.0;
 
-			foreach (var rec in records)
-				{
-				var c = rec.Causal;
-				var f = rec.Forward;
+            foreach (var rec in records)
+            {
+                var c = rec.Causal;
+                var f = rec.Forward;
 
-				bool goLong =
-					c.PredLabel == 2 ||
-					(c.PredLabel == 1 && c.PredMicroUp);
+                bool goLong =
+                    c.PredLabel == 2 ||
+                    (c.PredLabel == 1 && c.PredMicroUp);
 
-				bool goShort =
-					c.PredLabel == 0 ||
-					(c.PredLabel == 1 && c.PredMicroDown);
+                bool goShort =
+                    c.PredLabel == 0 ||
+                    (c.PredLabel == 1 && c.PredMicroDown);
 
-				if (!goLong && !goShort)
-					{
-					continue;
-					}
+                if (!goLong && !goShort)
+                {
+                    continue;
+                }
 
-				if (f.Entry <= 0.0 || f.Close24 <= 0.0)
-					{
-					Console.WriteLine (
-						$"[pnl-probe] skip {c.DateUtc:yyyy-MM-dd}: invalid prices Entry={f.Entry}, Close24={f.Close24}");
-					continue;
-					}
+                if (f.Entry <= 0.0 || f.Close24 <= 0.0)
+                {
+                    var day = c.DayKeyUtc.Value;
 
-				double dayRet = (f.Close24 - f.Entry) / f.Entry;
+                    Console.WriteLine(
+                        $"[pnl-probe] skip {day:yyyy-MM-dd}: invalid prices Entry={f.Entry}, Close24={f.Close24}");
+                    continue;
+                }
 
-				if (goShort && !goLong)
-					{
-					dayRet = -dayRet;
-					}
-				else if (goLong && goShort)
-					{
-					Console.WriteLine (
-						$"[pnl-probe] ambiguous direction on {c.DateUtc:yyyy-MM-dd}, " +
-						$"PredLabel={c.PredLabel}, PredMicroUp={c.PredMicroUp}, PredMicroDown={c.PredMicroDown} – skip.");
-					continue;
-					}
+                double dayRet = (f.Close24 - f.Entry) / f.Entry;
 
-				trades++;
-				returns.Add (dayRet);
+                if (goShort && !goLong)
+                {
+                    dayRet = -dayRet;
+                }
+                else if (goLong && goShort)
+                {
+                    var day = c.DayKeyUtc.Value;
 
-				if (dayRet > 0)
-					{
-					wins++;
-					}
+                    Console.WriteLine(
+                        $"[pnl-probe] ambiguous direction on {day:yyyy-MM-dd}, " +
+                        $"PredLabel={c.PredLabel}, PredMicroUp={c.PredMicroUp}, PredMicroDown={c.PredMicroDown} – skip.");
+                    continue;
+                }
 
-				equity *= (1.0 + dayRet);
+                trades++;
+                returns.Add(dayRet);
 
-				if (equity > peakEquity)
-					{
-					peakEquity = equity;
-					}
+                if (dayRet > 0)
+                {
+                    wins++;
+                }
 
-				double dd = equity / peakEquity - 1.0;
-				if (dd < maxDrawdown)
-					{
-					maxDrawdown = dd;
-					}
-				}
+                equity *= (1.0 + dayRet);
 
-			if (trades == 0 || returns.Count == 0)
-				{
-				return SimplePnlStats.Empty;
-				}
+                if (equity > peakEquity)
+                {
+                    peakEquity = equity;
+                }
 
-			double totalRet = equity - 1.0;
-			double winRate = (double) wins / trades;
+                double dd = equity / peakEquity - 1.0;
+                if (dd < maxDrawdown)
+                {
+                    maxDrawdown = dd;
+                }
+            }
 
-			double mean = returns.Average ();
-			double variance = returns
-				.Select (r => (r - mean) * (r - mean))
-				.DefaultIfEmpty (0.0)
-				.Average ();
+            if (trades == 0 || returns.Count == 0)
+            {
+                return SimplePnlStats.Empty;
+            }
 
-			double std = Math.Sqrt (variance);
+            double totalRet = equity - 1.0;
+            double winRate = (double)wins / trades;
 
-			return new SimplePnlStats (
-				Trades: trades,
-				TotalReturn: totalRet,
-				WinRate: winRate,
-				MaxDrawdown: maxDrawdown,
-				MeanReturn: mean,
-				StdReturn: std);
-			}
+            double mean = returns.Average();
+            double variance = returns
+                .Select(r => (r - mean) * (r - mean))
+                .DefaultIfEmpty(0.0)
+                .Average();
 
-		private static void PrintStats ( string prefix, SimplePnlStats stats )
-			{
-			if (stats.Trades == 0)
-				{
-				Console.WriteLine ($"{prefix}: no trades.");
-				return;
-				}
+            double std = Math.Sqrt(variance);
 
-			Console.WriteLine (
-				$"{prefix}: trades={stats.Trades}, " +
-				$"totalPnL={stats.TotalReturn * 100.0:0.00} %, " +
-				$"winRate={stats.WinRate * 100.0:0.0} %, " +
-				$"maxDD={stats.MaxDrawdown * 100.0:0.0} %, " +
-				$"mean={stats.MeanReturn * 100.0:0.00} %, " +
-				$"std={stats.StdReturn * 100.0:0.00} %");
-			}
+            return new SimplePnlStats(
+                Trades: trades,
+                TotalReturn: totalRet,
+                WinRate: winRate,
+                MaxDrawdown: maxDrawdown,
+                MeanReturn: mean,
+                StdReturn: std);
+        }
 
-		private readonly record struct SimplePnlStats (
-			int Trades,
-			double TotalReturn,
-			double WinRate,
-			double MaxDrawdown,
-			double MeanReturn,
-			double StdReturn )
-			{
-			public static readonly SimplePnlStats Empty = new (
-				Trades: 0,
-				TotalReturn: 0.0,
-				WinRate: 0.0,
-				MaxDrawdown: 0.0,
-				MeanReturn: 0.0,
-				StdReturn: 0.0);
-			}
-		}
-	}
+        private static void PrintStats(string prefix, SimplePnlStats stats)
+        {
+            if (stats.Trades == 0)
+            {
+                Console.WriteLine($"{prefix}: no trades.");
+                return;
+            }
+
+            Console.WriteLine(
+                $"{prefix}: trades={stats.Trades}, " +
+                $"totalPnL={stats.TotalReturn * 100.0:0.00} %, " +
+                $"winRate={stats.WinRate * 100.0:0.0} %, " +
+                $"maxDD={stats.MaxDrawdown * 100.0:0.0} %, " +
+                $"mean={stats.MeanReturn * 100.0:0.00} %, " +
+                $"std={stats.StdReturn * 100.0:0.00} %");
+        }
+
+        private readonly record struct SimplePnlStats(
+            int Trades,
+            double TotalReturn,
+            double WinRate,
+            double MaxDrawdown,
+            double MeanReturn,
+            double StdReturn)
+        {
+            public static readonly SimplePnlStats Empty = new(
+                Trades: 0,
+                TotalReturn: 0.0,
+                WinRate: 0.0,
+                MaxDrawdown: 0.0,
+                MeanReturn: 0.0,
+                StdReturn: 0.0);
+        }
+    }
+}

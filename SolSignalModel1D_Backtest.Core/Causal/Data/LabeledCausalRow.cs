@@ -1,10 +1,8 @@
 ﻿using System;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 {
-    /// <summary>
-    /// Контракт для обучения: каузальные фичи + forward-истина отдельно.
-    /// </summary>
     public sealed class LabeledCausalRow
     {
         public CausalDataRow Causal { get; }
@@ -12,8 +10,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public bool FactMicroUp { get; }
         public bool FactMicroDown { get; }
 
-        public DateTime EntryUtc => Causal.EntryUtc;
-        public DateTime DayKeyUtc => Causal.DayKeyUtc;
+        public NyTradingEntryUtc EntryUtc => Causal.EntryUtc;
+        public DayKeyUtc DayKeyUtc => Causal.DayKeyUtc;
 
         public LabeledCausalRow(CausalDataRow causal, int trueLabel, bool factMicroUp, bool factMicroDown)
         {

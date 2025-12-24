@@ -121,7 +121,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				}
 
 			var trainUntilUtc = start.AddDays (179);
-			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+			var boundary = new TrainBoundary (trainUntilUtc, NyWindowing.NyTz);
 
 			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (records, boundary);
 
@@ -155,7 +155,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				}
 
 			var trainUntilUtc = start.AddDays (cut - 1);
-			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+			var boundary = new TrainBoundary (trainUntilUtc, NyWindowing.NyTz);
 
 			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (records, boundary);
 
@@ -181,7 +181,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				}
 
 			var trainUntilUtc = start.AddDays (1000);
-			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+			var boundary = new TrainBoundary (trainUntilUtc, NyWindowing.NyTz);
 
 			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (records, boundary);
 

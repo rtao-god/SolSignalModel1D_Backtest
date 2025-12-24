@@ -7,19 +7,18 @@ using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 {
     /// <summary>
-    /// Запись бэктеста за один день: каузальная часть (решение модели) + forward-факты рынка.
-    /// Инвариант: Causal не должен зависеть от Forward-фактов будущего окна.
+    /// Запись бэктеста за один день: каузальная часть + forward-факты рынка.
     /// </summary>
     public sealed class BacktestRecord
     {
         public required CausalPredictionRecord Causal { get; init; }
         public required ForwardOutcomes Forward { get; init; }
 
-        // ===== Identity =====
-        public DateTime EntryUtc => Causal.EntryUtc;
-        public DateTime DayKeyUtc => Causal.DayKeyUtc;
+        // ===== Identity (legacy proxies) =====
+        public DateTime EntryUtc => Causal.EntryUtc.Value;
+        public DateTime DayKeyUtc => Causal.DayKeyUtc.Value;
 
-        // ===== Truth (истина) — хранится в Forward, чтобы каузальный слой физически не мог “подсмотреть” =====
+        // ===== Truth =====
         public int TrueLabel => Forward.TrueLabel;
         public bool FactMicroUp => Forward.FactMicroUp;
         public bool FactMicroDown => Forward.FactMicroDown;
@@ -71,7 +70,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public double? Conf_SlLong => Causal.Conf_SlLong;
         public double? Conf_SlShort => Causal.Conf_SlShort;
 
-        // ===== Delayed runtime (каузальная часть: решения/гейты/параметры) =====
+        // ===== Delayed runtime (каузальная часть) =====
         public string? DelayedSource => Causal.DelayedSource;
         public bool? DelayedEntryAsked => Causal.DelayedEntryAsked;
         public bool? DelayedEntryUsed => Causal.DelayedEntryUsed;
@@ -87,7 +86,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public DateTime? DelayedEntryExecutedAtUtc => DelayedExecution?.ExecutedAtUtc;
         public DelayedIntradayResult? DelayedIntradayResult => DelayedExecution?.IntradayResult;
 
-        // ===== Прочее состояние симуляции =====
         public bool AntiDirectionApplied { get; set; }
     }
 }

@@ -289,7 +289,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var lastOpenLocal = startLocal.AddHours (6 * (total6h - 1));
 			var lastOpenUtc = TimeZoneInfo.ConvertTimeToUtc (lastOpenLocal, nyTz);
 
-			var lastExitUtc = Windowing.ComputeBaselineExitUtc (lastOpenUtc, nyTz);
+			var lastExitUtc = NyWindowing.ComputeBaselineExitUtc (lastOpenUtc, nyTz);
 			var lastExitLocal = TimeZoneInfo.ConvertTimeFromUtc (lastExitUtc, nyTz);
 
 			var totalMinutes = (int) Math.Ceiling ((lastExitLocal - firstMinuteLocal).TotalMinutes) + 60;

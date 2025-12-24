@@ -64,7 +64,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 						"MinMove должен быть > 0; исправлять нужно генератор MinMove, а не подставлять дефолты.");
 
 				DateTime endUtc;
-				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
+				try { endUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
 				catch (Exception ex)
 					{
 					throw new InvalidOperationException (

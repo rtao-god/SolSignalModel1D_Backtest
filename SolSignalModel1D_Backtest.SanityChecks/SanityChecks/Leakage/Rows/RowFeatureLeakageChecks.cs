@@ -5,7 +5,7 @@ using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 {
@@ -75,7 +75,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
                 if (sol1mSorted != null && nyTz != null)
                 {
-                    var exitUtc = CoreWindowing.ComputeBaselineExitUtc(entryUtc, nyTz);
+                    var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz);
                     var future1m = FindFirstMinuteAfter(sol1mSorted, exitUtc);
                     if (future1m != null)
                     {

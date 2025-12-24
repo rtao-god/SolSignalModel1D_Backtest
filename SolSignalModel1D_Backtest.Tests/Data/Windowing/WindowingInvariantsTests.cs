@@ -1,9 +1,9 @@
 ﻿using System;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Infra;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
+namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 	{
 	/// <summary>
 	/// Инварианты окна дневной сделки:
@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 	/// - пятница переносится на ближайшее рабочее утро;
 	/// - IsNyMorning помечает только будние 7/8 часов.
 	/// </summary>
-	public sealed class WindowingInvariantsTests
+	public sealed class NyWindowingInvariantsTests
 		{
 		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocal, NyTz);
 
 			Assert.Throws<InvalidOperationException> (() =>
-				CoreWindowing.ComputeBaselineExitUtc (entryUtc, NyTz));
+				CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, NyTz));
 			}
 
 		[Fact]
@@ -33,7 +33,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			var entryLocal = new DateTime (2024, 3, 8, 8, 0, 0, DateTimeKind.Unspecified);
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocal, NyTz);
 
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, NyTz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, NyTz);
 			var exitLocal = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, NyTz);
 
 			// Должен быть первый рабочий день после уикенда.
@@ -58,9 +58,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			var saturdayLocal = new DateTime (2024, 3, 9, 8, 0, 0, DateTimeKind.Unspecified);
 			var saturdayUtc = TimeZoneInfo.ConvertTimeToUtc (saturdayLocal, NyTz);
 
-			Assert.True (CoreWindowing.IsNyMorning (mondayMorningUtc, NyTz));
-			Assert.False (CoreWindowing.IsNyMorning (mondayNoonUtc, NyTz));
-			Assert.False (CoreWindowing.IsNyMorning (saturdayUtc, NyTz));
+			Assert.True (CoreNyWindowing.IsNyMorning (mondayMorningUtc, NyTz));
+			Assert.False (CoreNyWindowing.IsNyMorning (mondayNoonUtc, NyTz));
+			Assert.False (CoreNyWindowing.IsNyMorning (saturdayUtc, NyTz));
 			}
 		}
 	}

@@ -13,10 +13,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 		[Fact]
 		public void Build_CutsTrainRowsByBaselineExit_NotByEntryUtc ()
 			{
-			var nyTz = Windowing.NyTz;
+			var nyTz = NyWindowing.NyTz;
 
 			var entryUtc = NyTestDates.ToUtc (NyTestDates.NyLocal (2025, 1, 6, 8, 0));
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			Assert.True (exitUtc > entryUtc);
 
 			var rows = new List<LabeledCausalRow>
@@ -40,7 +40,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 		[Fact]
 		public void Build_AllTrainListsContainOnlyTrainEntries_ByTrainBoundary ()
 			{
-			var nyTz = Windowing.NyTz;
+			var nyTz = NyWindowing.NyTz;
 
 			var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
 				startNyLocalDate: NyTestDates.NyLocal (2025, 1, 1, 0),
@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				}
 
 			var pivotEntry = datesUtc[^20];
-			var pivotExit = Windowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
+			var pivotExit = NyWindowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
 			var trainUntilUtc = pivotExit.AddMinutes (1);
 
 			var boundary = new TrainBoundary (trainUntilUtc, nyTz);

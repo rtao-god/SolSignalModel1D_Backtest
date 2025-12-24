@@ -65,7 +65,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			if (countTotal <= 0) throw new ArgumentOutOfRangeException (nameof (countTotal));
 			if (countMicro < 0 || countMicro > countTotal) throw new ArgumentOutOfRangeException (nameof (countMicro));
 
-			var nyTz = Windowing.NyTz;
+			var nyTz = NyWindowing.NyTz;
 
 			var res = new List<LabeledCausalRow> (countTotal);
 			var dt = new DateTime (2024, 1, 2, 12, 0, 0, DateTimeKind.Utc);

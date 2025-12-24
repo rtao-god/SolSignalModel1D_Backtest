@@ -23,14 +23,15 @@ namespace SolSignalModel1D_Backtest
 			if (allRows.Count == 0)
 				throw new InvalidOperationException ("[engine] Пустой список LabeledCausalRow для обучения моделей");
 
-			var ordered = allRows
-				.OrderBy (r => r.Causal.DateUtc)
-				.ToList ();
+            // ordered:
+            var ordered = allRows
+                .OrderBy(r => r.EntryUtc.Value)
+                .ToList();
 
-			var minEntryUtc = ordered.First ().Causal.DateUtc;
-			var maxEntryUtc = ordered.Last ().Causal.DateUtc;
+            var minEntryUtc = ordered.First().EntryUtc.Value;
+            var maxEntryUtc = ordered.Last().EntryUtc.Value;
 
-			const int HoldoutDays = 120;
+            const int HoldoutDays = 120;
 
 			var trainUntilUtc = DeriveTrainUntilUtcFromHoldout (
 				maxEntryUtc: maxEntryUtc,
@@ -39,8 +40,8 @@ namespace SolSignalModel1D_Backtest
 
 			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
 
-			var split = boundary.Split (ordered, r => r.Causal.DateUtc);
-			var trainRows = split.Train;
+            var split = boundary.Split(ordered, r => r.EntryUtc.Value);
+            var trainRows = split.Train;
 
 			if (split.Excluded.Count > 0)
 				{
@@ -125,9 +126,9 @@ namespace SolSignalModel1D_Backtest
 
 			var orderedMornings = mornings as List<LabeledCausalRow> ?? mornings.ToList ();
 
-			var split = boundary.Split (orderedMornings, r => r.Causal.DateUtc);
+            var split = boundary.Split(orderedMornings, r => r.EntryUtc.Value);
 
-			Console.WriteLine (
+            Console.WriteLine (
 				$"[forward] mornings total={orderedMornings.Count}, train={split.Train.Count}, oos={split.Oos.Count}, excluded={split.Excluded.Count}, " +
 				$"trainUntil(baseline-exit)={boundary.TrainUntilIsoDate}");
 
@@ -211,7 +212,7 @@ namespace SolSignalModel1D_Backtest
 			return await Task.FromResult (list);
 			}
 
-		private static DateTime DeriveTrainUntilUtcFromHoldout ( DateTime maxEntryUtc, int holdoutDays, TimeZoneInfo nyTz )
+        private static DateTime DeriveTrainUntilUtcFromHoldout ( DateTime maxEntryUtc, int holdoutDays, TimeZoneInfo nyTz )
 			{
 			if (holdoutDays < 0) throw new ArgumentOutOfRangeException (nameof (holdoutDays));
 			if (maxEntryUtc == default) throw new ArgumentException ("maxEntryUtc must be initialized.", nameof (maxEntryUtc));
@@ -223,7 +224,7 @@ namespace SolSignalModel1D_Backtest
 				{
 				var ny = TimeZoneInfo.ConvertTimeFromUtc (candidateEntry, nyTz);
 				if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
-					return Windowing.ComputeBaselineExitUtc (candidateEntry, nyTz);
+					return NyWindowing.ComputeBaselineExitUtc (candidateEntry, nyTz);
 
 				candidateEntry = candidateEntry.AddDays (-1);
 				}
@@ -242,13 +243,13 @@ namespace SolSignalModel1D_Backtest
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-				var entryUtc = rows[i].Causal.DateUtc;
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
+                var entryUtc = r.EntryUtc.Value;
+                var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, nyTz);
 
 				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
 					continue;
 
-				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+				var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 
 				if (!hasAny || exitUtc > maxExit)
 					{

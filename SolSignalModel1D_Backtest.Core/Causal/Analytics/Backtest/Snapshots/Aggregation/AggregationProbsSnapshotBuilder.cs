@@ -2,316 +2,374 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Aggregation
-	{
-	/// <summary>
-	/// Билдёр snapshot-а вероятностей по сегментам.
-	/// Важно: никаких Console.WriteLine — только расчёты.
-	/// </summary>
-	public static class AggregationProbsSnapshotBuilder
-		{
-		public static AggregationProbsSnapshot Build (
-			IReadOnlyList<BacktestAggRow> rows,
-			TrainBoundary boundary,
-			int recentDays,
-			int debugLastDays )
-			{
-			if (rows == null) throw new ArgumentNullException (nameof (rows));
+{
+    public static class AggregationProbsSnapshotBuilder
+    {
+        public static AggregationProbsSnapshot Build(
+            AggregationInputSets sets,
+            int recentDays,
+            int debugLastDays)
+        {
+            if (sets == null) throw new ArgumentNullException(nameof(sets));
+            if (recentDays <= 0) throw new ArgumentOutOfRangeException(nameof(recentDays), "recentDays must be > 0.");
+            if (debugLastDays <= 0) throw new ArgumentOutOfRangeException(nameof(debugLastDays), "debugLastDays must be > 0.");
 
-			// ВАЖНО: boundary может быть struct в твоём коде.
-			// Проверку на null делаем только если это reference-type.
-			// Чтобы сделать "идеально" и без двусмысленности — пришли файл TrainBoundary.cs (см. список ниже).
-			if (recentDays <= 0) throw new ArgumentOutOfRangeException (nameof (recentDays), "recentDays must be > 0.");
-			if (debugLastDays <= 0) throw new ArgumentOutOfRangeException (nameof (debugLastDays), "debugLastDays must be > 0.");
+            var eligible = OrderAndValidateDayKey(sets.Eligible, "eligible");
+            var excluded = OrderAndValidateDayKey(sets.Excluded, "excluded");
+            var train = OrderAndValidateDayKey(sets.Train, "train");
+            var oos = OrderAndValidateDayKey(sets.Oos, "oos");
 
-			if (rows.Count == 0)
-				{
-				return new AggregationProbsSnapshot
-					{
-					MinDateUtc = default,
-					MaxDateUtc = default,
-					TotalInputRecords = 0,
-					ExcludedCount = 0,
-					Segments = Array.Empty<AggregationProbsSegmentSnapshot> (),
-					DebugLastDays = Array.Empty<AggregationProbsDebugRow> ()
-					};
-				}
+            EnsureSplitInvariants(sets.Boundary.TrainUntilDayKeyUtc, eligible, train, oos);
 
-			var ordered = rows
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+            int totalInput = eligible.Count + excluded.Count;
 
-			var minDateUtc = ordered[0].DateUtc;
-			var maxDateUtc = ordered[^1].DateUtc;
+            if (totalInput == 0)
+            {
+                return new AggregationProbsSnapshot
+                {
+                    MinDateUtc = default,
+                    MaxDateUtc = default,
+                    TotalInputRecords = 0,
+                    ExcludedCount = 0,
+                    Segments = Array.Empty<AggregationProbsSegmentSnapshot>(),
+                    DebugLastDays = Array.Empty<AggregationProbsDebugRow>()
+                };
+            }
 
-			var split = boundary.Split (ordered, r => r.DateUtc);
-			var train = split.Train;
-			var oos = split.Oos;
+            var (minDateUtc, maxDateUtc) = ComputeMinMaxUtc(eligible, excluded);
 
-			// Инвариант: excluded никогда не участвуют в метриках сегментов.
-			var eligible = new List<BacktestAggRow> (train.Count + oos.Count);
-			eligible.AddRange (train);
-			eligible.AddRange (oos);
+            var segments = new List<AggregationProbsSegmentSnapshot>(4);
 
-			// На всякий случай фиксируем порядок, чтобы Recent/Debug были детерминированны.
-			eligible = eligible.OrderBy (r => r.DateUtc).ToList ();
+            AddSegment(
+                segments,
+                segmentName: "Train",
+                segmentLabel: $"Train (day<= {sets.Boundary.TrainUntilIsoDate})",
+                train);
 
-			var segments = new List<AggregationProbsSegmentSnapshot> (4);
+            AddSegment(
+                segments,
+                segmentName: "OOS",
+                segmentLabel: $"OOS (day>  {sets.Boundary.TrainUntilIsoDate})",
+                oos);
 
-			AddSegment (
-				segments,
-				segmentName: "Train",
-				segmentLabel: $"Train (exit<= {boundary.TrainUntilIsoDate})",
-				train);
+            var recent = BuildRecent(eligible, recentDays);
+            AddSegment(
+                segments,
+                segmentName: "Recent",
+                segmentLabel: $"Recent({recentDays}d)",
+                recent);
 
-			AddSegment (
-				segments,
-				segmentName: "OOS",
-				segmentLabel: $"OOS (exit>  {boundary.TrainUntilIsoDate})",
-				oos);
+            AddSegment(
+                segments,
+                segmentName: "Full",
+                segmentLabel: "Full (eligible days)",
+                eligible);
 
-			var recent = BuildRecent (eligible, recentDays);
-			AddSegment (
-				segments,
-				segmentName: "Recent",
-				segmentLabel: $"Recent({recentDays}d)",
-				recent);
+            var debug = BuildDebugLastDays(eligible, debugLastDays);
 
-			AddSegment (
-				segments,
-				segmentName: "Full",
-				segmentLabel: "Full (eligible days)",
-				eligible);
+            return new AggregationProbsSnapshot
+            {
+                MinDateUtc = minDateUtc,
+                MaxDateUtc = maxDateUtc,
+                TotalInputRecords = totalInput,
+                ExcludedCount = excluded.Count,
+                Segments = segments,
+                DebugLastDays = debug
+            };
+        }
 
-			var debug = BuildDebugLastDays (eligible, debugLastDays);
+        private static List<BacktestAggRow> OrderAndValidateDayKey(IReadOnlyList<BacktestAggRow> rows, string setName)
+        {
+            if (rows == null) throw new ArgumentNullException(nameof(rows), $"[{setName}] set is null.");
 
-			return new AggregationProbsSnapshot
-				{
-				MinDateUtc = minDateUtc,
-				MaxDateUtc = maxDateUtc,
-				TotalInputRecords = ordered.Count,
-				ExcludedCount = split.Excluded.Count,
-				Segments = segments,
-				DebugLastDays = debug
-				};
-			}
+            if (rows.Count == 0)
+                return new List<BacktestAggRow>(0);
 
-		private static IReadOnlyList<BacktestAggRow> BuildRecent ( IReadOnlyList<BacktestAggRow> eligible, int recentDays )
-			{
-			if (eligible.Count == 0)
-				return Array.Empty<BacktestAggRow> ();
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].DayUtc.Equals(default(DayKeyUtc)))
+                    throw new InvalidOperationException($"[agg-probs] BacktestAggRow.DayUtc is default in {setName} set.");
+            }
 
-			var maxDateUtc = eligible[^1].DateUtc;
-			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
+            return rows.OrderBy(r => r.DayUtc.Value).ToList();
+        }
 
-			var recent = eligible
-				.Where (r => r.DateUtc >= fromRecentUtc)
-				.ToList ();
+        private static void EnsureSplitInvariants(
+            DayKeyUtc trainUntilDayKeyUtc,
+            IReadOnlyList<BacktestAggRow> eligible,
+            IReadOnlyList<BacktestAggRow> train,
+            IReadOnlyList<BacktestAggRow> oos)
+        {
+            if (trainUntilDayKeyUtc.Equals(default(DayKeyUtc)))
+                throw new InvalidOperationException("[agg-probs] trainUntilDayKeyUtc is default.");
 
-			// Если по каким-то причинам “recentDays” вырезал всё, возвращаем eligible,
-			// чтобы не печатать пустой сегмент, который вводит в заблуждение.
-			return recent.Count == 0 ? eligible : recent;
-			}
+            if (train.Count + oos.Count != eligible.Count)
+            {
+                throw new InvalidOperationException(
+                    $"[agg-probs] Split invariant violated: train({train.Count}) + oos({oos.Count}) != eligible({eligible.Count}).");
+            }
 
-		private static void AddSegment (
-			List<AggregationProbsSegmentSnapshot> dst,
-			string segmentName,
-			string segmentLabel,
-			IReadOnlyList<BacktestAggRow> seg )
-			{
-			if (seg == null) throw new ArgumentNullException (nameof (seg));
+            var cut = trainUntilDayKeyUtc.Value;
 
-			if (seg.Count == 0)
-				{
-				dst.Add (new AggregationProbsSegmentSnapshot
-					{
-					SegmentName = segmentName,
-					SegmentLabel = segmentLabel,
-					FromDateUtc = null,
-					ToDateUtc = null,
-					RecordsCount = 0,
-					Day = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
-					DayMicro = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
-					Total = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
-					AvgConfDay = 0,
-					AvgConfMicro = 0,
-					RecordsWithSlScore = 0
-					});
-				return;
-				}
+            for (int i = 0; i < train.Count; i++)
+            {
+                if (train[i].DayUtc.Value > cut)
+                    throw new InvalidOperationException($"[agg-probs] Train set contains day > trainUntil: {train[i].DayUtc.Value:O} > {cut:O}.");
+            }
 
-			double sumUpDay = 0, sumFlatDay = 0, sumDownDay = 0;
-			double sumUpDm = 0, sumFlatDm = 0, sumDownDm = 0;
-			double sumUpTot = 0, sumFlatTot = 0, sumDownTot = 0;
+            for (int i = 0; i < oos.Count; i++)
+            {
+                if (oos[i].DayUtc.Value <= cut)
+                    throw new InvalidOperationException($"[agg-probs] OOS set contains day <= trainUntil: {oos[i].DayUtc.Value:O} <= {cut:O}.");
+            }
+        }
 
-			double sumSumDay = 0, sumSumDm = 0, sumSumTot = 0;
-			double sumConfDay = 0, sumConfMicro = 0;
+        private static (DateTime Min, DateTime Max) ComputeMinMaxUtc(
+            IReadOnlyList<BacktestAggRow> eligible,
+            IReadOnlyList<BacktestAggRow> excluded)
+        {
+            DateTime min = default;
+            DateTime max = default;
+            bool has = false;
 
-			int slNonZero = 0;
+            if (eligible.Count > 0)
+            {
+                min = eligible[0].DayUtc.Value;
+                max = eligible[^1].DayUtc.Value;
+                has = true;
+            }
 
-			foreach (var r in seg)
-				{
-				ValidateTri (r.DateUtc, "Day", r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day);
-				ValidateTri (r.DateUtc, "Day+Micro", r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro);
-				ValidateTri (r.DateUtc, "Total", r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total);
+            if (excluded.Count > 0)
+            {
+                var exMin = excluded[0].DayUtc.Value;
+                var exMax = excluded[^1].DayUtc.Value;
 
-				sumUpDay += r.ProbUp_Day;
-				sumFlatDay += r.ProbFlat_Day;
-				sumDownDay += r.ProbDown_Day;
+                if (!has)
+                {
+                    min = exMin;
+                    max = exMax;
+                    has = true;
+                }
+                else
+                {
+                    if (exMin < min) min = exMin;
+                    if (exMax > max) max = exMax;
+                }
+            }
 
-				sumUpDm += r.ProbUp_DayMicro;
-				sumFlatDm += r.ProbFlat_DayMicro;
-				sumDownDm += r.ProbDown_DayMicro;
+            return has ? (min, max) : (default, default);
+        }
 
-				sumUpTot += r.ProbUp_Total;
-				sumFlatTot += r.ProbFlat_Total;
-				sumDownTot += r.ProbDown_Total;
+        private static IReadOnlyList<BacktestAggRow> BuildRecent(IReadOnlyList<BacktestAggRow> eligible, int recentDays)
+        {
+            if (eligible.Count == 0)
+                return Array.Empty<BacktestAggRow>();
 
-				sumSumDay += r.ProbUp_Day + r.ProbFlat_Day + r.ProbDown_Day;
-				sumSumDm += r.ProbUp_DayMicro + r.ProbFlat_DayMicro + r.ProbDown_DayMicro;
-				sumSumTot += r.ProbUp_Total + r.ProbFlat_Total + r.ProbDown_Total;
+            var maxDateUtc = eligible[^1].DayUtc.Value;
+            var fromRecentUtc = maxDateUtc.AddDays(-recentDays);
 
-				sumConfDay += r.Conf_Day;
-				sumConfMicro += r.Conf_Micro;
+            var recent = eligible.Where(r => r.DayUtc.Value >= fromRecentUtc).ToList();
+            return recent.Count == 0 ? eligible : recent;
+        }
 
-				if (r.SlProb > 0.0) slNonZero++;
-				}
+        private static void AddSegment(
+            List<AggregationProbsSegmentSnapshot> dst,
+            string segmentName,
+            string segmentLabel,
+            IReadOnlyList<BacktestAggRow> seg)
+        {
+            if (seg == null) throw new ArgumentNullException(nameof(seg));
 
-			double invN = 1.0 / seg.Count;
+            if (seg.Count == 0)
+            {
+                dst.Add(new AggregationProbsSegmentSnapshot
+                {
+                    SegmentName = segmentName,
+                    SegmentLabel = segmentLabel,
+                    FromDateUtc = null,
+                    ToDateUtc = null,
+                    RecordsCount = 0,
+                    Day = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
+                    DayMicro = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
+                    Total = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
+                    AvgConfDay = 0,
+                    AvgConfMicro = 0,
+                    RecordsWithSlScore = 0
+                });
+                return;
+            }
 
-			var day = new AggregationLayerAvg
-				{
-				PUp = sumUpDay * invN,
-				PFlat = sumFlatDay * invN,
-				PDown = sumDownDay * invN,
-				Sum = sumSumDay * invN
-				};
+            double sumUpDay = 0, sumFlatDay = 0, sumDownDay = 0;
+            double sumUpDm = 0, sumFlatDm = 0, sumDownDm = 0;
+            double sumUpTot = 0, sumFlatTot = 0, sumDownTot = 0;
 
-			var dm = new AggregationLayerAvg
-				{
-				PUp = sumUpDm * invN,
-				PFlat = sumFlatDm * invN,
-				PDown = sumDownDm * invN,
-				Sum = sumSumDm * invN
-				};
+            double sumSumDay = 0, sumSumDm = 0, sumSumTot = 0;
+            double sumConfDay = 0, sumConfMicro = 0;
 
-			var tot = new AggregationLayerAvg
-				{
-				PUp = sumUpTot * invN,
-				PFlat = sumFlatTot * invN,
-				PDown = sumDownTot * invN,
-				Sum = sumSumTot * invN
-				};
+            int slNonZero = 0;
 
-			// Защита от деградации пайплайна: вероятности должны быть осмысленными,
-			// иначе печать "красиво" замаскирует проблему в апстриме.
-			if (day.Sum <= 1e-6 || dm.Sum <= 1e-6 || tot.Sum <= 1e-6)
-				throw new InvalidOperationException ("[agg-probs] Degenerate probabilities: avg sum ≈ 0.");
+            foreach (var r in seg)
+            {
+                var d = r.DayUtc.Value;
 
-			dst.Add (new AggregationProbsSegmentSnapshot
-				{
-				SegmentName = segmentName,
-				SegmentLabel = segmentLabel,
-				FromDateUtc = seg[0].DateUtc,
-				ToDateUtc = seg[^1].DateUtc,
-				RecordsCount = seg.Count,
-				Day = day,
-				DayMicro = dm,
-				Total = tot,
-				AvgConfDay = sumConfDay * invN,
-				AvgConfMicro = sumConfMicro * invN,
-				RecordsWithSlScore = slNonZero
-				});
-			}
+                ValidateTri(d, "Day", r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day);
+                ValidateTri(d, "Day+Micro", r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro);
+                ValidateTri(d, "Total", r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total);
 
-		private static IReadOnlyList<AggregationProbsDebugRow> BuildDebugLastDays (
-			IReadOnlyList<BacktestAggRow> eligible,
-			int debugLastDays )
-			{
-			if (eligible.Count == 0)
-				return Array.Empty<AggregationProbsDebugRow> ();
+                sumUpDay += r.ProbUp_Day;
+                sumFlatDay += r.ProbFlat_Day;
+                sumDownDay += r.ProbDown_Day;
 
-			var tail = eligible
-				.Skip (Math.Max (0, eligible.Count - debugLastDays))
-				.ToList ();
+                sumUpDm += r.ProbUp_DayMicro;
+                sumFlatDm += r.ProbFlat_DayMicro;
+                sumDownDm += r.ProbDown_DayMicro;
 
-			const double eps = 1e-3;
-			var res = new List<AggregationProbsDebugRow> (tail.Count);
+                sumUpTot += r.ProbUp_Total;
+                sumFlatTot += r.ProbFlat_Total;
+                sumDownTot += r.ProbDown_Total;
 
-			foreach (var r in tail)
-				{
-				bool microUsed = HasOverlayChange (
-					r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day,
-					r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro,
-					eps);
+                sumSumDay += r.ProbUp_Day + r.ProbFlat_Day + r.ProbDown_Day;
+                sumSumDm += r.ProbUp_DayMicro + r.ProbFlat_DayMicro + r.ProbDown_DayMicro;
+                sumSumTot += r.ProbUp_Total + r.ProbFlat_Total + r.ProbDown_Total;
 
-				bool slUsed =
-					HasOverlayChange (
-						r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro,
-						r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total,
-						eps)
-					|| r.SlHighDecision
-					|| r.SlProb > 0.0;
+                sumConfDay += r.Conf_Day;
+                sumConfMicro += r.Conf_Micro;
 
-				bool microAgree = r.PredLabel_DayMicro == r.PredLabel_Day;
+                if (r.SlProb > 0.0) slNonZero++;
+            }
 
-				bool slPenLong = r.ProbUp_Total < r.ProbUp_DayMicro - eps;
-				bool slPenShort = r.ProbDown_Total < r.ProbDown_DayMicro - eps;
+            double invN = 1.0 / seg.Count;
 
-				res.Add (new AggregationProbsDebugRow
-					{
-					DateUtc = r.DateUtc,
-					TrueLabel = r.TrueLabel,
-					PredDay = r.PredLabel_Day,
-					PredDayMicro = r.PredLabel_DayMicro,
-					PredTotal = r.PredLabel_Total,
-					PDay = new TriProb (r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day),
-					PDayMicro = new TriProb (r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro),
-					PTotal = new TriProb (r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total),
-					MicroUsed = microUsed,
-					SlUsed = slUsed,
-					MicroAgree = microAgree,
-					SlPenLong = slPenLong,
-					SlPenShort = slPenShort
-					});
-				}
+            var day = new AggregationLayerAvg
+            {
+                PUp = sumUpDay * invN,
+                PFlat = sumFlatDay * invN,
+                PDown = sumDownDay * invN,
+                Sum = sumSumDay * invN
+            };
 
-			return res;
-			}
+            var dm = new AggregationLayerAvg
+            {
+                PUp = sumUpDm * invN,
+                PFlat = sumFlatDm * invN,
+                PDown = sumDownDm * invN,
+                Sum = sumSumDm * invN
+            };
 
-		private static void ValidateTri ( DateTime dateUtc, string layer, double up, double flat, double down )
-			{
-			if (double.IsNaN (up) || double.IsNaN (flat) || double.IsNaN (down) ||
-				double.IsInfinity (up) || double.IsInfinity (flat) || double.IsInfinity (down))
-				{
-				throw new InvalidOperationException (
-					$"[agg-probs] Non-finite probability in layer '{layer}' for date {dateUtc:O}: up={up}, flat={flat}, down={down}.");
-				}
+            var tot = new AggregationLayerAvg
+            {
+                PUp = sumUpTot * invN,
+                PFlat = sumFlatTot * invN,
+                PDown = sumDownTot * invN,
+                Sum = sumSumTot * invN
+            };
 
-			if (up < 0.0 || flat < 0.0 || down < 0.0)
-				{
-				throw new InvalidOperationException (
-					$"[agg-probs] Negative probability in layer '{layer}' for date {dateUtc:O}: up={up}, flat={flat}, down={down}.");
-				}
+            if (day.Sum <= 1e-6 || dm.Sum <= 1e-6 || tot.Sum <= 1e-6)
+                throw new InvalidOperationException("[agg-probs] Degenerate probabilities: avg sum ≈ 0.");
 
-			double sum = up + flat + down;
-			if (sum <= 0.0)
-				{
-				throw new InvalidOperationException (
-					$"[agg-probs] Degenerate probability triple (sum<=0) in layer '{layer}' for date {dateUtc:O}: up={up}, flat={flat}, down={down}.");
-				}
-			}
+            dst.Add(new AggregationProbsSegmentSnapshot
+            {
+                SegmentName = segmentName,
+                SegmentLabel = segmentLabel,
+                FromDateUtc = seg[0].DayUtc.Value,
+                ToDateUtc = seg[^1].DayUtc.Value,
+                RecordsCount = seg.Count,
+                Day = day,
+                DayMicro = dm,
+                Total = tot,
+                AvgConfDay = sumConfDay * invN,
+                AvgConfMicro = sumConfMicro * invN,
+                RecordsWithSlScore = slNonZero
+            });
+        }
 
-		private static bool HasOverlayChange (
-			double up1, double flat1, double down1,
-			double up2, double flat2, double down2,
-			double eps )
-			{
-			return Math.Abs (up1 - up2) > eps
-				|| Math.Abs (flat1 - flat2) > eps
-				|| Math.Abs (down1 - down2) > eps;
-			}
-		}
-	}
+        private static IReadOnlyList<AggregationProbsDebugRow> BuildDebugLastDays(
+            IReadOnlyList<BacktestAggRow> eligible,
+            int debugLastDays)
+        {
+            if (eligible.Count == 0)
+                return Array.Empty<AggregationProbsDebugRow>();
+
+            var tail = eligible.Skip(Math.Max(0, eligible.Count - debugLastDays)).ToList();
+
+            const double eps = 1e-3;
+            var res = new List<AggregationProbsDebugRow>(tail.Count);
+
+            foreach (var r in tail)
+            {
+                bool microUsed = HasOverlayChange(
+                    r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day,
+                    r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro,
+                    eps);
+
+                bool slUsed =
+                    HasOverlayChange(
+                        r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro,
+                        r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total,
+                        eps)
+                    || r.SlHighDecision
+                    || r.SlProb > 0.0;
+
+                bool microAgree = r.PredLabel_DayMicro == r.PredLabel_Day;
+
+                bool slPenLong = r.ProbUp_Total < r.ProbUp_DayMicro - eps;
+                bool slPenShort = r.ProbDown_Total < r.ProbDown_DayMicro - eps;
+
+                res.Add(new AggregationProbsDebugRow
+                {
+                    DateUtc = r.DayUtc.Value,
+                    TrueLabel = r.TrueLabel,
+                    PredDay = r.PredLabel_Day,
+                    PredDayMicro = r.PredLabel_DayMicro,
+                    PredTotal = r.PredLabel_Total,
+                    PDay = new TriProb(r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day),
+                    PDayMicro = new TriProb(r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro),
+                    PTotal = new TriProb(r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total),
+                    MicroUsed = microUsed,
+                    SlUsed = slUsed,
+                    MicroAgree = microAgree,
+                    SlPenLong = slPenLong,
+                    SlPenShort = slPenShort
+                });
+            }
+
+            return res;
+        }
+
+        private static void ValidateTri(DateTime dateUtc, string layer, double up, double flat, double down)
+        {
+            if (double.IsNaN(up) || double.IsNaN(flat) || double.IsNaN(down) ||
+                double.IsInfinity(up) || double.IsInfinity(flat) || double.IsInfinity(down))
+            {
+                throw new InvalidOperationException(
+                    $"[agg-probs] Non-finite probability in layer '{layer}' for date {dateUtc:O}: up={up}, flat={flat}, down={down}.");
+            }
+
+            if (up < 0.0 || flat < 0.0 || down < 0.0)
+            {
+                throw new InvalidOperationException(
+                    $"[agg-probs] Negative probability in layer '{layer}' for date {dateUtc:O}: up={up}, flat={flat}, down={down}.");
+            }
+
+            double sum = up + flat + down;
+            if (sum <= 0.0)
+            {
+                throw new InvalidOperationException(
+                    $"[agg-probs] Degenerate probability triple (sum<=0) in layer '{layer}' for date {dateUtc:O}: up={up}, flat={flat}, down={down}.");
+            }
+        }
+
+        private static bool HasOverlayChange(
+            double up1, double flat1, double down1,
+            double up2, double flat2, double down2,
+            double eps)
+        {
+            return Math.Abs(up1 - up2) > eps
+                || Math.Abs(flat1 - flat2) > eps
+                || Math.Abs(down1 - down2) > eps;
+        }
+    }
+}

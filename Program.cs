@@ -219,19 +219,19 @@ namespace SolSignalModel1D_Backtest
 				datesToExclude: null
 			);
 
-			var trainDates = new HashSet<DateTime> (dataset.TrainRows.Select (r => r.Causal.DateUtc));
+            var trainDates = new HashSet<DateTime>(dataset.TrainRows.Select(r => r.DayKeyUtc.Value));
 
-			var trainRecords = new List<BacktestRecord> (trainDates.Count);
-			for (int i = 0; i < records.Count; i++)
+            var trainRecords = new List<BacktestRecord>(trainDates.Count);
+            for (int i = 0; i < records.Count; i++)
 				{
 				var r = records[i];
 
-				// Требование: ключ датасета и ключ record должны совпадать по дню.
-				if (trainDates.Contains (r.Forward.DateUtc))
-					trainRecords.Add (r);
-				}
+                // Требование: ключ датасета и ключ record должны совпадать по дню.
+                if (trainDates.Contains(r.DateUtc))
+                    trainRecords.Add(r);
+            }
 
-			SplitByTrainUntilUtc (records, trainUntilUtc, out _, out var oosRecords);
+            SplitByTrainUntilUtc (records, trainUntilUtc, out _, out var oosRecords);
 
 			static double Acc ( IReadOnlyList<BacktestRecord> xs )
 				{

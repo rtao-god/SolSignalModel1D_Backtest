@@ -47,7 +47,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 			if (totalDays <= 0) throw new ArgumentOutOfRangeException (nameof (totalDays));
 			if (microDays < 0 || microDays > totalDays) throw new ArgumentOutOfRangeException (nameof (microDays));
 
-			var nyTz = Windowing.NyTz;
+			var nyTz = NyWindowing.NyTz;
 
 			var res = new List<LabeledCausalRow> (totalDays);
 

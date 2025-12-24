@@ -66,8 +66,8 @@ namespace SolSignalModel1D_Backtest
 				throw new InvalidOperationException ("[PopulateDelayedA] No samples for model A – check input rows and candles consistency.");
 
 			var pullbackTrainer = new PullbackContinuationTrainer ();
-			DateTime asOfDate = allRows.Max (r => r.Causal.DateUtc).AddDays (1);
-			var pullbackModel = pullbackTrainer.Train (pullbackSamples, asOfDate);
+            DateTime asOfDate = allRows.Max(r => r.DayKeyUtc.Value).AddDays(1);
+            var pullbackModel = pullbackTrainer.Train (pullbackSamples, asOfDate);
 			var pullbackEngine = pullbackTrainer.CreateEngine (pullbackModel);
 
 			foreach (var rec in records)
@@ -113,7 +113,7 @@ namespace SolSignalModel1D_Backtest
 				DateTime dayEnd;
 				try
 					{
-					dayEnd = Windowing.ComputeBaselineExitUtc (dayStart, Windowing.NyTz);
+					dayEnd = NyWindowing.ComputeBaselineExitUtc (dayStart, NyWindowing.NyTz);
 					}
 				catch (Exception ex)
 					{

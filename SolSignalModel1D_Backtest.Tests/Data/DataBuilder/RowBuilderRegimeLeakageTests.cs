@@ -2,7 +2,7 @@
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 		[Fact]
 		public void RegimeDown_DoesNotChange_WhenAllFutureAfterEntryIsMutated ()
 			{
-			var tz = CoreWindowing.NyTz;
+			var tz = CoreNyWindowing.NyTz;
 
 			const int days = 260;
 
@@ -111,7 +111,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 		[Fact]
 		public void RegimeDown_DoesNotChange_WhenBaselineExitCloseChanges ()
 			{
-			var tz = CoreWindowing.NyTz;
+			var tz = CoreNyWindowing.NyTz;
 
 			const int days = 260;
 
@@ -137,7 +137,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 
 			var entryUtc = FindMidEntryUtc (solWinTrain_A, tz);
 
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, nyTz: CoreWindowing.NyTz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz: CoreNyWindowing.NyTz);
 			int exit6hIdx = FindCovering6hCandleIndex (solAll6h_B, exitUtc);
 			Assert.True (exit6hIdx >= 0, "Не удалось найти 6h-свечу, покрывающую baseline-exit.");
 

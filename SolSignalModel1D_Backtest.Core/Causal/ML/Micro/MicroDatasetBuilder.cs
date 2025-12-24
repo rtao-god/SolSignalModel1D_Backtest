@@ -51,7 +51,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
 			var ordered = allRows as List<LabeledCausalRow> ?? allRows.ToList ();
 
-			var boundary = new TrainBoundary (trainUntilUtc, Windowing.NyTz);
+			var boundary = new TrainBoundary (trainUntilUtc, NyWindowing.NyTz);
 			var split = boundary.Split (ordered, r => DayKeyUtc (r));
 
 			if (split.Excluded.Count > 0)

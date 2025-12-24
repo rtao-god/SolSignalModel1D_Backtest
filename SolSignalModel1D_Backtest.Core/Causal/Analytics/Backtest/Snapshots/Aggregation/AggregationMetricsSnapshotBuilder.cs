@@ -2,244 +2,241 @@
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Aggregation
-	{
-	/// <summary>
-	/// Билдёр метрик (confusion/accuracy/logloss) по сегментам.
-	/// </summary>
-	public static class AggregationMetricsSnapshotBuilder
-		{
-		public static AggregationMetricsSnapshot Build (
-			IReadOnlyList<BacktestAggRow> rows,
-			TrainBoundary boundary,
-			int recentDays )
-			{
-			if (rows == null) throw new ArgumentNullException (nameof (rows));
-			if (boundary.Equals (default (TrainBoundary)))
-				throw new ArgumentException ("boundary must be initialized (non-default).", nameof (boundary));
-			if (recentDays <= 0) throw new ArgumentOutOfRangeException (nameof (recentDays), "recentDays must be > 0.");
+{
+    public static class AggregationMetricsSnapshotBuilder
+    {
+        public static AggregationMetricsSnapshot Build(
+            AggregationInputSets sets,
+            int recentDays)
+        {
+            if (sets == null) throw new ArgumentNullException(nameof(sets));
+            if (recentDays <= 0) throw new ArgumentOutOfRangeException(nameof(recentDays), "recentDays must be > 0.");
 
-			if (rows.Count == 0)
-				{
-				return new AggregationMetricsSnapshot
-					{
-					TotalInputRecords = 0,
-					ExcludedCount = 0,
-					Segments = Array.Empty<AggregationMetricsSegmentSnapshot> ()
-					};
-				}
+            var eligible = OrderAndValidateDayKey(sets.Eligible, "eligible");
+            var excluded = OrderAndValidateDayKey(sets.Excluded, "excluded");
+            var train = OrderAndValidateDayKey(sets.Train, "train");
+            var oos = OrderAndValidateDayKey(sets.Oos, "oos");
 
-			var ordered = rows
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+            EnsureSplitInvariants(sets.Boundary.TrainUntilDayKeyUtc, eligible, train, oos);
 
-			var split = boundary.Split (ordered, r => r.DateUtc);
-			var train = split.Train;
-			var oos = split.Oos;
+            int totalInput = eligible.Count + excluded.Count;
 
-			var eligible = new List<BacktestAggRow> (train.Count + oos.Count);
-			eligible.AddRange (train);
-			eligible.AddRange (oos);
+            if (totalInput == 0)
+            {
+                return new AggregationMetricsSnapshot
+                {
+                    TotalInputRecords = 0,
+                    ExcludedCount = 0,
+                    Segments = Array.Empty<AggregationMetricsSegmentSnapshot>()
+                };
+            }
 
-			var recent = BuildRecent (eligible, recentDays);
+            var recent = BuildRecent(eligible, recentDays);
 
-			var segments = new List<AggregationMetricsSegmentSnapshot> (4);
+            var segments = new List<AggregationMetricsSegmentSnapshot>(4)
+            {
+                BuildSegment("Train", $"Train (day<= {sets.Boundary.TrainUntilIsoDate})", train),
+                BuildSegment("OOS",  $"OOS (day>  {sets.Boundary.TrainUntilIsoDate})", oos),
+                BuildSegment("Recent", $"Recent({recentDays}d)", recent),
+                BuildSegment("Full", "Full (eligible days)", eligible)
+            };
 
-			segments.Add (BuildSegment ("Train", $"Train (exit<= {boundary.TrainUntilIsoDate})", train));
-			segments.Add (BuildSegment ("OOS", $"OOS (exit>  {boundary.TrainUntilIsoDate})", oos));
-			segments.Add (BuildSegment ("Recent", $"Recent({recentDays}d)", recent));
-			segments.Add (BuildSegment ("Full", "Full (eligible days)", eligible));
+            return new AggregationMetricsSnapshot
+            {
+                TotalInputRecords = totalInput,
+                ExcludedCount = excluded.Count,
+                Segments = segments
+            };
+        }
 
-			return new AggregationMetricsSnapshot
-				{
-				TotalInputRecords = ordered.Count,
-				ExcludedCount = split.Excluded.Count,
-				Segments = segments
-				};
-			}
+        private static List<BacktestAggRow> OrderAndValidateDayKey(IReadOnlyList<BacktestAggRow> rows, string setName)
+        {
+            if (rows == null) throw new ArgumentNullException(nameof(rows), $"[{setName}] set is null.");
 
-		private static IReadOnlyList<BacktestAggRow> BuildRecent ( IReadOnlyList<BacktestAggRow> eligible, int recentDays )
-			{
-			if (eligible.Count == 0)
-				return Array.Empty<BacktestAggRow> ();
+            if (rows.Count == 0)
+                return new List<BacktestAggRow>(0);
 
-			var maxDateUtc = eligible[^1].DateUtc;
-			var fromRecentUtc = maxDateUtc.AddDays (-recentDays);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].DayUtc.Equals(default(DayKeyUtc)))
+                    throw new InvalidOperationException($"[agg-metrics] BacktestAggRow.DayUtc is default in {setName} set.");
+            }
 
-			var recent = eligible
-				.Where (r => r.DateUtc >= fromRecentUtc)
-				.ToList ();
+            return rows.OrderBy(r => r.DayUtc.Value).ToList();
+        }
 
-			return recent.Count == 0 ? eligible : recent;
-			}
+        private static void EnsureSplitInvariants(
+            DayKeyUtc trainUntilDayKeyUtc,
+            IReadOnlyList<BacktestAggRow> eligible,
+            IReadOnlyList<BacktestAggRow> train,
+            IReadOnlyList<BacktestAggRow> oos)
+        {
+            if (trainUntilDayKeyUtc.Equals(default(DayKeyUtc)))
+                throw new InvalidOperationException("[agg-metrics] trainUntilDayKeyUtc is default.");
 
-		private static AggregationMetricsSegmentSnapshot BuildSegment (
-			string name,
-			string label,
-			IReadOnlyList<BacktestAggRow> seg )
-			{
-			if (seg == null) throw new ArgumentNullException (nameof (seg));
+            if (train.Count + oos.Count != eligible.Count)
+            {
+                throw new InvalidOperationException(
+                    $"[agg-metrics] Split invariant violated: train({train.Count}) + oos({oos.Count}) != eligible({eligible.Count}).");
+            }
 
-			if (seg.Count == 0)
-				{
-				return new AggregationMetricsSegmentSnapshot
-					{
-					SegmentName = name,
-					SegmentLabel = label,
-					FromDateUtc = null,
-					ToDateUtc = null,
-					RecordsCount = 0,
-					Day = EmptyLayer ("Day"),
-					DayMicro = EmptyLayer ("Day+Micro"),
-					Total = EmptyLayer ("Total")
-					};
-				}
+            var cut = trainUntilDayKeyUtc.Value;
 
-			return new AggregationMetricsSegmentSnapshot
-				{
-				SegmentName = name,
-				SegmentLabel = label,
-				FromDateUtc = seg[0].DateUtc,
-				ToDateUtc = seg[^1].DateUtc,
-				RecordsCount = seg.Count,
+            for (int i = 0; i < train.Count; i++)
+            {
+                if (train[i].DayUtc.Value > cut)
+                    throw new InvalidOperationException($"[agg-metrics] Train set contains day > trainUntil: {train[i].DayUtc.Value:O} > {cut:O}.");
+            }
 
-				Day = ComputeLayerMetrics (
-					seg,
-					"Day",
-					r => r.PredLabel_Day,
-					r => (r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day)),
+            for (int i = 0; i < oos.Count; i++)
+            {
+                if (oos[i].DayUtc.Value <= cut)
+                    throw new InvalidOperationException($"[agg-metrics] OOS set contains day <= trainUntil: {oos[i].DayUtc.Value:O} <= {cut:O}.");
+            }
+        }
 
-				DayMicro = ComputeLayerMetrics (
-					seg,
-					"Day+Micro",
-					r => r.PredLabel_DayMicro,
-					r => (r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro)),
+        private static IReadOnlyList<BacktestAggRow> BuildRecent(IReadOnlyList<BacktestAggRow> eligible, int recentDays)
+        {
+            if (eligible.Count == 0)
+                return Array.Empty<BacktestAggRow>();
 
-				Total = ComputeLayerMetrics (
-					seg,
-					"Total",
-					r => r.PredLabel_Total,
-					r => (r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total))
-				};
-			}
+            var maxDay = eligible[^1].DayUtc.Value;
+            var from = maxDay.AddDays(-recentDays);
 
-		private static LayerMetricsSnapshot EmptyLayer ( string layerName )
-			{
-			return new LayerMetricsSnapshot
-				{
-				LayerName = layerName,
-				Confusion = new int[3, 3],
-				N = 0,
-				Correct = 0,
-				Accuracy = double.NaN,
-				MicroF1 = double.NaN,
-				LogLoss = double.NaN,
-				InvalidForLogLoss = 0,
-				ValidForLogLoss = 0
-				};
-			}
+            var recent = eligible.Where(r => r.DayUtc.Value >= from).ToList();
+            return recent.Count == 0 ? eligible : recent;
+        }
 
-		private static LayerMetricsSnapshot ComputeLayerMetrics (
-			IReadOnlyList<BacktestAggRow> seg,
-			string layerName,
-			Func<BacktestAggRow, int> predSelector,
-			Func<BacktestAggRow, (double up, double flat, double down)> probSelector )
-			{
-			var conf = new int[3, 3];
-			int n = seg.Count;
-			int correct = 0;
-			double sumLog = 0.0;
+        private static AggregationMetricsSegmentSnapshot BuildSegment(
+            string name,
+            string label,
+            IReadOnlyList<BacktestAggRow> seg)
+        {
+            if (seg == null) throw new ArgumentNullException(nameof(seg));
 
-			int invalidForLogLoss = 0;
-			int validForLogLoss = 0;
+            if (seg.Count == 0)
+            {
+                return new AggregationMetricsSegmentSnapshot
+                {
+                    SegmentName = name,
+                    SegmentLabel = label,
+                    FromDateUtc = null,
+                    ToDateUtc = null,
+                    RecordsCount = 0,
+                    Day = EmptyLayer("Day"),
+                    DayMicro = EmptyLayer("Day+Micro"),
+                    Total = EmptyLayer("Total")
+                };
+            }
 
-			foreach (var r in seg)
-				{
-				int y = r.TrueLabel;
-				if (y < 0 || y > 2)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Unexpected TrueLabel={y} for date {r.DateUtc:O}. Expected 0/1/2.");
-					}
+            return new AggregationMetricsSegmentSnapshot
+            {
+                SegmentName = name,
+                SegmentLabel = label,
+                FromDateUtc = seg[0].DayUtc.Value,
+                ToDateUtc = seg[^1].DayUtc.Value,
+                RecordsCount = seg.Count,
 
-				int pred = predSelector (r);
-				if (pred < 0 || pred > 2)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Unexpected predicted label={pred} in layer '{layerName}' for date {r.DateUtc:O}. Expected 0/1/2.");
-					}
+                Day = ComputeLayerMetrics(seg, "Day", r => r.PredLabel_Day, r => (r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day)),
+                DayMicro = ComputeLayerMetrics(seg, "Day+Micro", r => r.PredLabel_DayMicro, r => (r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro)),
+                Total = ComputeLayerMetrics(seg, "Total", r => r.PredLabel_Total, r => (r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total))
+            };
+        }
 
-				var (pUp, pFlat, pDown) = probSelector (r);
+        private static LayerMetricsSnapshot EmptyLayer(string layerName)
+        {
+            return new LayerMetricsSnapshot
+            {
+                LayerName = layerName,
+                Confusion = new int[3, 3],
+                N = 0,
+                Correct = 0,
+                Accuracy = double.NaN,
+                MicroF1 = double.NaN,
+                LogLoss = double.NaN,
+                InvalidForLogLoss = 0,
+                ValidForLogLoss = 0
+            };
+        }
 
-				if (double.IsNaN (pUp) || double.IsNaN (pFlat) || double.IsNaN (pDown) ||
-					double.IsInfinity (pUp) || double.IsInfinity (pFlat) || double.IsInfinity (pDown))
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Non-finite probability in layer '{layerName}' for date {r.DateUtc:O}. " +
-						$"P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
-					}
+        private static LayerMetricsSnapshot ComputeLayerMetrics(
+            IReadOnlyList<BacktestAggRow> seg,
+            string layerName,
+            Func<BacktestAggRow, int> predSelector,
+            Func<BacktestAggRow, (double up, double flat, double down)> probSelector)
+        {
+            var conf = new int[3, 3];
+            int n = seg.Count;
+            int correct = 0;
+            double sumLog = 0.0;
 
-				if (pUp < 0.0 || pFlat < 0.0 || pDown < 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Negative probability in layer '{layerName}' for date {r.DateUtc:O}. " +
-						$"P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
-					}
+            int invalidForLogLoss = 0;
+            int validForLogLoss = 0;
 
-				double sum = pUp + pFlat + pDown;
-				if (sum <= 0.0)
-					{
-					throw new InvalidOperationException (
-						$"[agg-metrics] Degenerate probability triple (sum<=0) in layer '{layerName}' for date {r.DateUtc:O}. " +
-						$"P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
-					}
+            foreach (var r in seg)
+            {
+                int y = r.TrueLabel;
+                if (y < 0 || y > 2)
+                    throw new InvalidOperationException($"[agg-metrics] Unexpected TrueLabel={y} for day {r.DayUtc.Value:O}. Expected 0/1/2.");
 
-				double pTrue = y switch
-					{
-						2 => pUp,
-						1 => pFlat,
-						0 => pDown,
-						_ => throw new InvalidOperationException ("Unreachable label branch")
-						};
+                int pred = predSelector(r);
+                if (pred < 0 || pred > 2)
+                    throw new InvalidOperationException($"[agg-metrics] Unexpected predicted label={pred} in layer '{layerName}' for day {r.DayUtc.Value:O}. Expected 0/1/2.");
 
-				conf[y, pred]++;
+                var (pUp, pFlat, pDown) = probSelector(r);
 
-				if (pred == y)
-					correct++;
+                if (double.IsNaN(pUp) || double.IsNaN(pFlat) || double.IsNaN(pDown) ||
+                    double.IsInfinity(pUp) || double.IsInfinity(pFlat) || double.IsInfinity(pDown))
+                    throw new InvalidOperationException($"[agg-metrics] Non-finite probability in layer '{layerName}' for day {r.DayUtc.Value:O}. P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
 
-				// Логлосс для pTrue<=0 не определён (∞). Не маскируем: считаем отдельно и явно показываем.
-				if (pTrue <= 0.0)
-					{
-					invalidForLogLoss++;
-					}
-				else
-					{
-					validForLogLoss++;
-					sumLog += Math.Log (pTrue);
-					}
-				}
+                if (pUp < 0.0 || pFlat < 0.0 || pDown < 0.0)
+                    throw new InvalidOperationException($"[agg-metrics] Negative probability in layer '{layerName}' for day {r.DayUtc.Value:O}. P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
 
-			double accuracy = n > 0 ? (double) correct / n : double.NaN;
-			double microF1 = accuracy;
+                double sum = pUp + pFlat + pDown;
+                if (sum <= 0.0)
+                    throw new InvalidOperationException($"[agg-metrics] Degenerate probability triple (sum<=0) in layer '{layerName}' for day {r.DayUtc.Value:O}. P_up={pUp}, P_flat={pFlat}, P_down={pDown}.");
 
-			double logLoss = validForLogLoss == 0
-				? double.NaN
-				: -sumLog / validForLogLoss;
+                double pTrue = y switch
+                {
+                    2 => pUp,
+                    1 => pFlat,
+                    0 => pDown,
+                    _ => throw new InvalidOperationException("Unreachable label branch")
+                };
 
-			return new LayerMetricsSnapshot
-				{
-				LayerName = layerName,
-				Confusion = conf,
-				N = n,
-				Correct = correct,
-				Accuracy = accuracy,
-				MicroF1 = microF1,
-				LogLoss = logLoss,
-				InvalidForLogLoss = invalidForLogLoss,
-				ValidForLogLoss = validForLogLoss
-				};
-			}
-		}
-	}
+                conf[y, pred]++;
+
+                if (pred == y)
+                    correct++;
+
+                if (pTrue <= 0.0) invalidForLogLoss++;
+                else
+                {
+                    validForLogLoss++;
+                    sumLog += Math.Log(pTrue);
+                }
+            }
+
+            double accuracy = n > 0 ? (double)correct / n : double.NaN;
+            double microF1 = accuracy;
+
+            double logLoss = validForLogLoss == 0 ? double.NaN : -sumLog / validForLogLoss;
+
+            return new LayerMetricsSnapshot
+            {
+                LayerName = layerName,
+                Confusion = conf,
+                N = n,
+                Correct = correct,
+                Accuracy = accuracy,
+                MicroF1 = microF1,
+                LogLoss = logLoss,
+                InvalidForLogLoss = invalidForLogLoss,
+                ValidForLogLoss = validForLogLoss
+            };
+        }
+    }
+}

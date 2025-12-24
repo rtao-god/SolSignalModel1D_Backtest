@@ -1,31 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Domain;
-using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 {
-    /// <summary>
-    /// Каузальная строка (то, что было доступно на момент принятия решения).
-    ///
-    /// Контракт времени:
-    /// - EntryUtc: момент принятия решения/входа (UTC timestamp, не day-key).
-    /// - DayKeyUtc: ключ дня (UTC 00:00), вычисляется строго из EntryUtc.
-    /// </summary>
     public sealed class CausalDataRow
     {
-        public DateTime EntryUtc { get; }
-        public DateTime DayKeyUtc => EntryUtc.ToCausalDateUtc();
+        public NyTradingEntryUtc EntryUtc { get; }
+        public DayKeyUtc DayKeyUtc { get; }
 
-        // ===== Контекст, который может использоваться rule-based логикой (фильтры/режимы) =====
         public bool RegimeDown { get; }
         public bool IsMorning { get; }
         public int HardRegime { get; }
 
         public double MinMove { get; }
 
-        // ===== Фичи (ровно то, что подаётся в модель) =====
         public double SolRet30 { get; }
         public double BtcRet30 { get; }
         public double SolBtcRet30 { get; }
@@ -55,7 +44,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public double BtcEma50vs200 { get; }
 
         public ReadOnlyMemory<double> FeaturesVector => _featuresVector;
-
         private readonly double[] _featuresVector;
 
         public static IReadOnlyList<string> FeatureNames { get; } = new[]
@@ -94,7 +82,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public static int FeatureCount => FeatureNames.Count;
 
         public CausalDataRow(
-            DateTime entryUtc,
+            NyTradingEntryUtc entryUtc,
             bool regimeDown,
             bool isMorning,
             int hardRegime,
@@ -128,7 +116,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
             double solEma50vs200,
             double btcEma50vs200)
         {
-            EntryUtc = UtcTime.RequireUtc(entryUtc, nameof(entryUtc));
+            if (entryUtc.IsDefault)
+                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+
+            EntryUtc = entryUtc;
+            DayKeyUtc = DayKeyUtc.NormalizeUtc(entryUtc.Value);
 
             RegimeDown = regimeDown;
             IsMorning = isMorning;
@@ -209,11 +201,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
             for (int i = 0; i < v.Length; i++)
             {
                 var x = v[i];
+
                 if (double.IsNaN(x) || double.IsInfinity(x))
                 {
                     throw new InvalidOperationException(
-                        $"[CausalDataRow] Non-finite feature value at index {i}: {x}. " +
-                        "Это ошибка данных/индикаторов; такие значения ломают метрики и могут имитировать «утечки».");
+                        $"[CausalDataRow] Non-finite feature value at index {i}: {x}.");
                 }
             }
         }

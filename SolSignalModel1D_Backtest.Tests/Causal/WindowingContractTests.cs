@@ -13,7 +13,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 	/// - Friday переносится на ближайший рабочий день после уикенда;
 	/// - TrainBoundary опирается на baseline-exit, а weekend кладёт в Excluded.
 	/// </summary>
-	public sealed class WindowingContractTests
+	public sealed class NyWindowingContractTests
 		{
 		[Fact]
 		public void ComputeBaselineExitUtc_Throws_ForWeekendEntry ()
@@ -21,7 +21,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 			// Суббота в NY: берём 12:00 UTC (обычно попадает в утренний слот, но день выходной).
 			var entryUtc = new DateTime (2024, 1, 6, 12, 0, 0, DateTimeKind.Utc);
 
-			var ex = Assert.Throws<InvalidOperationException> (() => Windowing.ComputeBaselineExitUtc (entryUtc));
+			var ex = Assert.Throws<InvalidOperationException> (() => NyWindowing.ComputeBaselineExitUtc (entryUtc));
 			Assert.Contains ("Weekend entry", ex.Message, StringComparison.OrdinalIgnoreCase);
 			}
 
@@ -30,7 +30,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 			{
 			var entryUtc = new DateTime (2024, 1, 6, 12, 0, 0, DateTimeKind.Utc);
 
-			bool ok = Windowing.TryComputeBaselineExitUtc (entryUtc, Windowing.NyTz, out var exitUtc);
+			bool ok = NyWindowing.TryComputeBaselineExitUtc (entryUtc, NyWindowing.NyTz, out var exitUtc);
 
 			Assert.False (ok);
 			Assert.Equal (default, exitUtc);
@@ -41,17 +41,17 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 			{
 			// Зима: 12:00 UTC == 07:00 NY.
 			var entryUtc = new DateTime (2024, 1, 8, 12, 0, 0, DateTimeKind.Utc); // Monday
-			Assert.True (Windowing.IsNyMorning (entryUtc));
+			Assert.True (NyWindowing.IsNyMorning (entryUtc));
 
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc);
 			Assert.True (exitUtc > entryUtc);
 
-			var nyExit = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, Windowing.NyTz);
+			var nyExit = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, NyWindowing.NyTz);
 
 			Assert.Equal (6, nyExit.Hour);
 			Assert.Equal (58, nyExit.Minute);
 
-			var nyEntry = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, Windowing.NyTz);
+			var nyEntry = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, NyWindowing.NyTz);
 			Assert.Equal (nyEntry.Date.AddDays (1), nyExit.Date);
 			}
 
@@ -60,15 +60,15 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 			{
 			// Лето: 12:00 UTC == 08:00 NY.
 			var entryUtc = new DateTime (2024, 6, 10, 12, 0, 0, DateTimeKind.Utc); // Monday
-			Assert.True (Windowing.IsNyMorning (entryUtc));
+			Assert.True (NyWindowing.IsNyMorning (entryUtc));
 
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc);
-			var nyExit = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, Windowing.NyTz);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc);
+			var nyExit = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, NyWindowing.NyTz);
 
 			Assert.Equal (7, nyExit.Hour);
 			Assert.Equal (58, nyExit.Minute);
 
-			var nyEntry = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, Windowing.NyTz);
+			var nyEntry = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, NyWindowing.NyTz);
 			Assert.Equal (nyEntry.Date.AddDays (1), nyExit.Date);
 			}
 
@@ -77,8 +77,8 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 			{
 			// Пятница зимой: 12:00 UTC == 07:00 NY.
 			var entryUtc = new DateTime (2024, 1, 5, 12, 0, 0, DateTimeKind.Utc); // Friday
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc);
-			var nyExit = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, Windowing.NyTz);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc);
+			var nyExit = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, NyWindowing.NyTz);
 
 			Assert.Equal (DayOfWeek.Monday, nyExit.DayOfWeek);
 			Assert.Equal (6, nyExit.Hour);   // зима => 07:00 - 2m = 06:58
@@ -91,7 +91,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
 			// Берём границу далеко вперёд, чтобы все будни попали в train.
 			var boundary = new TrainBoundary (
 				trainUntilUtc: new DateTime (2030, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-				nyTz: Windowing.NyTz);
+				nyTz: NyWindowing.NyTz);
 
 			var items = new[]
 			{

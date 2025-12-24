@@ -78,7 +78,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					}
 
 				DateTime endUtc;
-				try { endUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
+				try { endUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
 				catch (Exception ex)
 					{
 					throw new InvalidOperationException (

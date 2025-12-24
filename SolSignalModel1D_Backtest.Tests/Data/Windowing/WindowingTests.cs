@@ -3,23 +3,23 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using Xunit;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.Windowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
+namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 	{
-	public sealed class WindowingTests
+	public sealed class NyWindowingTests
 		{
 		[Fact]
 		public void ComputeBaselineExitUtc_Weekday_GoesToNextNyMorningMinusTwoMinutes ()
 			{
-			var nyTz = CoreWindowing.NyTz;
+			var nyTz = CoreNyWindowing.NyTz;
 
 			var entryLocal = new DateTime (2024, 1, 8, 7, 0, 0, DateTimeKind.Unspecified); // понедельник, зима
 			Assert.False (nyTz.IsDaylightSavingTime (entryLocal));
 
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocal, nyTz);
 
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			var exitLocal = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, nyTz);
 
 			Assert.Equal (entryLocal.Date.AddDays (1), exitLocal.Date);
@@ -32,7 +32,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 		[Fact]
 		public void ComputeBaselineExitUtc_Friday_GoesToMondayNyMorningMinusTwoMinutes ()
 			{
-			var nyTz = CoreWindowing.NyTz;
+			var nyTz = CoreNyWindowing.NyTz;
 
 			var entryLocal = new DateTime (2024, 1, 5, 7, 0, 0, DateTimeKind.Unspecified); // пятница, зима
 			Assert.Equal (DayOfWeek.Friday, entryLocal.DayOfWeek);
@@ -40,7 +40,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocal, nyTz);
 
-			var exitUtc = CoreWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			var exitLocal = TimeZoneInfo.ConvertTimeFromUtc (exitUtc, nyTz);
 
 			Assert.Equal (DayOfWeek.Monday, exitLocal.DayOfWeek);
@@ -53,20 +53,20 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 		[Fact]
 		public void ComputeBaselineExitUtc_Throws_OnWeekendEntry ()
 			{
-			var nyTz = CoreWindowing.NyTz;
+			var nyTz = CoreNyWindowing.NyTz;
 
 			var saturdayLocal = new DateTime (2024, 1, 6, 12, 0, 0, DateTimeKind.Unspecified);
 			Assert.Equal (DayOfWeek.Saturday, saturdayLocal.DayOfWeek);
 
 			var saturdayUtc = TimeZoneInfo.ConvertTimeToUtc (saturdayLocal, nyTz);
 
-			Assert.Throws<InvalidOperationException> (() => CoreWindowing.ComputeBaselineExitUtc (saturdayUtc, nyTz));
+			Assert.Throws<InvalidOperationException> (() => CoreNyWindowing.ComputeBaselineExitUtc (saturdayUtc, nyTz));
 			}
 
 		[Fact]
 		public void FilterNyMorningOnly_RespectsDst_AndSkipsWeekends ()
 			{
-			var nyTz = CoreWindowing.NyTz;
+			var nyTz = CoreNyWindowing.NyTz;
 
 			var candles = new List<Candle6h> ();
 
@@ -91,7 +91,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 
 			candles.Add (new Candle6h { OpenTimeUtc = weekendUtc, Open = 150, High = 151, Low = 149, Close = 150.5 });
 
-			var filtered = CoreWindowing.FilterNyMorningOnly (candles, nyTz);
+			var filtered = CoreNyWindowing.FilterNyMorningOnly (candles, nyTz);
 
 			Assert.Equal (2, filtered.Count);
 			Assert.Contains (filtered, c => c.OpenTimeUtc == winterMorningUtc);
@@ -102,7 +102,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 		[Fact]
 		public void IsNyMorning_True_OnlyForMorningBar ()
 			{
-			var nyTz = CoreWindowing.NyTz;
+			var nyTz = CoreNyWindowing.NyTz;
 
 			var winterMorningLocal = new DateTime (2024, 1, 10, 7, 0, 0, DateTimeKind.Unspecified);
 			var winterDayLocal = new DateTime (2024, 1, 10, 13, 0, 0, DateTimeKind.Unspecified);
@@ -110,14 +110,14 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			var winterMorningUtc = TimeZoneInfo.ConvertTimeToUtc (winterMorningLocal, nyTz);
 			var winterDayUtc = TimeZoneInfo.ConvertTimeToUtc (winterDayLocal, nyTz);
 
-			Assert.True (CoreWindowing.IsNyMorning (winterMorningUtc, nyTz));
-			Assert.False (CoreWindowing.IsNyMorning (winterDayUtc, nyTz));
+			Assert.True (CoreNyWindowing.IsNyMorning (winterMorningUtc, nyTz));
+			Assert.False (CoreNyWindowing.IsNyMorning (winterDayUtc, nyTz));
 
 			var summerMorningLocal = new DateTime (2024, 6, 11, 8, 0, 0, DateTimeKind.Unspecified);
 			Assert.True (nyTz.IsDaylightSavingTime (summerMorningLocal));
 			var summerMorningUtc = TimeZoneInfo.ConvertTimeToUtc (summerMorningLocal, nyTz);
 
-			Assert.True (CoreWindowing.IsNyMorning (summerMorningUtc, nyTz));
+			Assert.True (CoreNyWindowing.IsNyMorning (summerMorningUtc, nyTz));
 			}
 
 		[Fact]
@@ -129,7 +129,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			for (int i = 0; i < 10; i++)
 				rows.Add (new DummyRow { DateUtc = start.AddDays (i), Label = i });
 
-			var spaced = CoreWindowing.BuildSpacedTest (
+			var spaced = CoreNyWindowing.BuildSpacedTest (
 				rows,
 				take: 3,
 				skip: 2,
@@ -154,7 +154,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
 			for (int i = 0; i < 10; i++)
 				rows.Add (new DummyRow { DateUtc = start.AddDays (i), Label = i });
 
-			var blocks = CoreWindowing.GroupByBlocks (rows, blockSize: 4).ToList ();
+			var blocks = CoreNyWindowing.GroupByBlocks (rows, blockSize: 4).ToList ();
 
 			Assert.Equal (3, blocks.Count);
 			Assert.Equal (new[] { 0, 1, 2, 3 }, blocks[0].Select (r => r.Label));

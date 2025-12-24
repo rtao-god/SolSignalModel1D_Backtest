@@ -28,7 +28,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 			var entryLocalNy = new DateTime (2025, 1, 6, 8, 0, 0, DateTimeKind.Unspecified);
 			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocalNy, nyTz);
 
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
 			Assert.True (exitUtc > entryUtc);
 
 			// 1m-окно (короткое, но достаточное для срабатывания TP/SL в первой минуте).

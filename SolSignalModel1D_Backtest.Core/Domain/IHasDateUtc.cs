@@ -1,13 +1,17 @@
 ﻿using System;
 
 namespace SolSignalModel1D_Backtest.Core.Domain
-	{
-	/// <summary>
-	/// Минимальный контракт «есть дата в UTC».
-	/// Нужен для аналитических операций (сэмплинг/группировки) без привязки к конкретным DTO.
-	/// </summary>
-	public interface IHasDateUtc
-		{
-		DateTime DateUtc { get; }
-		}
-	}
+{
+    /// <summary>
+    /// Минимальный контракт: объект имеет дату в UTC.
+    ///
+    /// Контракт:
+    /// - DateUtc должен быть "днём" (обычно 00:00:00Z) либо согласованным UTC-моментом,
+    ///   который используется как ключ для группировок/сэмплинга.
+    /// - Kind ожидается Utc (или строго согласованная договорённость по месту вызова).
+    /// </summary>
+    public interface IHasDateUtc
+    {
+        DateTime DateUtc { get; }
+    }
+}

@@ -1,4 +1,5 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Aggregation;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Micro;
@@ -6,148 +7,202 @@ using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Globalization;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
-	{
-	/// <summary>
-	/// Верхнеуровневый “дирижёр”: принимает готовые данные и запускает каузальную аналитику/бек-тест.
-	/// </summary>
-	public sealed class BacktestRunner
-		{
-		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+{
+    public sealed class BacktestRunner
+    {
+        private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		public void Run (
-			IReadOnlyList<LabeledCausalRow> mornings,
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<Candle1m> candles1m,
-			IReadOnlyList<RollingLoop.PolicySpec> policies,
-			BacktestConfig config,
-			DateTime trainUntilUtc )
-			{
-			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (candles1m == null) throw new ArgumentNullException (nameof (candles1m));
-			if (policies == null) throw new ArgumentNullException (nameof (policies));
-			if (config == null) throw new ArgumentNullException (nameof (config));
+        public void Run(
+            IReadOnlyList<LabeledCausalRow> mornings,
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<Candle1m> candles1m,
+            IReadOnlyList<RollingLoop.PolicySpec> policies,
+            BacktestConfig config,
+            DayKeyUtc trainUntilDayKeyUtc)
+        {
+            if (mornings == null) throw new ArgumentNullException(nameof(mornings));
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (candles1m == null) throw new ArgumentNullException(nameof(candles1m));
+            if (policies == null) throw new ArgumentNullException(nameof(policies));
+            if (config == null) throw new ArgumentNullException(nameof(config));
+            if (trainUntilDayKeyUtc.Equals(default(DayKeyUtc)))
+                throw new ArgumentException("trainUntilDayKeyUtc must be initialized (non-default).", nameof(trainUntilDayKeyUtc));
 
-			var boundary = new TrainBoundary (trainUntilUtc, NyTz);
+            // ===== records coverage + split =====
+            int recordsCount = records.Count;
 
-			// ===== records coverage =====
-			int recordsCount = records.Count;
+            DateTime? recMin = null;
+            DateTime? recMax = null;
 
-			DateTime? recMin = null;
-			DateTime? recMax = null;
+            var recordDays = new HashSet<DayKeyUtc>(recordsCount);
 
-			var recordDays = new HashSet<DateTime> (recordsCount);
+            var excludedDays = new HashSet<DayKeyUtc>(Math.Min(recordsCount, 256));
 
-			for (int i = 0; i < recordsCount; i++)
-				{
-				var r = records[i];
-				var day = CausalTimeKey.DayKeyUtc (r);
+            for (int i = 0; i < recordsCount; i++)
+            {
+                var r = records[i];
 
-				if (!recMin.HasValue || day < recMin.Value) recMin = day;
-				if (!recMax.HasValue || day > recMax.Value) recMax = day;
+                var day = CausalTimeKey.DayKeyUtc(r);
+                var dayDt = day.Value;
 
-				recordDays.Add (day);
-				}
+                if (!recMin.HasValue || dayDt < recMin.Value) recMin = dayDt;
+                if (!recMax.HasValue || dayDt > recMax.Value) recMax = dayDt;
 
-			if (recordsCount > 0)
-				Console.WriteLine ($"[diag-path] records: count={recordsCount}, range={recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}");
-			else
-				Console.WriteLine ("[diag-path] records: count=0");
+                recordDays.Add(day);
 
-			var splitRecords = boundary.Split (records, r => CausalTimeKey.DayKeyUtc (r));
+                var entry = CausalTimeKey.EntryUtc(r);
+                if (IsNyWeekendEntry(entry))
+                    excludedDays.Add(day);
+            }
 
-			Console.WriteLine (
-				$"[diag-path] boundary trainUntil={boundary.TrainUntilIsoDate}, " +
-				$"train={splitRecords.Train.Count}, oos={splitRecords.Oos.Count}, excluded={splitRecords.Excluded.Count}");
+            if (recordsCount > 0)
+                Console.WriteLine($"[diag-path] records: count={recordsCount}, range={recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}");
+            else
+                Console.WriteLine("[diag-path] records: count=0");
 
-			// ===== mornings coverage =====
-			int morningsCount = mornings.Count;
-			DateTime? mornMin = null;
-			DateTime? mornMax = null;
+            int trainCount = 0, oosCount = 0, exclCount = 0;
 
-			var morningDays = new HashSet<DateTime> (morningsCount);
+            for (int i = 0; i < recordsCount; i++)
+            {
+                var r = records[i];
+                var day = CausalTimeKey.DayKeyUtc(r);
 
-			for (int i = 0; i < morningsCount; i++)
-				{
-				var day = CausalTimeKey.DayKeyUtc (mornings[i]);
+                if (excludedDays.Contains(day))
+                {
+                    exclCount++;
+                    continue;
+                }
 
-				if (!mornMin.HasValue || day < mornMin.Value) mornMin = day;
-				if (!mornMax.HasValue || day > mornMax.Value) mornMax = day;
+                if (day.Value <= trainUntilDayKeyUtc.Value) trainCount++;
+                else oosCount++;
+            }
 
-				morningDays.Add (day);
-				}
+            Console.WriteLine(
+                $"[diag-path] boundary trainUntil={trainUntilDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, " +
+                $"train={trainCount}, oos={oosCount}, excluded={exclCount}");
 
-			if (morningsCount > 0)
-				Console.WriteLine ($"[diag-path] mornings: count={morningsCount}, range={mornMin:yyyy-MM-dd}..{mornMax:yyyy-MM-dd}");
-			else
-				Console.WriteLine ("[diag-path] mornings: count=0");
+            // ===== mornings coverage =====
+            int morningsCount = mornings.Count;
+            DateTime? mornMin = null;
+            DateTime? mornMax = null;
 
-			// ===== mismatch sample =====
-			var recordOnly = new List<DateTime> ();
-			foreach (var d in recordDays)
-				{
-				if (!morningDays.Contains (d))
-					recordOnly.Add (d);
-				}
-			recordOnly.Sort ();
+            var morningDays = new HashSet<DayKeyUtc>(morningsCount);
 
-			var morningOnly = new List<DateTime> ();
-			foreach (var d in morningDays)
-				{
-				if (!recordDays.Contains (d))
-					morningOnly.Add (d);
-				}
-			morningOnly.Sort ();
+            for (int i = 0; i < morningsCount; i++)
+            {
+                var day = CausalTimeKey.DayKeyUtc(mornings[i]);
+                var dayDt = day.Value;
 
-			if (recordOnly.Count > 10) recordOnly = recordOnly.GetRange (0, 10);
-			if (morningOnly.Count > 10) morningOnly = morningOnly.GetRange (0, 10);
+                if (!mornMin.HasValue || dayDt < mornMin.Value) mornMin = dayDt;
+                if (!mornMax.HasValue || dayDt > mornMax.Value) mornMax = dayDt;
 
-			Console.WriteLine ("[diag-path] dates in records but not in mornings (first 10):");
-			if (recordOnly.Count == 0) Console.WriteLine ("  (none)");
-			else
-				{
-				for (int i = 0; i < recordOnly.Count; i++)
-					Console.WriteLine ($"  {recordOnly[i]:yyyy-MM-dd}");
-				}
+                morningDays.Add(day);
+            }
 
-			Console.WriteLine ("[diag-path] dates in mornings but not in records (first 10):");
-			if (morningOnly.Count == 0) Console.WriteLine ("  (none)");
-			else
-				{
-				for (int i = 0; i < morningOnly.Count; i++)
-					Console.WriteLine ($"  {morningOnly[i]:yyyy-MM-dd}");
-				}
+            if (morningsCount > 0)
+                Console.WriteLine($"[diag-path] mornings: count={morningsCount}, range={mornMin:yyyy-MM-dd}..{mornMax:yyyy-MM-dd}");
+            else
+                Console.WriteLine("[diag-path] mornings: count=0");
 
-			// ===== Каузальная аналитика (не должна зависеть от forward и 1m-path) =====
-			var rows = records.Select (r => r.ToAggRow ()).ToList ();
+            // ===== mismatch sample =====
+            var recordOnly = new List<DayKeyUtc>();
+            foreach (var d in recordDays)
+            {
+                if (!morningDays.Contains(d))
+                    recordOnly.Add(d);
+            }
+            recordOnly.Sort((a, b) => a.Value.CompareTo(b.Value));
 
-			var probsSnap = AggregationProbsSnapshotBuilder.Build (rows, boundary, recentDays: 240, debugLastDays: 10);
-			AggregationProbsPrinter.Print (probsSnap);
+            var morningOnly = new List<DayKeyUtc>();
+            foreach (var d in morningDays)
+            {
+                if (!recordDays.Contains(d))
+                    morningOnly.Add(d);
+            }
+            morningOnly.Sort((a, b) => a.Value.CompareTo(b.Value));
 
-			var metricsSnap = AggregationMetricsSnapshotBuilder.Build (rows, boundary, recentDays: 240);
-			AggregationMetricsPrinter.Print (metricsSnap);
+            if (recordOnly.Count > 10) recordOnly = recordOnly.GetRange(0, 10);
+            if (morningOnly.Count > 10) morningOnly = morningOnly.GetRange(0, 10);
 
-			var microSnap = MicroStatsSnapshotBuilder.Build (rows);
-			MicroStatsPrinter.Print (microSnap);
+            Console.WriteLine("[diag-path] dates in records but not in mornings (first 10):");
+            if (recordOnly.Count == 0) Console.WriteLine("  (none)");
+            else
+            {
+                for (int i = 0; i < recordOnly.Count; i++)
+                    Console.WriteLine($"  {recordOnly[i].Value:yyyy-MM-dd}");
+            }
 
-			/*
-			var loop = new RollingLoop();
-			loop.Run(
-				mornings: mornings,
-				records: records,
-				candles1m: candles1m,
-				policies: policies,
-				config: config
-			);
+            Console.WriteLine("[diag-path] dates in mornings but not in records (first 10):");
+            if (morningOnly.Count == 0) Console.WriteLine("  (none)");
+            else
+            {
+                for (int i = 0; i < morningOnly.Count; i++)
+                    Console.WriteLine($"  {morningOnly[i].Value:yyyy-MM-dd}");
+            }
 
-			DelayedStatsPrinter.Print(records);
-			*/
-			}
-		}
-	}
+            // ===== Каузальная аналитика =====
+            var aggAll = new List<BacktestAggRow>(records.Count);
+            for (int i = 0; i < records.Count; i++)
+                aggAll.Add(records[i].ToAggRow());
+
+            var eligible = new List<BacktestAggRow>(aggAll.Count);
+            var excluded = new List<BacktestAggRow>(Math.Min(256, aggAll.Count));
+
+            for (int i = 0; i < aggAll.Count; i++)
+            {
+                var r = aggAll[i];
+                if (excludedDays.Contains(r.DayUtc)) excluded.Add(r);
+                else eligible.Add(r);
+            }
+
+            var train = new List<BacktestAggRow>(eligible.Count);
+            var oos = new List<BacktestAggRow>(Math.Min(256, eligible.Count));
+
+            for (int i = 0; i < eligible.Count; i++)
+            {
+                var r = eligible[i];
+                if (r.DayUtc.Value <= trainUntilDayKeyUtc.Value) train.Add(r);
+                else oos.Add(r);
+            }
+
+            var sets = new AggregationInputSets
+            {
+                Boundary = new TrainBoundaryMeta(trainUntilDayKeyUtc),
+                Eligible = eligible,
+                Excluded = excluded,
+                Train = train,
+                Oos = oos
+            };
+
+            var probsSnap = AggregationProbsSnapshotBuilder.Build(sets, recentDays: 240, debugLastDays: 10);
+            AggregationProbsPrinter.Print(probsSnap);
+
+            var metricsSnap = AggregationMetricsSnapshotBuilder.Build(sets, recentDays: 240);
+            AggregationMetricsPrinter.Print(metricsSnap);
+
+            var microSnap = MicroStatsSnapshotBuilder.Build(sets.Eligible);
+            MicroStatsPrinter.Print(microSnap);
+        }
+
+        private static bool IsNyWeekendEntry(EntryUtc entry)
+        {
+            if (entry.IsDefault)
+                throw new ArgumentException("[diag-path] entry must be initialized (non-default).", nameof(entry));
+
+            // Валидация UTC инварианта.
+            var entryUtc = entry.Value;
+            if (entryUtc.Kind != DateTimeKind.Utc)
+                throw new InvalidOperationException($"[diag-path] entryUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
+
+            return NyWindowing.IsWeekendInNy(entry, NyTz);
+        }
+    }
+}
