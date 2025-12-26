@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 
 namespace SolSignalModel1D_Backtest.Core.Infra.Causality

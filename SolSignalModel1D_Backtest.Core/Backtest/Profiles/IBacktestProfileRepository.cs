@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Backtest.Profiles
+namespace SolSignalModel1D_Backtest.Core.Backtest.Profiles
 	{
 	/// <summary>
 	/// Репозиторий профилей бэктеста (BacktestProfile).

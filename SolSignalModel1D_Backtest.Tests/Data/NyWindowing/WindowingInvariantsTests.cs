@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Time;
 using Xunit;

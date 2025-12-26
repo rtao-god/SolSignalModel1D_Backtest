@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.ML.Aggregation;
@@ -99,7 +99,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 
                 var ml = _bundle.MlCtx;
 
-                var dayKeyUtc = row.DayKeyUtc.Value;
+                var dayKeyUtc = row.EntryDayKeyUtc.Value;
 
                 var fixedFeatures = ToFloatFixedFromVectorOrThrow(row.FeaturesVector, dayKeyUtc);
 
@@ -251,9 +251,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
             if (micro.Predicted)
                 confMicro = Math.Max(micro.Prob, 1.0 - micro.Prob);
 
+            if (row.EntryUtc.IsDefault)
+                throw new InvalidOperationException("[PredictionEngine] CausalDataRow.EntryUtc is default (contract violation).");
+
+            // Инвариант каузального домена: entry обязан быть NY-morning.
+            if (!NyWindowing.IsNyMorning(row.EntryUtc, NyWindowing.NyTz))
+                throw new InvalidOperationException($"[PredictionEngine] CausalDataRow.EntryUtc is not NY-morning: {row.EntryUtc.Value:O}.");
+
             return new CausalPredictionRecord
             {
-                EntryUtc = new EntryUtc(row.EntryUtc.Value),
+                EntryUtc = row.EntryUtc,
 
                 FeaturesVector = row.FeaturesVector,
 

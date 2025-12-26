@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Time
 {
@@ -22,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
         public static SplitStrict<T> SplitByBaselineExitStrict<T>(
             IReadOnlyList<T> ordered,
             Func<T, EntryUtc> entrySelector,
-            TrainUntilUtc trainUntilUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz,
             string tag)
         {
@@ -30,12 +31,13 @@ namespace SolSignalModel1D_Backtest.Core.Time
             if (entrySelector == null) throw new ArgumentNullException(nameof(entrySelector));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
             if (string.IsNullOrWhiteSpace(tag)) throw new ArgumentException("tag must be non-empty.", nameof(tag));
-            if (trainUntilUtc.Value == default) throw new ArgumentException("trainUntilUtc must be initialized.", nameof(trainUntilUtc));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
             var split = SplitByBaselineExit(
                 ordered: ordered,
                 entrySelector: entrySelector,
-                trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: nyTz);
 
             if (split.Excluded.Count > 0)
@@ -50,7 +52,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
             var trainOnly = new TrainOnly<T>(
                 items: split.Train,
-                trainUntilUtc: trainUntilUtc.Value,
+                trainUntilUtc: trainUntilExitDayKeyUtc.Value,
                 tag: tag);
 
             return new SplitStrict<T>(trainOnly, split.Oos);

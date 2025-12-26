@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
@@ -12,18 +12,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
     /// разложенные на NORMAL / DOWN.
     ///
     /// Контракт времени:
-    /// - TrainUntilExitDayKeyUtc — exit-day-key (DayKeyUtc)
+    /// - TrainUntilExitDayKeyUtc — exit-day-key (ExitDayKeyUtc)
     /// </summary>
     public sealed class DirDataset
     {
         public IReadOnlyList<LabeledCausalRow> DirNormalRows { get; }
         public IReadOnlyList<LabeledCausalRow> DirDownRows { get; }
-        public DayKeyUtc TrainUntilExitDayKeyUtc { get; }
+        public ExitDayKeyUtc TrainUntilExitDayKeyUtc { get; }
 
         public DirDataset(
             IReadOnlyList<LabeledCausalRow> dirNormalRows,
             IReadOnlyList<LabeledCausalRow> dirDownRows,
-            DayKeyUtc trainUntilExitDayKeyUtc)
+            ExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             if (dirNormalRows == null) throw new ArgumentNullException(nameof(dirNormalRows));
             if (dirDownRows == null) throw new ArgumentNullException(nameof(dirDownRows));
@@ -48,10 +48,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Dir
     {
         public static DirDataset Build(
             IReadOnlyList<LabeledCausalRow> allRows,
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             bool balanceDir,
             double balanceTargetFrac,
-            HashSet<DayKeyUtc>? dayKeysToExclude = null)
+            HashSet<EntryDayKeyUtc>? dayKeysToExclude = null)
         {
             if (allRows == null) throw new ArgumentNullException(nameof(allRows));
             if (trainUntilExitDayKeyUtc.IsDefault)

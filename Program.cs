@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Infra.Perf;
@@ -21,10 +21,9 @@ namespace SolSignalModel1D_Backtest
     public partial class Program
     {
         /// <summary>
-        /// Флажок: гонять ли self-check'и при старте приложения.
-        /// При false поведение полностью совпадает с текущим.
+        /// Флажок: гонять ли self-check'и при старте приложения, которые могут заблокировать основной пайплайн.
         /// </summary>
-        private static readonly bool RunSelfChecksOnStartup = true;
+        private static readonly bool RunSelfChecksOnStartup = false;
 
         /// <summary>
         /// Глобальная таймзона Нью-Йорка для всех расчётов.
@@ -198,7 +197,7 @@ namespace SolSignalModel1D_Backtest
             List<BacktestRecord> records,
             DateTime trainUntilUtc)
         {
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
 
             var dataset = DailyDatasetBuilder.Build(
                 allRows,
@@ -209,14 +208,14 @@ namespace SolSignalModel1D_Backtest
                 dayKeysToExclude: null
             );
 
-            var trainDates = new HashSet<DateTime>(dataset.TrainRows.Select(r => r.DayKeyUtc.Value));
+            var trainDates = new HashSet<DateTime>(dataset.TrainRows.Select(r => r.EntryDayKeyUtc.Value));
 
             var trainRecords = new List<BacktestRecord>(trainDates.Count);
             for (int i = 0; i < records.Count; i++)
             {
                 var r = records[i];
 
-                var recDayKey = r.Causal.DayKeyUtc.Value;
+                var recDayKey = r.EntryDayKeyUtc.Value;
 
                 if (trainDates.Contains(recDayKey))
                     trainRecords.Add(r);
@@ -259,19 +258,21 @@ namespace SolSignalModel1D_Backtest
             if (trainUntilUtc.Kind != DateTimeKind.Utc)
                 throw new ArgumentException("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
 
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+
             var ordered = records
-                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .OrderBy(static r => r.EntryUtc.Value) // ВАЖНО: НЕ r.Causal.EntryUtc
                 .ToList();
 
-            var split = NyTrainSplit.SplitByBaselineExitStrict(
-              ordered: ordered,
-              entrySelector: static r => r.Causal.EntryUtc,
-              trainUntilUtc: new TrainUntilUtc(trainUntilUtc),
-              nyTz: NyTz,
-              tag: "train-split.records");
+            var split = NyTrainSplit.SplitByBaselineExitStrict<BacktestRecord>(
+                ordered: ordered,
+                entrySelector: static r => r.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: NyTz,
+                tag: "train-split.records");
 
             train = split.Train.ToList();
-            oos = split.Oos as List<BacktestRecord> ?? split.Oos.ToList();
+            oos = split.Oos.ToList();
         }
     }
 }

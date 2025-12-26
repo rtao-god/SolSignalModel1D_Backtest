@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -35,11 +35,11 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
                 .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: r => r.Causal.EntryUtc,
+                entrySelector: r => r.Causal.RawEntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: nyTz);
 
@@ -103,7 +103,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 
                 if (f.Entry <= 0.0 || f.Close24 <= 0.0)
                 {
-                    var day = c.DayKeyUtc.Value;
+                    var day = c.EntryDayKeyUtc.Value;
 
                     Console.WriteLine(
                         $"[pnl-probe] skip {day:yyyy-MM-dd}: invalid prices Entry={f.Entry}, Close24={f.Close24}");
@@ -118,7 +118,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
                 }
                 else if (goLong && goShort)
                 {
-                    var day = c.DayKeyUtc.Value;
+                    var day = c.EntryDayKeyUtc.Value;
 
                     Console.WriteLine(
                         $"[pnl-probe] ambiguous direction on {day:yyyy-MM-dd}, " +

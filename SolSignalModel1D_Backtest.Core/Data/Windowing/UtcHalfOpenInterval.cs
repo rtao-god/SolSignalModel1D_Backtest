@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Data.Windowing
+namespace SolSignalModel1D_Backtest.Core.Data.Windowing
 {
 	/// <summary>
 	/// Полуоткрытый UTC-интервал [StartUtc; EndUtcExclusive).

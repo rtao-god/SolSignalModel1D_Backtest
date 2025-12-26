@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Time;
@@ -53,8 +53,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
             Assert.NotEmpty(ds.TrainRows);
             Assert.NotEmpty(ds.MicroRows);
 
-            Assert.All(ds.TrainRows, r => Assert.True(CausalTimeKey.DayKeyUtc(r).Value <= trainUntil));
-            Assert.All(ds.MicroRows, r => Assert.True(CausalTimeKey.DayKeyUtc(r).Value <= trainUntil));
+            Assert.All(ds.TrainRows, r => Assert.True(CausalTimeKey.EntryDayKeyUtc(r).Value <= trainUntil));
+            Assert.All(ds.MicroRows, r => Assert.True(CausalTimeKey.EntryDayKeyUtc(r).Value <= trainUntil));
         }
 
         [Fact]
@@ -91,11 +91,11 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
             var ds = MicroDatasetBuilder.Build(rows, trainUntil);
 
             var trainKeys = ds.TrainRows
-                .Select(r => CausalTimeKey.DayKeyUtc(r))
+                .Select(r => CausalTimeKey.EntryDayKeyUtc(r))
                 .ToHashSet();
 
             foreach (var microRow in ds.MicroRows)
-                Assert.Contains(CausalTimeKey.DayKeyUtc(microRow), trainKeys);
+                Assert.Contains(CausalTimeKey.EntryDayKeyUtc(microRow), trainKeys);
         }
 
         private static CausalDataRow MakeCausalRow(
@@ -108,8 +108,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
         {
             double s = seed;
 
+            var nyEntry = NyWindowing.CreateNyTradingEntryUtcOrThrow(new EntryUtc(dateUtc), NyWindowing.NyTz);
+
             return new CausalDataRow(
-                entryUtc: new EntryUtc(dateUtc),
+                entryUtc: nyEntry,
                 regimeDown: regimeDown,
                 isMorning: isMorning,
                 hardRegime: hardRegime,

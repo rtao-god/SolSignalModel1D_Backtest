@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Trading
+namespace SolSignalModel1D_Backtest.Core.Trading
 	{
 	public enum TradeOutcome
 		{

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -25,8 +25,8 @@ namespace SolSignalModel1D_Backtest
         )
         {
             // Локальный хелпер: печатает диапазон дат и распределение по day-of-week.
-            // selector обязан возвращать "дневной ключ" (DayKeyUtc) или другой стабильный идентификатор.
-            static void DumpRange<T>(string label, IReadOnlyList<T> items, Func<T, DayKeyUtc> selector)
+            // selector обязан возвращать "дневной ключ" (EntryDayKeyUtc) или другой стабильный идентификатор.
+            static void DumpRange<T>(string label, IReadOnlyList<T> items, Func<T, EntryDayKeyUtc> selector)
             {
                 if (items == null || items.Count == 0)
                 {
@@ -53,8 +53,8 @@ namespace SolSignalModel1D_Backtest
             }
 
             // Логируем, какие дни реально присутствуют в утренних точках.
-            // Берём DayKeyUtc, а не EntryUtc: это "идентичность дня", а не timestamp.
-            DumpRange("mornings", mornings, r => CausalTimeKey.DayKeyUtc(r));
+            // Берём EntryDayKeyUtc, а не EntryUtc: это "идентичность дня", а не timestamp.
+            DumpRange("mornings", mornings, r => CausalTimeKey.EntryDayKeyUtc(r));
 
             // PredictionEngine создаётся один раз на весь проход, чтобы не пересоздавать модель на каждый день.
             var engine = CreatePredictionEngineOrFallback(allRows);
@@ -65,10 +65,10 @@ namespace SolSignalModel1D_Backtest
             var records = await LoadPredictionRecordsAsync(mornings, solAll6h, engine);
 
             // Логируем результат по day-key (стабильное сопоставление "дней").
-            DumpRange("mornings", mornings, r => CausalTimeKey.DayKeyUtc(r));
+            DumpRange("mornings", mornings, r => CausalTimeKey.EntryDayKeyUtc(r));
 
             // Диагностика: распределение предиктов на train/oos (использует внутренние правила разбиения).
-            DumpRange("records", records, r => CausalTimeKey.DayKeyUtc(r));
+            DumpRange("records", records, r => CausalTimeKey.EntryDayKeyUtc(r));
 
             Console.WriteLine($"[records] built = {records.Count}");
 

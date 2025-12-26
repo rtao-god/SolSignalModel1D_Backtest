@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Infra
+namespace SolSignalModel1D_Backtest.Core.Infra
 	{
 	/// <summary>
 	/// Централизованная конфигурация путей.

@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.ML.Shared;

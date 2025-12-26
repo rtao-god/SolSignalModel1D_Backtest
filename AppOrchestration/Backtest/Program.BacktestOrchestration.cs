@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
@@ -68,7 +68,7 @@ namespace SolSignalModel1D_Backtest
 				candles1m: dayMinutes,
 				policies: policies,
 				config: backtestConfig,
-				trainUntilDayKeyUtc: _trainUntilExitDayKeyUtc
+				trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc
 			);
 
             BacktestReportsOrchestrator.SaveBacktestReports (

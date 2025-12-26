@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.TestUtils

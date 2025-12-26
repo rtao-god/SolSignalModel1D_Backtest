@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe
+namespace SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe
 	{
 	public enum CandleTimeframe
 		{

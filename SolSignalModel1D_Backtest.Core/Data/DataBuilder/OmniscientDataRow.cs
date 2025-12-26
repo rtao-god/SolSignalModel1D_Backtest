@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Domain;
 
@@ -13,6 +13,6 @@ namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder
         public CausalDataRow Causal { get; } = causal ?? throw new ArgumentNullException(nameof(causal));
         public ForwardOutcomes Outcomes { get; } = outcomes ?? throw new ArgumentNullException(nameof(outcomes));
 
-        public DateTime DateUtc => Causal.DayKeyUtc.Value;
+        public DateTime DateUtc => Causal.EntryDayKeyUtc.Value;
     }
 }

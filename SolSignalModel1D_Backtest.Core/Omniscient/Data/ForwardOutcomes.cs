@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Time;
@@ -8,19 +8,23 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
     public sealed class ForwardOutcomes
     {
         // Invariant: entry timestamp is always UTC and is the start of the baseline window for this record.
-        public EntryUtc EntryUtc { get; init; }
+        public required EntryUtc EntryUtc { get; init; }
 
-        // Stable day identity (UTC 00:00).
-        public DayKeyUtc DayKeyUtc
+        // Stable day identity for this record: entry day-key (UTC 00:00).
+        public EntryDayKeyUtc EntryDayKeyUtc
         {
             get
             {
                 if (EntryUtc.IsDefault)
                     throw new InvalidOperationException("[forward] EntryUtc is default (uninitialized).");
 
-                return EntryUtc.DayKeyUtc;
+                return SolSignalModel1D_Backtest.Core.Time.EntryDayKeyUtc.FromUtcMomentOrThrow(EntryUtc.Value);
             }
         }
+
+        // Back-compat (temporary): prefer EntryDayKeyUtc.
+        [Obsolete("Use EntryDayKeyUtc (explicit entry day-key).", error: false)]
+        public EntryDayKeyUtc DayKeyUtc => EntryDayKeyUtc;
 
         public DateTime WindowEndUtc { get; init; }
 

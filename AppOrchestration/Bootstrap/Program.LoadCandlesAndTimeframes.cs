@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles;
+using SolSignalModel1D_Backtest.Core.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Domain;
 using SolSignalModel1D_Backtest.Core.Utils;

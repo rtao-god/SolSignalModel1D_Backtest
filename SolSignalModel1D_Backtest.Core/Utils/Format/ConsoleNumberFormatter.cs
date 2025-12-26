@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 
 namespace SolSignalModel1D_Backtest.Core.Utils.Format

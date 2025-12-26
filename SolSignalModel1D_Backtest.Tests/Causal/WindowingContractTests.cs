@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -83,7 +83,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
         [Fact]
         public void Split_UsesBaselineExit_AndWeekendsGoToExcluded()
         {
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
             var items = new List<EntryUtc>
             {

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows;
@@ -31,7 +31,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
             if (ctx.TrainUntilUtc.Kind != DateTimeKind.Utc)
                 throw new ArgumentException($"ctx.TrainUntilUtc must be UTC. Got Kind={ctx.TrainUntilUtc.Kind}, t={ctx.TrainUntilUtc:O}.", nameof(ctx));
 
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
 
             var results = new List<SelfCheckResult>();
 

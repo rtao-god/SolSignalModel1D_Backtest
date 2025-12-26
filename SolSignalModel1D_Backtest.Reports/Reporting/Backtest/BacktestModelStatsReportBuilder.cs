@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Reports.Model;
 using System;

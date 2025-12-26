@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Candles

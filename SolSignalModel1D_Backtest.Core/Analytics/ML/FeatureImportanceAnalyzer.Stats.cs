@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.ML
+namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 	{
 	/// <summary>
 	/// Агрегированные статистики по одной фиче для бинарной модели.

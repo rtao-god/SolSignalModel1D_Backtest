@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.ML.SL
+namespace SolSignalModel1D_Backtest.Core.ML.SL
 	{
 	/// <summary>
 	/// Общая логика интерпретации MinMove → "сильный"/"слабый" день

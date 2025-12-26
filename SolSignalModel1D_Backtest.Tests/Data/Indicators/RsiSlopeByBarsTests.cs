@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using Xunit;

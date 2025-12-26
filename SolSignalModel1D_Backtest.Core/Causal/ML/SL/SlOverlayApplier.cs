@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.ML.Aggregation;
 
@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
             if (rec == null) throw new ArgumentNullException(nameof(rec));
 
             // Для диагностик в исключениях: стабильный day-key записи (а не внутридневной timestamp).
-            var day = rec.DayKeyUtc;
+            var day = rec.EntryDayKeyUtc;
 
             // Без торгового сигнала SL-оверлей не нужен.
             if (!goLong && !goShort)

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using System;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Leverage.Policies

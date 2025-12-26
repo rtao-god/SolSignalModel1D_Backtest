@@ -1,4 +1,7 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
 using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
@@ -6,11 +9,11 @@ using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
@@ -33,7 +36,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
         private static DateTime RecordDayKeyUtc(BacktestRecord r)
         {
             if (r == null) throw new ArgumentNullException(nameof(r));
-            return r.Causal.DayKeyUtc.Value;
+            return r.EntryDayKeyUtc.Value;
         }
 
         public static void SavePfiReports()
@@ -190,7 +193,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
                         $"totalRecords = {orderedRecords.Count}");
 
                     var effectiveTrainUntilUtc00 = (trainUntilUtc ?? maxDayKeyUtc).ToCausalDateUtc();
-                    var trainUntilExitDayKeyUtc = Core.Time.DayKeyUtc.FromUtcOrThrow(effectiveTrainUntilUtc00);
+                    var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(effectiveTrainUntilUtc00);
 
                     var multi = BacktestModelStatsMultiSnapshotBuilder.Build(
                         allRecords: records,
@@ -281,7 +284,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
                     walletBalanceUsd: walletBalanceUsd
                 );
 
-                // Берём глобальные PFI-снимки и добавляем топ-фичи по нужной модели.
                 CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots(
                     snapshot: currentSnapshot,
                     tagFilter: "train:dir-normal"
@@ -299,13 +301,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
                     );
                 }
 
-                if (currentSnapshot == null)
-                {
-                    Console.WriteLine("[current-report] snapshot not built (no records or policies).");
-                    return;
-                }
-
-                // Полный вывод в консоль (включая ExplanationItems).
                 CurrentPredictionPrinter.Print(currentSnapshot);
 
                 var report = CurrentPredictionReportBuilder.Build(currentSnapshot);
@@ -326,11 +321,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
             }
         }
 
-        /// <summary>
-        /// Бэкфилл отчётов "текущий прогноз" за последние historyWindowDays дней.
-        /// Для каждого дня строится снапшот + ReportDocument (kind = "current_prediction").
-        /// Отчёты сохраняются через ReportStorage.
-        /// </summary>
         public static void SaveCurrentPredictionHistoryReports(
             IReadOnlyList<BacktestRecord> records,
             IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
@@ -398,11 +388,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
             }
         }
 
-        /// <summary>
-        /// Строит и сохраняет отчёт "текущий прогноз" за конкретную дату (UTC).
-        /// Берётся последняя PredictionRecord с DateUtc.ToCausalDateUtc() == predictionDateUtc.ToCausalDateUtc().
-        /// Это заготовка под API/фронт для выбора даты из всей выборки.
-        /// </summary>
         public static void SaveCurrentPredictionReportForDate(
             IReadOnlyList<BacktestRecord> records,
             IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
@@ -433,7 +418,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
                     predictionDateUtc: predictionDateUtc
                 );
 
-                // Выводим в консоль именно выбранный день.
                 CurrentPredictionPrinter.Print(snapshot);
 
                 var report = CurrentPredictionReportBuilder.Build(snapshot);

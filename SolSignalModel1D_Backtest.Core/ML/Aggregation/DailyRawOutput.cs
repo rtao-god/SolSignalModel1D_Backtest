@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 	{

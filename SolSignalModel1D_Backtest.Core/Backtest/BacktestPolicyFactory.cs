@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 using SolSignalModel1D_Backtest.Core.Trading.Leverage.Policies;
 using System;

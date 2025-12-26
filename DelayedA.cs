@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data;
@@ -68,7 +68,7 @@ namespace SolSignalModel1D_Backtest
                 throw new InvalidOperationException("[PopulateDelayedA] No samples for model A – check input rows and candles consistency.");
 
             var pullbackTrainer = new PullbackContinuationTrainer();
-            DateTime asOfDate = allRows.Max(r => r.DayKeyUtc.Value).AddDays(1);
+            DateTime asOfDate = allRows.Max(r => r.EntryDayKeyUtc.Value).AddDays(1);
             var pullbackModel = pullbackTrainer.Train(pullbackSamples, asOfDate);
             var pullbackEngine = pullbackTrainer.CreateEngine(pullbackModel);
 

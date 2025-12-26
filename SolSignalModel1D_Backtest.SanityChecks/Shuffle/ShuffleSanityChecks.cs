@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.SanityChecks.Shuffle
+namespace SolSignalModel1D_Backtest.SanityChecks.Shuffle
 	{
 	/// <summary>
 	/// Заглушка под общие sanity-проверки shuffle-процедур.

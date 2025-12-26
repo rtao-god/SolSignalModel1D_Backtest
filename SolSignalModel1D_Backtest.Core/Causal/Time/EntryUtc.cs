@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace SolSignalModel1D_Backtest.Core.Time
 {
@@ -14,7 +14,15 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
         public bool IsDefault => _instant.IsDefault;
 
-        public DateTime Value => _instant.Value;
+        public DateTime Value
+        {
+            get
+            {
+                if (IsDefault)
+                    throw new InvalidOperationException("[entryUtc] EntryUtc is default (uninitialized).");
+                return _instant.Value;
+            }
+        }
 
         public EntryUtc(DateTime utc)
         {
@@ -31,8 +39,8 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
         public static EntryUtc FromUtcOrThrow(DateTime utc) => new EntryUtc(utc);
 
-        /// <summary>Явная проекция entry на day-key.</summary>
-        public DayKeyUtc DayKeyUtc => DayKeyUtc.FromUtcMomentOrThrow(Value);
+        /// <summary>Явная проекция entry на entry-day-key (00:00Z дня входа).</summary>
+        public EntryDayKeyUtc EntryDayKeyUtc => EntryDayKeyUtc.FromUtcMomentOrThrow(Value);
 
         public int CompareTo(EntryUtc other) => Value.CompareTo(other.Value);
         public bool Equals(EntryUtc other) => _instant.Equals(other._instant);

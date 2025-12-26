@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
@@ -15,7 +15,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
             bool delayedAsked = rec.DelayedEntryAsked == true;
 
             Console.WriteLine(
-                $"[day] {r.Causal.DayKeyUtc.Value:yyyy-MM-dd}  pred={rec.PredLabel} " +
+                $"[day] {r.EntryDayKeyUtc.Value:yyyy-MM-dd}  pred={rec.PredLabel} " +
                 $"micro=({(rec.PredMicroUp ? "UP" : rec.PredMicroDown ? "DOWN" : "-")})  " +
                 $"entry={rec.Entry:F2}  exit24={rec.Close24:F2}  delayedExec={(delayedExec ? "Y" : "N")} " +
                 $"src={rec.DelayedSource ?? "-"}");

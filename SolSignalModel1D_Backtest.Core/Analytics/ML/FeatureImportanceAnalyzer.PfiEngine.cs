@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 

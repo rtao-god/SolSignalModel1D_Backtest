@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
@@ -35,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
     public static class MicroDatasetBuilder
     {
-        private static DateTime DayKeyUtcDt(LabeledCausalRow r) => CausalTimeKey.DayKeyUtc(r).Value;
+        private static DateTime EntryUtcDt(LabeledCausalRow r) => r.EntryUtc.Value;
 
         public static MicroDataset Build(
             IReadOnlyList<LabeledCausalRow> allRows,
@@ -44,16 +44,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
             if (allRows == null) throw new ArgumentNullException(nameof(allRows));
             if (allRows.Count == 0) throw new ArgumentException("allRows must be non-empty.", nameof(allRows));
 
-            SeriesGuards.EnsureStrictlyAscendingUtc(allRows, r => DayKeyUtcDt(r), "micro-dataset.allRows");
+            SeriesGuards.EnsureStrictlyAscendingUtc(allRows, r => EntryUtcDt(r), "micro-dataset.allRows");
 
             var ordered = allRows as List<LabeledCausalRow> ?? allRows.ToList();
 
+            var trainUntilExitDayKeyUtc = trainUntilUtc.ExitDayKeyUtc;
+
             var split = NyTrainSplit.SplitByBaselineExitStrict(
-                ordered: ordered,
-                entrySelector: static r => new EntryUtc(r.EntryUtc.Value),
-                trainUntilUtc: trainUntilUtc,
-                nyTz: NyWindowing.NyTz,
-                tag: "micro-dataset.rows");
+                ordered,
+                static r => r.EntryUtc.AsEntryUtc(),
+                trainUntilExitDayKeyUtc,
+                NyWindowing.NyTz,
+                "micro-dataset.rows");
 
             var microRowsList = split.Train
                 .Where(r => r.FactMicroUp || r.FactMicroDown)

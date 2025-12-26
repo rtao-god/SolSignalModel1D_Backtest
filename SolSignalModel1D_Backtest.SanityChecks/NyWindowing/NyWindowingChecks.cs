@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
 

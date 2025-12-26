@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -63,6 +63,7 @@ namespace SolSignalModel1D_Backtest
             // 3. SL-модель: обучаемся строго на TrainOnly<BacktestRecord> по baseline-exit контракту.
             {
                 var trainUntilUtc = new TrainUntilUtc(_trainUntilUtc);
+                var trainUntilExitDayKeyUtc = trainUntilUtc.ExitDayKeyUtc;
 
                 var orderedRecords = records
                     .OrderBy(r => r.Causal.EntryUtc.Value)
@@ -70,19 +71,19 @@ namespace SolSignalModel1D_Backtest
 
                 var recSplit = NyTrainSplit.SplitByBaselineExitStrict(
                     ordered: orderedRecords,
-                    entrySelector: static r => r.Causal.EntryUtc,
-                    trainUntilUtc: trainUntilUtc,
+                    entrySelector: static r => r.Causal.RawEntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                     nyTz: NyTz,
                     tag: "sl");
 
                 Console.WriteLine(
                     $"[sl] records split: train={recSplit.Train.Count}, oos={recSplit.Oos.Count}, " +
-                    $"trainUntilExitDayKey={NyTrainSplit.ToIsoDate(trainUntilUtc.ExitDayKeyUtc)}, trainUntilUtc={trainUntilUtc.Value:O}");
+                    $"trainUntilExitDayKey={NyTrainSplit.ToIsoDate(trainUntilExitDayKeyUtc)}, trainUntilUtc={trainUntilUtc.Value:O}");
 
                 if (recSplit.Train.Count < 50)
                 {
-                    var trMin = recSplit.Train.Count > 0 ? recSplit.Train.Min(r => r.Causal.DayKeyUtc.Value) : default;
-                    var trMax = recSplit.Train.Count > 0 ? recSplit.Train.Max(r => r.Causal.DayKeyUtc.Value) : default;
+                    var trMin = recSplit.Train.Count > 0 ? recSplit.Train.Min(r => r.Causal.EntryDayKeyUtc.Value) : default;
+                    var trMax = recSplit.Train.Count > 0 ? recSplit.Train.Max(r => r.Causal.EntryDayKeyUtc.Value) : default;
 
                     throw new InvalidOperationException(
                         $"[sl] SL train subset too small (count={recSplit.Train.Count}). " +

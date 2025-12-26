@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
@@ -11,7 +11,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public bool FactMicroDown { get; }
 
         public NyTradingEntryUtc EntryUtc => Causal.EntryUtc;
-        public DayKeyUtc DayKeyUtc => Causal.DayKeyUtc;
+        public EntryUtc RawEntryUtc => Causal.RawEntryUtc;
+
+        public EntryDayKeyUtc EntryDayKeyUtc => Causal.EntryDayKeyUtc;
+
+        [Obsolete("Use EntryDayKeyUtc (explicit entry day-key).", error: false)]
+        public EntryDayKeyUtc DayKeyUtc => EntryDayKeyUtc;
 
         public LabeledCausalRow(CausalDataRow causal, int trueLabel, bool factMicroUp, bool factMicroDown)
         {

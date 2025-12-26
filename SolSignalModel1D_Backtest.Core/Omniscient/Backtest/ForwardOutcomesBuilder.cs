@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
@@ -17,8 +17,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
     /// - полного ряда 1m-свечей (forward-факты).
     ///
     /// Контракт времени:
-    /// - EntryUtc: момент старта окна (утро/вход) — используется для нарезки минут и NyWindowing.ComputeBaselineExitUtc.
-    /// - DayKeyUtc: ключ дня (00:00 UTC) — используется для "идентичности дня" и сопоставления truth↔causal.
+    /// - EntryUtc: старт baseline-окна (утро/вход);
+    /// - EntryDayKeyUtc: идентичность дня записи (00:00 UTC) для truth↔causal.
     /// </summary>
     public static class ForwardOutcomesBuilder
     {
@@ -39,19 +39,20 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 
             SeriesGuards.EnsureStrictlyAscendingUtc(allMinutes, m => m.OpenTimeUtc, "ForwardOutcomesBuilder.allMinutes");
 
-            // truth индексируем по DayKeyUtc (строгий day-key тип).
-            var truthByDayKey = new Dictionary<DayKeyUtc, LabeledCausalRow>(truthRows.Count);
+            // truth индексируем по entry-day-key (EntryDayKeyUtc).
+            var truthByDayKey = new Dictionary<EntryDayKeyUtc, LabeledCausalRow>(truthRows.Count);
             for (int i = 0; i < truthRows.Count; i++)
             {
                 var t = truthRows[i];
-                var dayKeyUtc = t.Causal.DayKeyUtc;
 
-                // Дубликаты по дню означают повреждение/рассинхрон входных данных.
+                var dayKeyUtc = t.Causal.EntryDayKeyUtc;
+                if (dayKeyUtc.IsDefault)
+                    throw new InvalidOperationException("[forward] truth row has default entry day-key.");
+
                 if (!truthByDayKey.TryAdd(dayKeyUtc, t))
                     throw new InvalidOperationException($"[forward] duplicate truth row for dayKey {dayKeyUtc.Value:O}.");
             }
 
-            // Стабильный порядок: по реальному моменту входа.
             var orderedRecords = causalRecords
                 .OrderBy(r => r.EntryUtc.Value)
                 .ToList();
@@ -62,31 +63,34 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 
             foreach (var causal in orderedRecords)
             {
-                DateTime entryUtc = causal.EntryUtc.Value;
-                DayKeyUtc dayKeyUtc = causal.DayKeyUtc;
+                DateTime entryUtcRaw = causal.EntryUtc.Value;
+
+                var dayKeyUtc = causal.EntryDayKeyUtc;
+                if (dayKeyUtc.IsDefault)
+                    throw new InvalidOperationException($"[forward] causal record has default entry day-key (entry={entryUtcRaw:O}).");
 
                 if (!truthByDayKey.TryGetValue(dayKeyUtc, out var truth))
-                    throw new InvalidOperationException($"[forward] No truth row for causal dayKey {dayKeyUtc.Value:O} (entry={entryUtc:O}).");
+                    throw new InvalidOperationException($"[forward] No truth row for causal dayKey {dayKeyUtc.Value:O} (entry={entryUtcRaw:O}).");
 
-                // Жёсткая проверка: causal и truth обязаны описывать одно и то же "утро".
                 var truthEntryUtc = truth.Causal.EntryUtc.Value;
-                if (truthEntryUtc != entryUtc)
+                if (truthEntryUtc != entryUtcRaw)
                 {
                     throw new InvalidOperationException(
                         $"[forward] truth.EntryUtc != causal.EntryUtc for dayKey {dayKeyUtc.Value:O}. " +
-                        $"truthEntry={truthEntryUtc:O}, causalEntry={entryUtc:O}.");
+                        $"truthEntry={truthEntryUtc:O}, causalEntry={entryUtcRaw:O}.");
                 }
 
-                // Конец окна по контракту NyWindowing (полуоткрытое окно [entryUtc; end)).
+                var entryUtc = new EntryUtc(entryUtcRaw);
+
                 DateTime windowEndUtc = NyWindowing
-                    .ComputeBaselineExitUtc(new EntryUtc(entryUtc), NyWindowing.NyTz)
+                    .ComputeBaselineExitUtc(entryUtc, NyWindowing.NyTz)
                     .Value;
 
-                if (windowEndUtc <= entryUtc)
+                if (windowEndUtc <= entryUtcRaw)
                     throw new InvalidOperationException(
-                        $"[forward] Invalid baseline window: entry={entryUtc:O}, end={windowEndUtc:O}, dayKey={dayKeyUtc.Value:O}.");
+                        $"[forward] Invalid baseline window: entry={entryUtcRaw:O}, end={windowEndUtc:O}, dayKey={dayKeyUtc.Value:O}.");
 
-                while (minuteIndex < allMinutes.Count && allMinutes[minuteIndex].OpenTimeUtc < entryUtc)
+                while (minuteIndex < allMinutes.Count && allMinutes[minuteIndex].OpenTimeUtc < entryUtcRaw)
                     minuteIndex++;
 
                 var dayMinutes = new List<Candle1m>();
@@ -104,17 +108,17 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 
                 if (dayMinutes.Count == 0)
                     throw new InvalidOperationException(
-                        $"[forward] No 1m candles found for window start {entryUtc:O} (end={windowEndUtc:O}, dayKey={dayKeyUtc.Value:O}).");
+                        $"[forward] No 1m candles found for window start {entryUtcRaw:O} (end={windowEndUtc:O}, dayKey={dayKeyUtc.Value:O}).");
 
                 minuteIndex = j;
 
                 for (int k = 0; k < dayMinutes.Count; k++)
-                    ValidateMinuteCandle(dayMinutes[k], entryUtc);
+                    ValidateMinuteCandle(dayMinutes[k], entryUtcRaw);
 
                 var first = dayMinutes[0];
                 if (!double.IsFinite(first.Open) || first.Open <= 0.0)
                     throw new InvalidOperationException(
-                        $"[forward] Entry price must be finite and > 0 (entry={entryUtc:O}, dayKey={dayKeyUtc.Value:O}).");
+                        $"[forward] Entry price must be finite and > 0 (entry={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}).");
 
                 double entry = first.Open;
 
@@ -130,40 +134,41 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 
                 if (!double.IsFinite(maxHigh) || maxHigh <= 0.0)
                     throw new InvalidOperationException(
-                        $"[forward] Invalid maxHigh in window (entry={entryUtc:O}, dayKey={dayKeyUtc.Value:O}).");
+                        $"[forward] Invalid maxHigh in window (entry={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}).");
 
                 if (!double.IsFinite(minLow) || minLow <= 0.0)
                     throw new InvalidOperationException(
-                        $"[forward] Invalid minLow in window (entry={entryUtc:O}, dayKey={dayKeyUtc.Value:O}).");
+                        $"[forward] Invalid minLow in window (entry={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}).");
 
                 var last = dayMinutes[dayMinutes.Count - 1];
                 if (!double.IsFinite(last.Close) || last.Close <= 0.0)
                     throw new InvalidOperationException(
-                        $"[forward] Last Close must be finite and > 0 (entry={entryUtc:O}, dayKey={dayKeyUtc.Value:O}).");
+                        $"[forward] Last Close must be finite and > 0 (entry={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}).");
 
                 double close24 = last.Close;
 
                 double upDiff = maxHigh - entry;
                 if (upDiff < 0.0)
                     throw new InvalidOperationException(
-                        $"[forward] maxHigh < entry: entry={entry:0.########}, maxHigh={maxHigh:0.########}, entryUtc={entryUtc:O}, dayKey={dayKeyUtc.Value:O}.");
+                        $"[forward] maxHigh < entry: entry={entry:0.########}, maxHigh={maxHigh:0.########}, entryUtc={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}.");
 
                 double downDiff = entry - minLow;
                 if (downDiff < 0.0)
                     throw new InvalidOperationException(
-                        $"[forward] minLow > entry: entry={entry:0.########}, minLow={minLow:0.########}, entryUtc={entryUtc:O}, dayKey={dayKeyUtc.Value:O}.");
+                        $"[forward] minLow > entry: entry={entry:0.########}, minLow={minLow:0.########}, entryUtc={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}.");
 
                 double upMove = upDiff / entry;
                 double downMove = downDiff / entry;
 
                 if (!double.IsFinite(upMove) || !double.IsFinite(downMove))
                     throw new InvalidOperationException(
-                        $"[forward] Non-finite move computed (entryUtc={entryUtc:O}, dayKey={dayKeyUtc.Value:O}).");
+                        $"[forward] Non-finite move computed (entryUtc={entryUtcRaw:O}, dayKey={dayKeyUtc.Value:O}).");
 
                 double forwardMinMove = Math.Max(upMove, downMove);
 
                 var forward = new ForwardOutcomes
                 {
+                    EntryUtc = entryUtc,
                     WindowEndUtc = windowEndUtc,
                     Entry = entry,
                     MaxHigh24 = maxHigh,

@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Causal.Features
+namespace SolSignalModel1D_Backtest.Core.Causal.Features
 {
     public sealed class BtcFeatures : IFeatureBuilder<CausalDataRow>
     {

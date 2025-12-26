@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
@@ -44,8 +44,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 
             // Диапазон дат в summary считаем по day-key, чтобы это была "шкала дней", а не timestamp.
             // Это важно, чтобы даты summary были устойчивы и не зависели от "времени входа".
-            var fromDate = mornings.Min(r => CausalTimeKey.DayKeyUtc(r));
-            var toDate = mornings.Max(r => CausalTimeKey.DayKeyUtc(r));
+            var fromDayKey = mornings.Min(r => r.Causal.EntryDayKeyUtc);
+            var toDayKey = mornings.Max(r => r.Causal.EntryDayKeyUtc);
 
             // Прогоняем все четыре режима:
             // - useStopLoss: влияет на daily SL + delayed intraday stops
@@ -94,9 +94,6 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
                 bestTotalPnl = 0.0;
             if (double.IsNegativeInfinity(worstMaxDd))
                 worstMaxDd = 0.0;
-
-            var fromDayKey = mornings.Min(r => CausalTimeKey.DayKeyUtc(r));
-            var toDayKey = mornings.Max(r => CausalTimeKey.DayKeyUtc(r));
 
             // Формируем итоговый summary.
             return new BacktestSummary

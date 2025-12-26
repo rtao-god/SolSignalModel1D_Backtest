@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
+namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 	{
 	/// <summary>
 	/// Сводный DTO, который держит все уровни вероятностей по одному дню:

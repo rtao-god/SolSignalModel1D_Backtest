@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
@@ -61,7 +61,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
         [Fact]
         public void Split_PutsWeekendsIntoExcluded()
         {
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
             var items = new List<EntryUtc>
             {

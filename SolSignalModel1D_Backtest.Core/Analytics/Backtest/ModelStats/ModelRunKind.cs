@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats
+namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats
 	{
 	/// <summary>
 	/// Режим запуска, в котором собираются/печатаются модельные статистики.

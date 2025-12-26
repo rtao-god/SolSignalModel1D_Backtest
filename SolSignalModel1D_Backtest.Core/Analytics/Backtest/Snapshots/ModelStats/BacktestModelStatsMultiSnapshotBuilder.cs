@@ -1,8 +1,9 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
@@ -16,7 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
             TimeZoneInfo nyTz,
             double dailyTpPct,
             double dailySlPct,
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             int recentDays,
             ModelRunKind runKind)
         {
@@ -32,7 +33,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
                 {
                     RunKind = runKind,
                     TrainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc,
-                    TrainUntilIsoDate = trainUntilExitDayKeyUtc.ToString(),
+                    TrainUntilIsoDate = trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     RecentDays = recentDays
                 }
             };
@@ -166,7 +167,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 
         private static (List<BacktestRecord> Train, List<BacktestRecord> Oos, List<BacktestRecord> Excluded) SplitByBaselineExitDayKey(
             IReadOnlyList<BacktestRecord> ordered,
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz)
         {
             if (ordered == null) throw new ArgumentNullException(nameof(ordered));
@@ -188,9 +189,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
                     continue;
                 }
 
-                var exitDayKey = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
+                var exitDayKey = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
 
-                if (exitDayKey <= trainUntilExitDayKeyUtc) train.Add(r);
+                if (exitDayKey.Value <= trainUntilExitDayKeyUtc.Value) train.Add(r);
                 else oos.Add(r);
             }
 

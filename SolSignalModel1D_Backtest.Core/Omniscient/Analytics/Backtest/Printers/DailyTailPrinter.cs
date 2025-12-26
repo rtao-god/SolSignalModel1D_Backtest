@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -22,8 +22,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			if (records == null || records.Count == 0) return;
 
-            var lastDay = records.Max(r => CausalTimeKey.DayKeyUtc(r).Value);
-            var rec = records.First(r => CausalTimeKey.DayKeyUtc(r).Value == lastDay);
+            var lastDay = records.Max(r => (r.Causal ?? 
+			throw new InvalidOperationException("[tail] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value);
+            var rec = records.First(r => (r.Causal ?? 
+			throw new InvalidOperationException("[tail] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value == lastDay);
 
             ConsoleStyler.WriteHeader($"=== LAST DAY @ {lastDay:yyyy-MM-dd} ===");
 

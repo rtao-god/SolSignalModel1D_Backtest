@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -32,11 +32,14 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 
             var (pUp, pFlat, pDown) = MakeTriProbs(predLabel);
 
+            var rawEntryUtc = new EntryUtc(entryUtc);
+            var nyEntryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow(rawEntryUtc, TimeZones.NewYork);
+
             return new BacktestRecord
             {
                 Causal = new CausalPredictionRecord
                 {
-                    EntryUtc = new EntryUtc(entryUtc),
+                    EntryUtc = nyEntryUtc,
 
                     PredLabel = predLabel,
                     PredLabel_Day = predLabel,
@@ -59,6 +62,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 
                 Forward = new ForwardOutcomes
                 {
+                    EntryUtc = rawEntryUtc,
                     WindowEndUtc = entryUtc.AddHours(24),
                     Entry = 100.0,
                     MaxHigh24 = 110.0,

@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Domain
+namespace SolSignalModel1D_Backtest.Core.Domain
 	{
 	/// <summary>
 	/// Централизованные имена тикеров:

@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Data.Candles
+namespace SolSignalModel1D_Backtest.Core.Data.Candles
 	{
 	public static class SyntheticCrossBuilder
 		{

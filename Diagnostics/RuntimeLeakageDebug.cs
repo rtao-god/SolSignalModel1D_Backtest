@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
 using System;
@@ -33,7 +33,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: r => r.Causal.EntryUtc,
+                entrySelector: r => r.Causal.RawEntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
                 nyTz: nyTz);
 
@@ -88,7 +88,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             static void PrintRow(string kind, BacktestRecord r)
             {
                 var c = r.Causal;
-                var dayKey = c.DayKeyUtc.Value;
+                var dayKey = c.EntryDayKeyUtc.Value;
 
                 Console.WriteLine(
                     $"[leak-probe] {kind} {dayKey:yyyy-MM-dd} " +

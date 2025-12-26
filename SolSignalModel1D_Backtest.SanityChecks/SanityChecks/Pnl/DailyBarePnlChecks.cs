@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -40,16 +40,16 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
                 throw new ArgumentException("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
             var trainUntilIso = trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
             var ordered = records
-                .OrderBy(r => r.Causal.DayKeyUtc.Value)
+                .OrderBy(r => r.Causal.EntryDayKeyUtc.Value)
                 .ToList();
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: r => r.Causal.EntryUtc,
+                entrySelector: r => r.Causal.RawEntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: nyTz);
 
@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
             {
                 var sample = split.Excluded
                     .Take(Math.Min(10, split.Excluded.Count))
-                    .Select(r => r.Causal.DayKeyUtc.Value.ToString("O"));
+                    .Select(r => r.Causal.EntryDayKeyUtc.Value.ToString("O"));
 
                 throw new InvalidOperationException(
                     $"[pnl-bare] Found excluded days (baseline-exit undefined). " +
@@ -211,7 +211,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
             if (goLong && goShort)
             {
                 Console.WriteLine(
-                    $"[pnl-bare] WARNING: both goLong & goShort for {c.DayKeyUtc.Value:O}, PredLabel={c.PredLabel}, microUp={c.PredMicroUp}, microDown={c.PredMicroDown}.");
+                    $"[pnl-bare] WARNING: both goLong & goShort for {c.EntryDayKeyUtc.Value:O}, PredLabel={c.PredLabel}, microUp={c.PredMicroUp}, microDown={c.PredMicroDown}.");
                 return 0;
             }
 
@@ -251,7 +251,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
                 if (!HasValidPrices(r))
                 {
                     Console.WriteLine(
-                        $"[pnl-bare] WARNING: invalid prices for {r.Causal.DayKeyUtc.Value:O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
+                        $"[pnl-bare] WARNING: invalid prices for {r.Causal.EntryDayKeyUtc.Value:O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
                     continue;
                 }
 
@@ -277,7 +277,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
                 if (!HasValidPrices(r))
                 {
                     Console.WriteLine(
-                        $"[pnl-bare] WARNING: invalid prices for {r.Causal.DayKeyUtc.Value:O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
+                        $"[pnl-bare] WARNING: invalid prices for {r.Causal.EntryDayKeyUtc.Value:O}, Entry={r.Forward.Entry}, Close24={r.Forward.Close24}, skip day.");
                     continue;
                 }
 

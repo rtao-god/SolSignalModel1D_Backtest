@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.ML
+namespace SolSignalModel1D_Backtest.Core.Analytics.ML
 	{
 	/// <summary>
 	/// Глобальная сводка по всем моделям:

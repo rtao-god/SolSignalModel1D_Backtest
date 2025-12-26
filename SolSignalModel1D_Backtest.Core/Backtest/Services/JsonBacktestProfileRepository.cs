@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
+using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
 using SolSignalModel1D_Backtest.Core.Infra;
 using System;
 using System.Collections.Generic;

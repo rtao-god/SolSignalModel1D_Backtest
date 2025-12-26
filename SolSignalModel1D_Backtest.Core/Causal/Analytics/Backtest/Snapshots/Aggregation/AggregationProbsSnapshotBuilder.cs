@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
@@ -17,10 +17,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
             if (recentDays <= 0) throw new ArgumentOutOfRangeException(nameof(recentDays), "recentDays must be > 0.");
             if (debugLastDays <= 0) throw new ArgumentOutOfRangeException(nameof(debugLastDays), "debugLastDays must be > 0.");
 
-            var eligible = OrderAndValidateDayKey(sets.Eligible, "eligible");
-            var excluded = OrderAndValidateDayKey(sets.Excluded, "excluded");
-            var train = OrderAndValidateDayKey(sets.Train, "train");
-            var oos = OrderAndValidateDayKey(sets.Oos, "oos");
+            var eligible = OrderAndValidateEntryDayKey(sets.Eligible, "eligible");
+            var excluded = OrderAndValidateEntryDayKey(sets.Excluded, "excluded");
+            var train = OrderAndValidateEntryDayKey(sets.Train, "train");
+            var oos = OrderAndValidateEntryDayKey(sets.Oos, "oos");
 
             EnsureSplitInvariants(sets.Boundary.TrainUntilExitDayKeyUtc, eligible, train, oos);
 
@@ -46,13 +46,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
             AddSegment(
                 segments,
                 segmentName: "Train",
-                segmentLabel: $"Train (day<= {sets.Boundary.TrainUntilIsoDate})",
+                segmentLabel: $"Train (exit<= {sets.Boundary.TrainUntilIsoDate})",
                 train);
 
             AddSegment(
                 segments,
                 segmentName: "OOS",
-                segmentLabel: $"OOS (day>  {sets.Boundary.TrainUntilIsoDate})",
+                segmentLabel: $"OOS (exit>  {sets.Boundary.TrainUntilIsoDate})",
                 oos);
 
             var recent = BuildRecent(eligible, recentDays);
@@ -81,7 +81,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
             };
         }
 
-        private static List<BacktestAggRow> OrderAndValidateDayKey(IReadOnlyList<BacktestAggRow> rows, string setName)
+        private static List<BacktestAggRow> OrderAndValidateEntryDayKey(IReadOnlyList<BacktestAggRow> rows, string setName)
         {
             if (rows == null) throw new ArgumentNullException(nameof(rows), $"[{setName}] set is null.");
 
@@ -90,20 +90,20 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
 
             for (int i = 0; i < rows.Count; i++)
             {
-                if (rows[i].DayUtc.Equals(default(DayKeyUtc)))
-                    throw new InvalidOperationException($"[agg-probs] BacktestAggRow.DayUtc is default in {setName} set.");
+                if (rows[i].EntryDayKeyUtc.Equals(default(EntryDayKeyUtc)))
+                    throw new InvalidOperationException($"[agg-probs] BacktestAggRow.EntryDayKeyUtc is default in {setName} set.");
             }
 
-            return rows.OrderBy(r => r.DayUtc.Value).ToList();
+            return rows.OrderBy(r => r.EntryDayKeyUtc.Value).ToList();
         }
 
         private static void EnsureSplitInvariants(
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             IReadOnlyList<BacktestAggRow> eligible,
             IReadOnlyList<BacktestAggRow> train,
             IReadOnlyList<BacktestAggRow> oos)
         {
-            if (trainUntilExitDayKeyUtc.Equals(default(DayKeyUtc)))
+            if (trainUntilExitDayKeyUtc.Equals(default(ExitDayKeyUtc)))
                 throw new InvalidOperationException("[agg-probs] trainUntilExitDayKeyUtc is default.");
 
             if (train.Count + oos.Count != eligible.Count)
@@ -112,19 +112,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
                     $"[agg-probs] Split invariant violated: train({train.Count}) + oos({oos.Count}) != eligible({eligible.Count}).");
             }
 
-            var cut = trainUntilExitDayKeyUtc.Value;
-
-            for (int i = 0; i < train.Count; i++)
-            {
-                if (train[i].DayUtc.Value > cut)
-                    throw new InvalidOperationException($"[agg-probs] Train set contains day > trainUntil: {train[i].DayUtc.Value:O} > {cut:O}.");
-            }
-
-            for (int i = 0; i < oos.Count; i++)
-            {
-                if (oos[i].DayUtc.Value <= cut)
-                    throw new InvalidOperationException($"[agg-probs] OOS set contains day <= trainUntil: {oos[i].DayUtc.Value:O} <= {cut:O}.");
-            }
+            // ВАЖНО:
+            // - BacktestAggRow.EntryDayKeyUtc — entry day-key.
+            // - trainUntilExitDayKeyUtc — baseline-exit day-key.
+            // Их прямое сравнение запрещено; корректность обеспечивается апстрим-сплитом.
         }
 
         private static (DateTime Min, DateTime Max) ComputeMinMaxUtc(
@@ -137,15 +128,15 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
 
             if (eligible.Count > 0)
             {
-                min = eligible[0].DayUtc.Value;
-                max = eligible[^1].DayUtc.Value;
+                min = eligible[0].EntryDayKeyUtc.Value;
+                max = eligible[^1].EntryDayKeyUtc.Value;
                 has = true;
             }
 
             if (excluded.Count > 0)
             {
-                var exMin = excluded[0].DayUtc.Value;
-                var exMax = excluded[^1].DayUtc.Value;
+                var exMin = excluded[0].EntryDayKeyUtc.Value;
+                var exMax = excluded[^1].EntryDayKeyUtc.Value;
 
                 if (!has)
                 {
@@ -168,10 +159,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
             if (eligible.Count == 0)
                 return Array.Empty<BacktestAggRow>();
 
-            var maxDateUtc = eligible[^1].DayUtc.Value;
+            var maxDateUtc = eligible[^1].EntryDayKeyUtc.Value;
             var fromRecentUtc = maxDateUtc.AddDays(-recentDays);
 
-            var recent = eligible.Where(r => r.DayUtc.Value >= fromRecentUtc).ToList();
+            var recent = eligible.Where(r => r.EntryDayKeyUtc.Value >= fromRecentUtc).ToList();
             return recent.Count == 0 ? eligible : recent;
         }
 
@@ -213,7 +204,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
 
             foreach (var r in seg)
             {
-                var d = r.DayUtc.Value;
+                var d = r.EntryDayKeyUtc.Value;
 
                 ValidateTri(d, "Day", r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day);
                 ValidateTri(d, "Day+Micro", r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro);
@@ -274,8 +265,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
             {
                 SegmentName = segmentName,
                 SegmentLabel = segmentLabel,
-                FromDateUtc = seg[0].DayUtc.Value,
-                ToDateUtc = seg[^1].DayUtc.Value,
+                FromDateUtc = seg[0].EntryDayKeyUtc.Value,
+                ToDateUtc = seg[^1].EntryDayKeyUtc.Value,
                 RecordsCount = seg.Count,
                 Day = day,
                 DayMicro = dm,
@@ -320,7 +311,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
 
                 res.Add(new AggregationProbsDebugRow
                 {
-                    DateUtc = r.DayUtc.Value,
+                    DateUtc = r.EntryDayKeyUtc.Value,
                     TrueLabel = r.TrueLabel,
                     PredDay = r.PredLabel_Day,
                     PredDayMicro = r.PredLabel_DayMicro,

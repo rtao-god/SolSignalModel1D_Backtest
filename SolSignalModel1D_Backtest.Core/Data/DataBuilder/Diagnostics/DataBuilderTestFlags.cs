@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder.Diagnostics
+namespace SolSignalModel1D_Backtest.Core.Data.DataBuilder.Diagnostics
 	{
 	/// <summary>
 	/// Набор флажков для намеренных утечек в RowBuilder.

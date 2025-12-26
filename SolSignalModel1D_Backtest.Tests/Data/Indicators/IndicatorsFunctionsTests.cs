@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
 using Xunit;
 

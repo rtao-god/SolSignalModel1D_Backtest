@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
@@ -31,7 +31,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 
             var labeled = mornings
                 .Where(r => r.FactMicroUp || r.FactMicroDown)
-                .OrderBy(r => CausalTimeKey.DayKeyUtc(r))
+                .OrderBy(r => CausalTimeKey.EntryDayKeyUtc(r))
                 .ToList();
 
             if (labeled.Count < 20)
@@ -40,14 +40,14 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
                     $"[micro] размеченных микро-дней слишком мало ({labeled.Count}), пропускаем sanity-проверку.");
             }
 
-            var factByDayKey = labeled.ToDictionary(r => CausalTimeKey.DayKeyUtc(r), r => r);
+            var factByDayKey = labeled.ToDictionary(r => CausalTimeKey.EntryDayKeyUtc(r), r => r);
 
-            // Пары собираем строго по day-key (семантический тип), чтобы не смешивать timestamp и идентичность дня.
-            var pairs = new List<(DayKeyUtc DayKey, bool PredUp, bool FactUp)>();
+            // Пары собираем по exit-day-key (baseline-exit), чтобы сравнение train vs OOS было по каноничной границе.
+            var pairs = new List<(ExitDayKeyUtc ExitDayKeyUtc, bool PredUp, bool FactUp)>();
 
             foreach (var rec in records)
             {
-                var dayKey = CausalTimeKey.DayKeyUtc(rec);
+                var dayKey = CausalTimeKey.EntryDayKeyUtc(rec);
 
                 if (!factByDayKey.TryGetValue(dayKey, out var row))
                     continue;
@@ -55,8 +55,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
                 if (!rec.PredMicroUp && !rec.PredMicroDown)
                     continue;
 
+                var exitDayKeyUtc = NyWindowing.ComputeExitDayKeyUtc(rec.EntryUtc, NyWindowing.NyTz);
+
                 pairs.Add((
-                    DayKey: dayKey,
+                    ExitDayKeyUtc: exitDayKeyUtc,
                     PredUp: rec.PredMicroUp,
                     FactUp: row.FactMicroUp));
             }
@@ -68,10 +70,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
             }
 
             // Граница сравнения для micro-check: day-key границы trainUntil (exit-day-key по контракту пайплайна).
-            var trainUntilExitDayKey = DayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
+            var trainUntilExitDayKey = ExitDayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
 
-            var train = pairs.Where(p => p.DayKey <= trainUntilExitDayKey).ToList();
-            var oos = pairs.Where(p => p.DayKey > trainUntilExitDayKey).ToList();
+            var train = pairs.Where(p => p.ExitDayKeyUtc <= trainUntilExitDayKey).ToList();
+            var oos = pairs.Where(p => p.ExitDayKeyUtc > trainUntilExitDayKey).ToList();
 
             double accAll = ComputeAccuracy(pairs);
             double accTrain = ComputeAccuracy(train);
@@ -124,7 +126,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
             return result;
         }
 
-        private static double ComputeAccuracy(IReadOnlyList<(DayKeyUtc DayKey, bool PredUp, bool FactUp)> items)
+        private static double ComputeAccuracy(IReadOnlyList<(ExitDayKeyUtc ExitDayKeyUtc, bool PredUp, bool FactUp)> items)
         {
             if (items == null || items.Count == 0)
                 return double.NaN;

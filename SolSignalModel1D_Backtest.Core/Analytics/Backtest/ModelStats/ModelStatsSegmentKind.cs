@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats
+namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats
 	{
 	/// <summary>
 	/// Тип сегмента, по которому строятся независимые модельные метрики.

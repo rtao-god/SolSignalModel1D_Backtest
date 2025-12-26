@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
+namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 	{
 	/// <summary>
 	/// DTO для вероятностей риск-слоя SL (стоп-лоссы long/short) и их уверенности.

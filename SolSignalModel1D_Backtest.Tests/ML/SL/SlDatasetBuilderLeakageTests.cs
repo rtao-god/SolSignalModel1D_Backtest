@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
@@ -26,6 +26,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
             var entryLocalNy = new DateTime(2025, 1, 6, 8, 0, 0, DateTimeKind.Unspecified);
             var entryUtcDt = TimeZoneInfo.ConvertTimeToUtc(entryLocalNy, nyTz);
             var entry = new EntryUtc(entryUtcDt);
+            var nyEntry = NyWindowing.CreateNyTradingEntryUtcOrThrow(entry, nyTz);
 
             var exitUtc = NyWindowing.ComputeBaselineExitUtc(entry, nyTz);
             Assert.True(exitUtc.Value > entryUtcDt);
@@ -73,7 +74,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
                 {
                     Causal = new CausalPredictionRecord
                     {
-                        EntryUtc = entry,
+                        EntryUtc = nyEntry,
                         MinMove = 0.02,
                         PredLabel = 2,
                         PredMicroUp = false,
@@ -85,6 +86,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
                         FactMicroUp = false,
                         FactMicroDown = false,
 
+                        EntryUtc = entry,
                         Entry = entryPrice,
                         MaxHigh24 = entryPrice,
                         MinLow24 = entryPrice,
@@ -124,8 +126,8 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
             Assert.All(rawSamples, s => Assert.Equal(entryUtcDt, s.EntryUtc));
 
             // Граница ставится на день ДО exit-day-key => этот день должен попасть в OOS, а train-сэмплы быть пустыми.
-            var exitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1));
+            var exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1));
 
             var ds = SlDatasetBuilder.Build(
                 rows: rows,

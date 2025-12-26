@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Data

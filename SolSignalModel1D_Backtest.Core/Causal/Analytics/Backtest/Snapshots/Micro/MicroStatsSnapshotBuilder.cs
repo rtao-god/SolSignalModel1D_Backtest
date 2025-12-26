@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
@@ -35,10 +35,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Mic
             foreach (var r in rows.Where(x => x.PredLabel_Day == 1))
             {
                 if (r.PredMicroUp && r.PredMicroDown)
-                    throw new InvalidOperationException($"[micro-stats] Both PredMicroUp/PredMicroDown are true for {r.DayUtc.Value:O}.");
+                    throw new InvalidOperationException($"[micro-stats] Both PredMicroUp/PredMicroDown are true for {r.EntryDayKeyUtc.Value:O}.");
+
 
                 if (r.FactMicroUp && r.FactMicroDown)
-                    throw new InvalidOperationException($"[micro-stats] Both FactMicroUp/FactMicroDown are true for {r.DayUtc.Value:O}.");
+                    throw new InvalidOperationException($"[micro-stats] Both FactMicroUp/FactMicroDown are true for {r.EntryDayKeyUtc.Value:O}.");
+
+
 
                 if (!r.FactMicroUp && !r.FactMicroDown)
                     continue;

@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{

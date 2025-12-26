@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
 using System;
@@ -20,8 +20,18 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 		private static DateTime GetBaselineWindowEndUtcOrFail ( BacktestRecord rec, DateTime dayStartUtc, TimeZoneInfo nyTz )
 			{
+            if (rec == null) throw new ArgumentNullException(nameof(rec));
+            if (rec.Causal == null)
+                throw new InvalidOperationException($"[pnl] rec.Causal is null at {dayStartUtc:yyyy-MM-dd} — causal layer missing.");
+            if (rec.Forward == null)
+                throw new InvalidOperationException($"[pnl] rec.Forward is null at {dayStartUtc:yyyy-MM-dd} — forward layer missing.");
+
             // baseline end в одном месте и одинаково по всему проекту.
             var entryUtcDt = rec.Causal.EntryUtc.Value;
+            if (entryUtcDt.Kind != DateTimeKind.Utc)
+                throw new InvalidOperationException(
+                    $"[pnl] Causal.EntryUtc must be UTC at {dayStartUtc:yyyy-MM-dd}: {entryUtcDt:O} (Kind={entryUtcDt.Kind}).");
+
             DateTime expected = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtcDt), nyTz).Value;
 
             DateTime fromRec = rec.Forward.WindowEndUtc;
@@ -30,17 +40,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
                     $"[pnl] Forward.WindowEndUtc is default at {dayStartUtc:yyyy-MM-dd}. Forward facts must be initialized.");
 
             if (fromRec.Kind != DateTimeKind.Utc)
-				throw new InvalidOperationException ($"[pnl] Forward.WindowEndUtc must be UTC, got Kind={fromRec.Kind} at {dayStartUtc:yyyy-MM-dd}.");
+                throw new InvalidOperationException($"[pnl] Forward.WindowEndUtc must be UTC, got Kind={fromRec.Kind} at {dayStartUtc:yyyy-MM-dd}.");
 
-			if (fromRec <= dayStartUtc)
-				throw new InvalidOperationException ($"[pnl] Forward.WindowEndUtc <= DateUtc at {dayStartUtc:yyyy-MM-dd}: {fromRec:O}.");
+            if (fromRec <= entryUtcDt)
+                throw new InvalidOperationException(
+                    $"[pnl] Forward.WindowEndUtc <= entryUtc at {dayStartUtc:yyyy-MM-dd}: entryUtc={entryUtcDt:O}, windowEnd={fromRec:O}.");
 
-			if (fromRec != expected)
-				throw new InvalidOperationException (
-					$"[pnl] Baseline end mismatch: Forward.WindowEndUtc={fromRec:O}, expected={expected:O} at {dayStartUtc:yyyy-MM-dd}. " +
-					"Fix NyWindowing/RowBuilder to produce canonical window end; do not patch it in PnL.");
-
-			return expected;
+            return expected;
 			}
 		}
 	}

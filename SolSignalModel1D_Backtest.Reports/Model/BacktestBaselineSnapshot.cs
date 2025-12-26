@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Reports.Model
+namespace SolSignalModel1D_Backtest.Reports.Model
 	{
 	/// <summary>
 	/// Компактный снимок baseline-бэктеста без подробностей по сделкам.

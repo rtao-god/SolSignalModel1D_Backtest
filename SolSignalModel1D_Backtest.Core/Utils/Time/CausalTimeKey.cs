@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
@@ -10,17 +10,17 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Time
         public static EntryUtc EntryUtc(BacktestRecord r)
         {
             if (r == null) throw new ArgumentNullException(nameof(r));
-            if (r.Causal == null)
-                throw new InvalidOperationException("[time] BacktestRecord.Causal is null (invalid record).");
+            if (r.Forward == null)
+                throw new InvalidOperationException("[time] BacktestRecord.Forward is null (invalid record).");
 
-            var t = r.Causal.EntryUtc;
-            if (t.Equals(default(EntryUtc)))
-                throw new InvalidOperationException("[time] BacktestRecord.Causal.EntryUtc is default (invalid record).");
+            var t = r.Forward.EntryUtc;
+            if (t.IsDefault)
+                throw new InvalidOperationException("[time] BacktestRecord.Forward.EntryUtc is default (invalid record).");
 
             return t;
         }
 
-        public static NyTradingEntryUtc EntryUtc(LabeledCausalRow r)
+        public static NyTradingEntryUtc TradingEntryUtc(LabeledCausalRow r)
         {
             if (r == null) throw new ArgumentNullException(nameof(r));
             if (r.Causal == null)
@@ -33,7 +33,18 @@ namespace SolSignalModel1D_Backtest.Core.Utils.Time
             return t;
         }
 
-        public static DayKeyUtc DayKeyUtc(BacktestRecord r) => r.Causal.DayKeyUtc;
-        public static DayKeyUtc DayKeyUtc(LabeledCausalRow r) => r.Causal.DayKeyUtc;
+        /// <summary>Day identity записи (entry-day-key, 00:00Z).</summary>
+        public static EntryDayKeyUtc EntryDayKeyUtc(BacktestRecord r)
+        {
+            if (r == null) throw new ArgumentNullException(nameof(r));
+            return r.EntryDayKeyUtc;
+        }
+
+        /// <summary>Day identity записи (entry-day-key, 00:00Z).</summary>
+        public static EntryDayKeyUtc EntryDayKeyUtc(LabeledCausalRow r)
+        {
+            if (r == null) throw new ArgumentNullException(nameof(r));
+            return r.EntryDayKeyUtc;
+        }
     }
 }

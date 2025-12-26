@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
 using SolSignalModel1D_Backtest.Core.Utils;
 using System;
@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 throw new InvalidOperationException("[daily-train] trainRows is empty.");
 
             // Инвариант: вход отсортирован по entryUtc (UTC) строго по возрастанию.
-            // DayKeyUtc может повторяться внутри одного дня (intraday ряды).
+            // EntryDayKeyUtc может повторяться внутри одного дня (intraday ряды).
             SeriesGuards.EnsureStrictlyAscendingUtc(
                 trainRows,
                 r => r.EntryUtc.Value,
@@ -35,7 +35,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 moveTrainRows = MlTrainingUtils.OversampleBinary(
                     src: trainRows,
                     isPositive: r => r.TrueLabel != 1,
-                    dateSelector: r => r.Causal.DayKeyUtc.Value,
+                    dateSelector: r => r.EntryDayKeyUtc.Value,
                     targetFrac: balanceTargetFrac);
             }
             else
@@ -61,13 +61,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 dirNormalRows = MlTrainingUtils.OversampleBinary(
                     src: dirNormalRows,
                     isPositive: r => r.TrueLabel == 2,
-                    dateSelector: r => r.Causal.DayKeyUtc.Value,
+                    dateSelector: r => r.EntryDayKeyUtc.Value,
                     targetFrac: balanceTargetFrac);
 
                 dirDownRows = MlTrainingUtils.OversampleBinary(
                     src: dirDownRows,
                     isPositive: r => r.TrueLabel == 2,
-                    dateSelector: r => r.Causal.DayKeyUtc.Value,
+                    dateSelector: r => r.EntryDayKeyUtc.Value,
                     targetFrac: balanceTargetFrac);
             }
         }

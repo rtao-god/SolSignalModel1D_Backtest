@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Infra;
 using System;
 
 namespace SolSignalModel1D_Backtest.Core.Time
@@ -8,6 +8,12 @@ namespace SolSignalModel1D_Backtest.Core.Time
     ///
     /// Контракт времени/каузальности:
     /// - входы всегда UTC (EntryUtc);
+    /// - каноничные ключи времени:
+    ///   EntryUtc (UTC-момент),
+    ///   NyTradingEntryUtc (валидированный NY-morning, не выходной),
+    ///   BaselineExitUtc (вычисляется из EntryUtc),
+    ///   EntryDayKeyUtc (00:00Z дня входа),
+    ///   ExitDayKeyUtc (00:00Z дня baseline-exit);
     /// - weekend по NY локальному времени запрещён для causal:
     ///   Try* возвращает false, OrThrow кидает исключение;
     /// - "NY morning" определяется по NY-локальному времени:
@@ -20,12 +26,10 @@ namespace SolSignalModel1D_Backtest.Core.Time
     ///   эффектов при ночных DST-переходах.
     /// - Локальные DateTime создаются как Unspecified и трактуются как время nyTz.
     /// </summary>
-    public static class NyWindowing
+    public static partial class NyWindowing
     {
-        /// <summary>Единый источник таймзоны Нью-Йорка.</summary>
         public static TimeZoneInfo NyTz => TimeZones.NewYork;
 
-        // ===== "convert once" helper =====
         private readonly struct NyLocalStamp
         {
             public readonly DateTime Local;
@@ -44,86 +48,88 @@ namespace SolSignalModel1D_Backtest.Core.Time
         {
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
             if (utc == default) throw new ArgumentException("utc must be non-default.", nameof(utc));
-            if (utc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException("utc must be UTC.", nameof(utc));
+            if (utc.Kind != DateTimeKind.Utc) throw new ArgumentException("utc must be UTC.", nameof(utc));
 
             var local = TimeZoneInfo.ConvertTimeFromUtc(utc, nyTz);
             return new NyLocalStamp(local);
         }
 
-        // ===== NyTradingEntryUtc factories (единственный путь создать тип) =====
+        private static bool IsNyMorningLocal(DateTime local, TimeZoneInfo nyTz)
+        {
+            var d = local.Date;
+
+            // DST определяем по полудню даты (стабильно на границах DST).
+            var noonLocal = new DateTime(d.Year, d.Month, d.Day, 12, 0, 0, DateTimeKind.Unspecified);
+            bool dst = nyTz.IsDaylightSavingTime(noonLocal);
+            int expectedHourLocal = dst ? 8 : 7;
+
+            return local.Hour == expectedHourLocal
+                   && local.Minute == 0
+                   && local.Second == 0
+                   && local.Millisecond == 0;
+        }
 
         public static bool TryCreateNyTradingEntryUtc(EntryUtc entryUtc, TimeZoneInfo nyTz, out NyTradingEntryUtc tradingEntryUtc)
         {
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
-            if (entryUtc.IsDefault)
-                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+            if (entryUtc.IsDefault) throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
 
             var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
-            if (stamp.IsWeekend)
+
+            if (stamp.IsWeekend || !IsNyMorningLocal(stamp.Local, nyTz))
             {
                 tradingEntryUtc = default;
                 return false;
             }
 
-            // ВАЖНО: NyTradingEntryUtc ожидает DateTime (см. CS1503: UtcInstant -> DateTime).
-            tradingEntryUtc = new NyTradingEntryUtc(entryUtc.Value);
+            tradingEntryUtc = new NyTradingEntryUtc(entryUtc.Value, default);
             return true;
         }
 
         public static NyTradingEntryUtc CreateNyTradingEntryUtcOrThrow(EntryUtc entryUtc, TimeZoneInfo nyTz)
         {
             if (!TryCreateNyTradingEntryUtc(entryUtc, nyTz, out var tradingEntryUtc))
-                throw new InvalidOperationException($"[time] Weekend entry is not allowed for NyTradingEntryUtc: {entryUtc.Value:O}.");
+            {
+                var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
+
+                if (stamp.IsWeekend)
+                    throw new InvalidOperationException($"[time] Weekend entry is not allowed for NyTradingEntryUtc: {entryUtc.Value:O}.");
+
+                throw new InvalidOperationException(
+                    $"[time] NyTradingEntryUtc requires NY-morning entry (07:00/08:00 local). entryUtc={entryUtc.Value:O}, nyLocal={stamp.Local:O}.");
+            }
 
             return tradingEntryUtc;
         }
 
-        // ===== Weekend / trading-day helpers =====
-
         public static bool IsWeekendInNy(EntryUtc entryUtc, TimeZoneInfo nyTz)
         {
-            if (entryUtc.IsDefault)
-                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
-
+            if (entryUtc.IsDefault) throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
             var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
             return stamp.IsWeekend;
         }
 
         public static bool IsNyMorning(EntryUtc entryUtc, TimeZoneInfo nyTz)
         {
-            if (entryUtc.IsDefault)
-                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+            if (entryUtc.IsDefault) throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
 
             var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
-            if (stamp.IsWeekend)
-                return false;
+            if (stamp.IsWeekend) return false;
 
-            int expectedHourLocal = nyTz.IsDaylightSavingTime(stamp.Local) ? 8 : 7;
-
-            return stamp.Local.Hour == expectedHourLocal
-                   && stamp.Local.Minute == 0
-                   && stamp.Local.Second == 0
-                   && stamp.Local.Millisecond == 0;
+            return IsNyMorningLocal(stamp.Local, nyTz);
         }
 
         public static bool IsNyMorning(NyTradingEntryUtc entryUtc, TimeZoneInfo nyTz)
         {
-            if (entryUtc.IsDefault)
-                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+            if (entryUtc.IsDefault) throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
 
             var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
 
-            // Инвариант типа: weekend недопустим. При нарушении — fail-fast.
             if (stamp.IsWeekend)
                 throw new InvalidOperationException($"[time] NyTradingEntryUtc cannot be weekend: {entryUtc.Value:O}.");
 
-            int expectedHourLocal = nyTz.IsDaylightSavingTime(stamp.Local) ? 8 : 7;
-
-            return stamp.Local.Hour == expectedHourLocal
-                   && stamp.Local.Minute == 0
-                   && stamp.Local.Second == 0
-                   && stamp.Local.Millisecond == 0;
+            // По контракту должно быть true; оставляем вычисление как проверку инварианта.
+            return IsNyMorningLocal(stamp.Local, nyTz);
         }
 
         public static NyTradingDay GetNyTradingDayOrThrow(EntryUtc entryUtc, TimeZoneInfo nyTz)
@@ -171,7 +177,6 @@ namespace SolSignalModel1D_Backtest.Core.Time
             if (entryUtc.IsDefault)
                 throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
 
-            // По типу weekend недопустим; при нарушении — fail-fast внутри GetNyTradingDayOrThrow.
             nyDay = GetNyTradingDayOrThrow(entryUtc, nyTz);
             return true;
         }
@@ -220,7 +225,53 @@ namespace SolSignalModel1D_Backtest.Core.Time
             return true;
         }
 
+        // ===== exit-day-key (baseline-exit -> 00:00Z) =====
+
+        public static ExitDayKeyUtc ComputeExitDayKeyUtc(EntryUtc entryUtc, TimeZoneInfo nyTz)
+        {
+            if (!TryComputeExitDayKeyUtc(entryUtc, nyTz, out var exitDayKeyUtc))
+                throw new InvalidOperationException($"[time] Weekend entry is not allowed: {entryUtc.Value:O}.");
+
+            return exitDayKeyUtc;
+        }
+
+        public static bool TryComputeExitDayKeyUtc(EntryUtc entryUtc, TimeZoneInfo nyTz, out ExitDayKeyUtc exitDayKeyUtc)
+        {
+            if (entryUtc.IsDefault)
+                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+
+            var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
+            if (stamp.IsWeekend)
+            {
+                exitDayKeyUtc = default;
+                return false;
+            }
+
+            var exitUtcMoment = ComputeBaselineExitUtcMomentCore(entryUtc.Value, stamp.Local, nyTz);
+            exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtcMoment);
+            return true;
+        }
+
+        public static ExitDayKeyUtc ComputeExitDayKeyUtc(NyTradingEntryUtc entryUtc, TimeZoneInfo nyTz)
+        {
+            if (entryUtc.IsDefault)
+                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+
+            var stamp = ConvertOnceUtcToNyLocal(entryUtc.Value, nyTz);
+            if (stamp.IsWeekend)
+                throw new InvalidOperationException($"[time] NyTradingEntryUtc cannot be weekend: {entryUtc.Value:O}.");
+
+            var exitUtcMoment = ComputeBaselineExitUtcMomentCore(entryUtc.Value, stamp.Local, nyTz);
+            return ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtcMoment);
+        }
+
         private static BaselineExitUtc ComputeBaselineExitUtcCore(DateTime entryUtc, DateTime entryLocal, TimeZoneInfo nyTz)
+        {
+            var exitUtcDt = ComputeBaselineExitUtcMomentCore(entryUtc, entryLocal, nyTz);
+            return new BaselineExitUtc(new UtcInstant(exitUtcDt));
+        }
+
+        private static DateTime ComputeBaselineExitUtcMomentCore(DateTime entryUtc, DateTime entryLocal, TimeZoneInfo nyTz)
         {
             int addDays = entryLocal.DayOfWeek == DayOfWeek.Friday ? 3 : 1;
 
@@ -246,7 +297,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
                 throw new InvalidOperationException(
                     $"[time] Invalid baseline window: start={entryUtc:O}, end={exitUtcDt:O}.");
 
-            return new BaselineExitUtc(new UtcInstant(exitUtcDt));
+            return exitUtcDt;
         }
 
         // ===== reverse mapping =====

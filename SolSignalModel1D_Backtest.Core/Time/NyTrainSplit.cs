@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
@@ -28,7 +28,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
             }
         }
 
-        public static string ToIsoDate(DayKeyUtc dayKeyUtc)
+        public static string ToIsoDate(EntryDayKeyUtc dayKeyUtc)
         {
             if (dayKeyUtc.IsDefault)
                 throw new ArgumentException("dayKeyUtc must be initialized (non-default).", nameof(dayKeyUtc));
@@ -36,11 +36,22 @@ namespace SolSignalModel1D_Backtest.Core.Time
             return dayKeyUtc.Value.ToString("yyyy-MM-dd");
         }
 
+        public static string ToIsoDate(ExitDayKeyUtc dayKeyUtc)
+        {
+            if (dayKeyUtc.IsDefault)
+                throw new ArgumentException("dayKeyUtc must be initialized (non-default).", nameof(dayKeyUtc));
+
+            return dayKeyUtc.Value.ToString("yyyy-MM-dd");
+        }
+
+        /// <summary>
+        /// Каноничная классификация: entryUtc + граница ExitDayKeyUtc -> Train/Oos/Excluded.
+        /// </summary>
         public static EntryClass ClassifyByBaselineExit(
             EntryUtc entryUtc,
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz,
-            out DayKeyUtc baselineExitDayKeyUtc)
+            out ExitDayKeyUtc baselineExitDayKeyUtc)
         {
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
             if (entryUtc.IsDefault)
@@ -54,7 +65,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
                 return EntryClass.Excluded;
             }
 
-            baselineExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
+            baselineExitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
 
             return baselineExitDayKeyUtc.Value <= trainUntilExitDayKeyUtc.Value
                 ? EntryClass.Train
@@ -62,13 +73,13 @@ namespace SolSignalModel1D_Backtest.Core.Time
         }
 
         /// <summary>
-        /// Каноничный сплит: по baseline-exit day-key (а не по entryUtc).
+        /// Каноничный сплит: по baseline-exit day-key (ExitDayKeyUtc), а не по entry-day-key.
         /// ordered обязан быть строго возрастающим по entrySelector(...).Value (UTC).
         /// </summary>
         public static Split<T> SplitByBaselineExit<T>(
             IReadOnlyList<T> ordered,
             Func<T, EntryUtc> entrySelector,
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz)
         {
             if (ordered == null) throw new ArgumentNullException(nameof(ordered));

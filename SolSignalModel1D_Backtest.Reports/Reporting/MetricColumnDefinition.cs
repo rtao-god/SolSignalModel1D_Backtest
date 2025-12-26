@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Reports.Reporting
+namespace SolSignalModel1D_Backtest.Reports.Reporting
 	{
 	/// <summary>
 	/// Описание одной колонки таблицы для произвольного типа строки TRow.

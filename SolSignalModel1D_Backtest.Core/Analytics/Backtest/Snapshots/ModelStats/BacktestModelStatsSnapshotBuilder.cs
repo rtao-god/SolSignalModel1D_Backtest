@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
@@ -12,8 +12,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
     /// </summary>
     public static class BacktestModelStatsSnapshotBuilder
     {
-        private static EntryUtc EntryUtcOf(BacktestRecord r) => r.Causal.EntryUtc;
-        private static DayKeyUtc DayKeyOf(BacktestRecord r) => r.Causal.DayKeyUtc;
+        private static EntryUtc EntryUtcOf(BacktestRecord r) => new EntryUtc(r.Causal.EntryUtc.Value);
 
         private sealed class SlThresholdDay
         {
@@ -43,10 +42,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 
             if (records.Count > 0)
             {
-                // NOTE: если BacktestModelStatsSnapshot.FromDateUtc/ToDateUtc по смыслу day-key,
-                // идеальный вариант — поменять их тип на DayKeyUtc в DTO.
-                snapshot.FromDateUtc = records.Min(DayKeyOf).Value;
-                snapshot.ToDateUtc = records.Max(DayKeyOf).Value;
+                snapshot.FromDateUtc = records.Min(r => r.EntryDayKeyUtc.Value);
+                snapshot.ToDateUtc = records.Max(r => r.EntryDayKeyUtc.Value);
             }
 
             ComputeDailyConfusion(records, snapshot.Daily);
@@ -324,7 +321,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
 
             DateTime from = EntryUtcOf(r).Value;
 
-            if (!NyWindowing.TryComputeBaselineExitUtc(r.Causal.EntryUtc, nyTz, out var toExit))
+            if (!NyWindowing.TryComputeBaselineExitUtc(EntryUtcOf(r), nyTz, out var toExit))
                 return DayOutcome.None;
 
             DateTime to = toExit.Value;

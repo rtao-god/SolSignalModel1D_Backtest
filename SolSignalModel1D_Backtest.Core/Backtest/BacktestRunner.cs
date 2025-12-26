@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Aggregation;
@@ -11,7 +11,10 @@ using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
 using OmniscientModelStatsPrinter =
     SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers.BacktestModelStatsPrinter;
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
 {
@@ -19,47 +22,91 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
     {
         private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
+        // Legacy overload: принимает UTC instant и конвертирует в exit-day-key (00:00Z дня).
         public void Run(
             IReadOnlyList<LabeledCausalRow> mornings,
             IReadOnlyList<BacktestRecord> records,
             IReadOnlyList<Candle1m> candles1m,
             IReadOnlyList<RollingLoop.PolicySpec> policies,
             BacktestConfig config,
-            DayKeyUtc trainUntilDayKeyUtc)
+            DateTime trainUntilUtc)
+        {
+            if (trainUntilUtc == default)
+                throw new ArgumentException("trainUntilUtc must be initialized (non-default).", nameof(trainUntilUtc));
+            if (trainUntilUtc.Kind != DateTimeKind.Utc)
+                throw new ArgumentException($"trainUntilUtc must be UTC. Got Kind={trainUntilUtc.Kind}, t={trainUntilUtc:O}.", nameof(trainUntilUtc));
+
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+
+            Run(
+                mornings: mornings,
+                records: records,
+                candles1m: candles1m,
+                policies: policies,
+                config: config,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc);
+        }
+
+        public void Run(
+            IReadOnlyList<LabeledCausalRow> mornings,
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<Candle1m> candles1m,
+            IReadOnlyList<RollingLoop.PolicySpec> policies,
+            BacktestConfig config,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             if (mornings == null) throw new ArgumentNullException(nameof(mornings));
             if (records == null) throw new ArgumentNullException(nameof(records));
             if (candles1m == null) throw new ArgumentNullException(nameof(candles1m));
             if (policies == null) throw new ArgumentNullException(nameof(policies));
             if (config == null) throw new ArgumentNullException(nameof(config));
-            if (trainUntilDayKeyUtc.Equals(default(DayKeyUtc)))
-                throw new ArgumentException("trainUntilDayKeyUtc must be initialized (non-default).", nameof(trainUntilDayKeyUtc));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
-            // ===== records coverage + split =====
+            // ===== records coverage + split (по baseline-exit) =====
             int recordsCount = records.Count;
 
             DateTime? recMin = null;
             DateTime? recMax = null;
 
-            var recordDays = new HashSet<DayKeyUtc>(recordsCount);
+            var recordDays = new HashSet<EntryDayKeyUtc>(recordsCount);
 
-            var excludedDays = new HashSet<DayKeyUtc>(Math.Min(recordsCount, 256));
+            // excludedDays — по entry-day-key ("дни записей", исключённые апстримом: weekend-entry / no baseline-exit).
+            var excludedDays = new HashSet<EntryDayKeyUtc>(Math.Min(recordsCount, 256));
+
+            int trainCount = 0, oosCount = 0, exclCount = 0;
 
             for (int i = 0; i < recordsCount; i++)
             {
                 var r = records[i];
 
-                var day = CausalTimeKey.DayKeyUtc(r);
-                var dayDt = day.Value;
+                var entryDayKey = r.EntryDayKeyUtc;
+                var dayDt = entryDayKey.Value;
 
                 if (!recMin.HasValue || dayDt < recMin.Value) recMin = dayDt;
                 if (!recMax.HasValue || dayDt > recMax.Value) recMax = dayDt;
 
-                recordDays.Add(day);
+                recordDays.Add(entryDayKey);
 
-                var entry = CausalTimeKey.EntryUtc(r);
-                if (IsNyWeekendEntry(entry))
-                    excludedDays.Add(day);
+                var cls = NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: r.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyTz,
+                    baselineExitDayKeyUtc: out _);
+
+                if (cls == NyTrainSplit.EntryClass.Excluded)
+                {
+                    excludedDays.Add(entryDayKey);
+                    exclCount++;
+                }
+                else if (cls == NyTrainSplit.EntryClass.Train)
+                {
+                    trainCount++;
+                }
+                else
+                {
+                    oosCount++;
+                }
             }
 
             if (recordsCount > 0)
@@ -67,25 +114,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
             else
                 Console.WriteLine("[diag-path] records: count=0");
 
-            int trainCount = 0, oosCount = 0, exclCount = 0;
-
-            for (int i = 0; i < recordsCount; i++)
-            {
-                var r = records[i];
-                var day = CausalTimeKey.DayKeyUtc(r);
-
-                if (excludedDays.Contains(day))
-                {
-                    exclCount++;
-                    continue;
-                }
-
-                if (day.Value <= trainUntilDayKeyUtc.Value) trainCount++;
-                else oosCount++;
-            }
-
             Console.WriteLine(
-                $"[diag-path] boundary trainUntil={trainUntilDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, " +
+                $"[diag-path] boundary trainUntilExitDayKey={trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, " +
                 $"train={trainCount}, oos={oosCount}, excluded={exclCount}");
 
             // ===== mornings coverage =====
@@ -93,11 +123,11 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
             DateTime? mornMin = null;
             DateTime? mornMax = null;
 
-            var morningDays = new HashSet<DayKeyUtc>(morningsCount);
+            var morningDays = new HashSet<EntryDayKeyUtc>(morningsCount);
 
             for (int i = 0; i < morningsCount; i++)
             {
-                var day = CausalTimeKey.DayKeyUtc(mornings[i]);
+                var day = mornings[i].EntryDayKeyUtc;
                 var dayDt = day.Value;
 
                 if (!mornMin.HasValue || dayDt < mornMin.Value) mornMin = dayDt;
@@ -112,7 +142,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
                 Console.WriteLine("[diag-path] mornings: count=0");
 
             // ===== mismatch sample =====
-            var recordOnly = new List<DayKeyUtc>();
+            var recordOnly = new List<EntryDayKeyUtc>();
             foreach (var d in recordDays)
             {
                 if (!morningDays.Contains(d))
@@ -120,7 +150,7 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
             }
             recordOnly.Sort((a, b) => a.Value.CompareTo(b.Value));
 
-            var morningOnly = new List<DayKeyUtc>();
+            var morningOnly = new List<EntryDayKeyUtc>();
             foreach (var d in morningDays)
             {
                 if (!recordDays.Contains(d))
@@ -147,34 +177,39 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
                     Console.WriteLine($"  {morningOnly[i].Value:yyyy-MM-dd}");
             }
 
-            // ===== Каузальная аналитика =====
-            var aggAll = new List<BacktestAggRow>(records.Count);
-            for (int i = 0; i < records.Count; i++)
-                aggAll.Add(records[i].ToAggRow());
+            // ===== Каузальная аналитика (split строго по baseline-exit) =====
+            var eligible = new List<BacktestAggRow>(recordsCount);
+            var excluded = new List<BacktestAggRow>(Math.Min(256, recordsCount));
+            var train = new List<BacktestAggRow>(recordsCount);
+            var oos = new List<BacktestAggRow>(Math.Min(256, recordsCount));
 
-            var eligible = new List<BacktestAggRow>(aggAll.Count);
-            var excluded = new List<BacktestAggRow>(Math.Min(256, aggAll.Count));
-
-            for (int i = 0; i < aggAll.Count; i++)
+            for (int i = 0; i < recordsCount; i++)
             {
-                var r = aggAll[i];
-                if (excludedDays.Contains(r.DayUtc)) excluded.Add(r);
-                else eligible.Add(r);
-            }
+                var r = records[i];
 
-            var train = new List<BacktestAggRow>(eligible.Count);
-            var oos = new List<BacktestAggRow>(Math.Min(256, eligible.Count));
+                var agg = r.ToAggRow();
 
-            for (int i = 0; i < eligible.Count; i++)
-            {
-                var r = eligible[i];
-                if (r.DayUtc.Value <= trainUntilDayKeyUtc.Value) train.Add(r);
-                else oos.Add(r);
+                var cls = NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: r.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyTz,
+                    baselineExitDayKeyUtc: out _);
+
+                if (cls == NyTrainSplit.EntryClass.Excluded)
+                {
+                    excluded.Add(agg);
+                    continue;
+                }
+
+                eligible.Add(agg);
+
+                if (cls == NyTrainSplit.EntryClass.Train) train.Add(agg);
+                else oos.Add(agg);
             }
 
             var sets = new AggregationInputSets
             {
-                Boundary = new TrainBoundaryMeta(trainUntilDayKeyUtc),
+                Boundary = new TrainBoundaryMeta(trainUntilExitDayKeyUtc),
                 Eligible = eligible,
                 Excluded = excluded,
                 Train = train,
@@ -196,21 +231,8 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
                 dailyTpPct: config.DailyTpPct,
                 dailySlPct: config.DailyStopPct,
                 nyTz: NyTz,
-                trainUntilExitDayKeyUtc: trainUntilDayKeyUtc
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc
             );
-        }
-
-        private static bool IsNyWeekendEntry(EntryUtc entry)
-        {
-            if (entry.IsDefault)
-                throw new ArgumentException("[diag-path] entry must be initialized (non-default).", nameof(entry));
-
-            // Валидация UTC инварианта.
-            var entryUtc = entry.Value;
-            if (entryUtc.Kind != DateTimeKind.Utc)
-                throw new InvalidOperationException($"[diag-path] entryUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
-
-            return NyWindowing.IsWeekendInNy(entry, NyTz);
         }
     }
 }

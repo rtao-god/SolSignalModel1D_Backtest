@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Time;
 
@@ -7,7 +7,14 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
     public sealed class CausalDataRow
     {
         public NyTradingEntryUtc EntryUtc { get; }
-        public DayKeyUtc DayKeyUtc { get; }
+
+        // Сырой тип (тот же момент), чтобы не плодить new EntryUtc(x.Value) по коду.
+        public EntryUtc RawEntryUtc => EntryUtc.AsEntryUtc();
+
+        public EntryDayKeyUtc EntryDayKeyUtc => EntryDayKeyUtc.FromUtcMomentOrThrow(EntryUtc.Value);
+
+        [Obsolete("Use EntryDayKeyUtc (explicit entry day-key).", error: false)]
+        public EntryDayKeyUtc DayKeyUtc => EntryDayKeyUtc;
 
         public bool RegimeDown { get; }
         public bool IsMorning { get; }
@@ -120,7 +127,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
                 throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
 
             EntryUtc = entryUtc;
-            DayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(entryUtc.Value);
 
             RegimeDown = regimeDown;
             IsMorning = isMorning;
@@ -203,10 +209,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
                 var x = v[i];
 
                 if (double.IsNaN(x) || double.IsInfinity(x))
-                {
-                    throw new InvalidOperationException(
-                        $"[CausalDataRow] Non-finite feature value at index {i}: {x}.");
-                }
+                    throw new InvalidOperationException($"[CausalDataRow] Non-finite feature value at index {i}: {x}.");
             }
         }
     }

@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
+namespace SolSignalModel1D_Backtest.Core.ML.Aggregation
 	{
 	/// <summary>
 	/// Дневные вероятности трёх классов и вспомогательные флаги фильтров.

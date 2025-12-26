@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
@@ -50,12 +50,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				nyTz: NyWindowing.NyTz);
 
 			var rowsA = resA.LabeledRows
-				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))
+				.OrderBy (r => CausalTimeKey.EntryDayKeyUtc (r))
 				.ToList ();
 
 			Assert.NotEmpty (rowsA);
 
-			var maxCausalDate = CausalTimeKey.DayKeyUtc (rowsA.Last ());
+			var maxCausalDate = CausalTimeKey.EntryDayKeyUtc (rowsA.Last ()).Value;
 			var trainUntil = maxCausalDate.AddDays (-40);
 
 			var tailStartUtc = trainUntil.AddDays (5);
@@ -80,15 +80,15 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				nyTz: NyWindowing.NyTz);
 
 			var rowsB = resB.LabeledRows
-				.OrderBy (r => CausalTimeKey.DayKeyUtc (r))
+				.OrderBy (r => CausalTimeKey.EntryDayKeyUtc (r))
 				.ToList ();
 
 			var safeRowsA = rowsA
-				.Where (r => CausalTimeKey.DayKeyUtc (r).AddDays (8) <= trainUntil)
+				.Where (r => CausalTimeKey.EntryDayKeyUtc (r).Value.AddDays (8) <= trainUntil)
 				.ToList ();
 
 			var safeRowsB = rowsB
-				.Where (r => CausalTimeKey.DayKeyUtc (r).AddDays (8) <= trainUntil)
+				.Where (r => CausalTimeKey.EntryDayKeyUtc (r).Value.AddDays (8) <= trainUntil)
 				.ToList ();
 
 			Assert.NotEmpty (safeRowsA);
@@ -99,7 +99,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				var a = safeRowsA[i];
 				var b = safeRowsB[i];
 
-				Assert.Equal (CausalTimeKey.DayKeyUtc (a), CausalTimeKey.DayKeyUtc (b));
+				Assert.Equal (CausalTimeKey.EntryDayKeyUtc (a), CausalTimeKey.EntryDayKeyUtc (b));
 
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);

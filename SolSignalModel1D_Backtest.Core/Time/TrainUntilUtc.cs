@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace SolSignalModel1D_Backtest.Core.Time
 {
@@ -27,9 +27,7 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
         public string IsoDate => Value.ToString("yyyy-MM-dd");
 
-        /// <summary>
-        /// Day-key (00:00Z) границы trainUntil в терминах baseline-exit.
-        /// </summary>
-        public DayKeyUtc ExitDayKeyUtc => DayKeyUtc.FromUtcMomentOrThrow(Value);
+        /// <summary>Exit-day-key (00:00Z) границы trainUntil в терминах baseline-exit.</summary>
+        public ExitDayKeyUtc ExitDayKeyUtc => ExitDayKeyUtc.FromUtcMomentOrThrow(Value);
     }
 }

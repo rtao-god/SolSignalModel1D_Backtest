@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -32,8 +32,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			if (policyResults == null) throw new ArgumentNullException (nameof (policyResults));
 
             var recByDate = records
-				.GroupBy(r => r.Causal.DayKeyUtc.Value)
-				.ToDictionary(g => g.Key, g => g.First());
+			 .GroupBy(r => r.Causal.EntryDayKeyUtc.Value)
+			 .ToDictionary(g => g.Key, g => g.First());
 
             var dict = new Dictionary<(string policy, string regime, MarginMode margin), (HashSet<DateTime> days, int trades, double pnlUsd)> ();
 

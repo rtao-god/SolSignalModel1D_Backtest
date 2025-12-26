@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using System;
 

@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
@@ -340,6 +340,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             return rows.OrderBy(DayKeyUtc).ToList();
         }
 
-        private static DateTime DayKeyUtc(LabeledCausalRow r) => r.Causal.DayKeyUtc.Value;
+        private static DateTime DayKeyUtc(LabeledCausalRow r) => r.Causal.EntryDayKeyUtc.Value;
     }
 }

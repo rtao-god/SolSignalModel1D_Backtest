@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Trading.Leverage;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
@@ -43,7 +43,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
                     "[current] records пустой при построении CurrentPredictionSnapshot — нет ни одной записи");
 
             var last = records
-                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value)
+                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value)
                 .Last();
 
             return BuildFromRecord(last, policies, walletBalanceUsd);
@@ -75,7 +75,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
                 throw new InvalidOperationException("[current] Entry <= 0 — нельзя построить CurrentPredictionSnapshot.");
 
             var causal = rec.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.");
-            var predictionDayUtc = causal.DayKeyUtc.Value;
+            var predictionDayUtc = causal.EntryDayKeyUtc.Value;
 
             var snapshot = new CurrentPredictionSnapshot
             {
@@ -160,8 +160,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
             var cutoffUtc = DateTime.UtcNow.ToCausalDateUtc().AddDays(-historyWindowDays);
 
             var ordered = records
-                .Where(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value >= cutoffUtc)
-                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value)
+                .Where(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value >= cutoffUtc)
+                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value)
                 .ToList();
 
             var result = new List<CurrentPredictionSnapshot>(ordered.Count);
@@ -195,8 +195,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
             var targetDateUtc = predictionDateUtc.ToCausalDateUtc();
 
             var recForDay = records
-                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value)
-                .LastOrDefault(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value == targetDateUtc);
+                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value)
+                .LastOrDefault(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value == targetDateUtc);
 
             if (recForDay == null)
             {
@@ -238,8 +238,8 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
                 });
             }
 
-            double slProb = snapshot.SlProb
-                ?? throw new InvalidOperationException("[current] SlProb is null in snapshot — SL layer missing.");
+            // SlProb хранится как вероятность 0..1, отображаем в процентах.
+            double slProbPct = (snapshot.SlProb ?? throw new InvalidOperationException("[current] SlProb is null in snapshot — SL layer missing.")) * 100.0;
 
             bool isRiskDay = snapshot.SlHighDecision
                 ?? throw new InvalidOperationException("[current] SlHighDecision is null in snapshot — SL layer missing.");
@@ -249,9 +249,9 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
                 Kind = "model",
                 Name = "sl",
                 Description =
-                    $"SL-модель: вероятность стопа {slProb:0.0} %, " +
+                    $"SL-модель: вероятность стопа {slProbPct:0.0} %, " +
                     $"решение = {(isRiskDay ? "HIGH (рискованный день)" : "OK (обычный день)")}",
-                Value = slProb,
+                Value = slProbPct,
                 Rank = rank++
             });
 
@@ -339,7 +339,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
 
             double leverage = policy.ResolveLeverage(causal);
 
-            var day = causal.DayKeyUtc.Value;
+            var day = causal.EntryDayKeyUtc.Value;
 
             if (double.IsNaN(leverage) || double.IsInfinity(leverage) || leverage <= 0.0)
                 throw new InvalidOperationException($"[current] policy '{policy.Name}' returned invalid leverage={leverage} for {day:yyyy-MM-dd}.");

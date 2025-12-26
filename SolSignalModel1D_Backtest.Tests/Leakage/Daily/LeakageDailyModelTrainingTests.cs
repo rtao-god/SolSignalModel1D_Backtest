@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML;
@@ -44,7 +44,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
-				datesToExclude: null);
+				dayKeysToExclude: null);
 
 			var dsB = DailyDatasetBuilder.Build (
 				allRows: rowsB,
@@ -52,7 +52,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
-				datesToExclude: null);
+				dayKeysToExclude: null);
 
 			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
 			AssertRowsEqual (dsA.MoveTrainRows, dsB.MoveTrainRows);

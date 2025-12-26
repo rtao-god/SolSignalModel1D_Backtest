@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 			};  
 
             var exitThu = CoreNyWindowing.ComputeBaselineExitUtc(entries[0], tz);
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(exitThu.Value);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitThu.Value);
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: entries,

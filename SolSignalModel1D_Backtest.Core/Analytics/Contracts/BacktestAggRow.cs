@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts
@@ -12,9 +12,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Contracts
     public sealed class BacktestAggRow
     {
         /// <summary>
-        /// UTC day-key (00:00:00Z). Это НЕ timestamp входа/выхода.
+        /// Entry day-key (UTC 00:00:00Z) — identity дня записи (входного дня), а не timestamp входа/выхода.
         /// </summary>
-        public required DayKeyUtc DayUtc { get; init; }
+        public required EntryDayKeyUtc EntryDayKeyUtc { get; init; }
 
         /// <summary>
         /// Истинная метка: 0=down, 1=flat, 2=up.

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -26,7 +26,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: static r => r.Causal.EntryUtc,
+                entrySelector: static r => r.Causal.RawEntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
                 nyTz: nyTz);
 

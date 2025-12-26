@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.ML.Shared
+namespace SolSignalModel1D_Backtest.Core.ML.Shared
 	{
 	/// <summary>
 	/// Схема фичей SL-слоя. Держим отдельно от общей MlSchema,

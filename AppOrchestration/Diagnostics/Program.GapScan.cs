@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Http;
 using System.Threading.Tasks;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Diagnostics;

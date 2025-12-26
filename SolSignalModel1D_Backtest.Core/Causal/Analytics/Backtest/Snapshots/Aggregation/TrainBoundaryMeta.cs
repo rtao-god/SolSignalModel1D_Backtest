@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using SolSignalModel1D_Backtest.Core.Time;
 
@@ -6,14 +6,14 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
 {
     /// <summary>
     /// Метаданные границы train/oos для подписи сегментов.
-    /// Контракт: граница — exit-day-key (DayKeyUtc)
+    /// Контракт: граница — baseline-exit day-key (ExitDayKeyUtc).
     /// </summary>
     public readonly struct TrainBoundaryMeta
     {
-        public DayKeyUtc TrainUntilExitDayKeyUtc { get; }
+        public ExitDayKeyUtc TrainUntilExitDayKeyUtc { get; }
         public string TrainUntilIsoDate { get; }
 
-        public TrainBoundaryMeta(DayKeyUtc trainUntilExitDayKeyUtc)
+        public TrainBoundaryMeta(ExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             if (trainUntilExitDayKeyUtc.IsDefault)
                 throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));

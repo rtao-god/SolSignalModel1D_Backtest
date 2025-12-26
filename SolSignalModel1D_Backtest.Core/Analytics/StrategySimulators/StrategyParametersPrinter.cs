@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
+namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 	{
 	/// <summary>
 	/// Консольный вывод параметров сценарной стратегии (одного пресета).

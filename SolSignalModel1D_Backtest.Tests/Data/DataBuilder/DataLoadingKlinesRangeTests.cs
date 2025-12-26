@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Data;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder

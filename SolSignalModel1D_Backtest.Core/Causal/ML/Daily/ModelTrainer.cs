@@ -1,9 +1,10 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.ML;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,21 +27,21 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
 
         public ModelBundle TrainAll(
             IReadOnlyList<LabeledCausalRow> trainRows,
-            HashSet<DateTime>? datesToExclude = null)
+            HashSet<EntryDayKeyUtc>? dayKeysToExclude = null)
         {
             if (trainRows == null) throw new ArgumentNullException(nameof(trainRows));
             if (trainRows.Count == 0)
-                throw new InvalidOperationException("TrainAll: empty trainRows — нечего обучать.");
+                throw new InvalidOperationException("TrainAll: empty trainRows - нечего обучать.");
 
             var ordered = trainRows
-                .OrderBy(DayKeyUtc)
+                .OrderBy(EntryDayKeyUtcValue)
                 .ToList();
 
-            if (datesToExclude != null && datesToExclude.Count > 0)
-                ordered = ordered.Where(r => !datesToExclude.Contains(DayKeyUtc(r))).ToList();
+            if (dayKeysToExclude != null && dayKeysToExclude.Count > 0)
+                ordered = ordered.Where(r => !dayKeysToExclude.Contains(r.Causal.EntryDayKeyUtc)).ToList();
 
             if (ordered.Count == 0)
-                throw new InvalidOperationException("TrainAll: all rows excluded by datesToExclude.");
+                throw new InvalidOperationException("TrainAll: all rows excluded by dayKeysToExclude.");
 
             var moveRows = ordered;
             var dirRows = ordered.Where(r => r.TrueLabel != 1).ToList();
@@ -53,7 +54,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 moveRows = MlTrainingUtils.OversampleBinary(
                     src: moveRows,
                     isPositive: r => r.TrueLabel != 1,
-                    dateSelector: DayKeyUtc,
+                    dateSelector: EntryDayKeyUtcValue,
                     targetFrac: BalanceTargetFrac);
             }
 
@@ -62,13 +63,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 dirNormalRows = MlTrainingUtils.OversampleBinary(
                     src: dirNormalRows,
                     isPositive: r => r.TrueLabel == 2,
-                    dateSelector: DayKeyUtc,
+                    dateSelector: EntryDayKeyUtcValue,
                     targetFrac: BalanceTargetFrac);
 
                 dirDownRows = MlTrainingUtils.OversampleBinary(
                     src: dirDownRows,
                     isPositive: r => r.TrueLabel == 2,
-                    dateSelector: DayKeyUtc,
+                    dateSelector: EntryDayKeyUtcValue,
                     targetFrac: BalanceTargetFrac);
             }
 
@@ -215,6 +216,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
             return model;
         }
 
-        private static DateTime DayKeyUtc(LabeledCausalRow r) => r.Causal.DayKeyUtc.Value;
+        private static DateTime EntryDayKeyUtcValue(LabeledCausalRow r) => r.Causal.EntryDayKeyUtc.Value;
     }
 }

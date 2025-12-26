@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -217,19 +217,41 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					resultBySource[source] = cnt + 1;
 				}
 
-            foreach (var rec in records.OrderBy(r => CausalTimeKey.DayKeyUtc(r).Value))
+            for (int i = 0; i < records.Count; i++)
             {
-				if (globalDead) break;
-				if (rec == null) throw new InvalidOperationException ("[pnl] records contains null BacktestRecord item.");
+                if (records[i] == null)
+                    throw new InvalidOperationException($"[pnl] records[{i}] is null BacktestRecord item.");
+                if (records[i]!.Causal == null)
+                    throw new InvalidOperationException($"[pnl] records[{i}].Causal is null — causal layer missing.");
+                if (records[i]!.Forward == null)
+                    throw new InvalidOperationException($"[pnl] records[{i}].Forward is null — forward layer missing.");
+            }
 
-                DateTime dayStart = RequireUtcDayStart(CausalTimeKey.DayKeyUtc(rec).Value, "DayKeyUtc");
-                DateTime dayEnd = GetBaselineWindowEndUtcOrFail (rec, dayStart, NyTz);
+            foreach (var rec in records.OrderBy(r => r.Causal!.EntryUtc.Value))
+            {
+                if (globalDead) break;
 
-				var dayMinutes = rec.Forward.DayMinutes;
-				if (dayMinutes == null || dayMinutes.Count == 0)
-					throw new InvalidOperationException ($"[pnl] Forward.DayMinutes is empty for {dayStart:yyyy-MM-dd}.");
+                var causal = rec.Causal ?? throw new InvalidOperationException("[pnl] rec.Causal is null — causal layer missing.");
 
-				double entry = rec.Entry;
+                DateTime dayStart = RequireUtcDayStart(causal.EntryDayKeyUtc.Value, "EntryDayKeyUtc");
+                DateTime dayEnd = GetBaselineWindowEndUtcOrFail(rec, dayStart, NyTz);
+
+                var dayMinutes = rec.Forward.DayMinutes;
+                if (dayMinutes == null || dayMinutes.Count == 0)
+                    throw new InvalidOperationException($"[pnl] Forward.DayMinutes is empty for {dayStart:yyyy-MM-dd}.");
+
+                DateTime entryTimeUtc = causal.EntryUtc.Value;
+                if (entryTimeUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException(
+                        $"[pnl] Causal.EntryUtc must be UTC for {dayStart:yyyy-MM-dd}: {entryTimeUtc:O} (Kind={entryTimeUtc.Kind}).");
+
+                if (dayMinutes[0].OpenTimeUtc != entryTimeUtc)
+                    throw new InvalidOperationException(
+                        $"[pnl] Forward.DayMinutes[0].OpenTimeUtc != Causal.EntryUtc at {dayStart:yyyy-MM-dd}. " +
+                        $"firstMinute={dayMinutes[0].OpenTimeUtc:O}, entryUtc={entryTimeUtc:O}.");
+
+
+                double entry = rec.Entry;
 				if (entry <= 0.0)
 					throw new InvalidOperationException ($"[pnl] Forward.Entry must be > 0 for {dayStart:yyyy-MM-dd}.");
 
@@ -292,9 +314,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 					var (liqHit, _) = CheckLiquidation (entry, goLong, lev, dayMinutes);
 
-					RegisterTrade (
+                    RegisterTrade(
 						dayStart,
-						dayStart,
+						entryTimeUtc,
 						exitTimeUtc,
 						"Daily",
 						"daily",
@@ -306,9 +328,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 						tradeMinutes: dayMinutes,
 						isRealLiquidation: liqHit
 					);
-					}
 
-				if (globalDead) break;
+                }
+
+                if (globalDead) break;
 
 				// ===== DELAYED =====
 				if (!string.IsNullOrEmpty (rec.DelayedSource) && rec.DelayedExecution is { } exec)
@@ -317,11 +340,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 					double dEntry = exec.EntryPrice;
 
-					DateTime delayedEntryTime = exec.ExecutedAtUtc;
-					if (delayedEntryTime < dayStart || delayedEntryTime >= dayEnd)
-						throw new InvalidOperationException ($"[pnl] Delayed executedAtUtc={delayedEntryTime:O} is outside window {dayStart:O}..{dayEnd:O}.");
+                    DateTime delayedEntryTime = exec.ExecutedAtUtc;
+                    if (delayedEntryTime < entryTimeUtc || delayedEntryTime >= dayEnd)
+                        throw new InvalidOperationException(
+                            $"[pnl] Delayed executedAtUtc={delayedEntryTime:O} is outside baseline window {entryTimeUtc:O}..{dayEnd:O}.");
 
-					int delayedStartIndex = FindFirstMinuteIndexAtOrAfter (dayMinutes, delayedEntryTime);
+                    int delayedStartIndex = FindFirstMinuteIndexAtOrAfter (dayMinutes, delayedEntryTime);
 					if (delayedStartIndex < 0)
 						throw new InvalidOperationException ($"[pnl] cannot find 1m candles for delayed window starting {delayedEntryTime:O}.");
 

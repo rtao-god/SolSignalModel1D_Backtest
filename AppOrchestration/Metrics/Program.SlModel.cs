@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
@@ -26,10 +26,12 @@ namespace SolSignalModel1D_Backtest
                 .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(_trainUntilUtc);
+
             var split = NyTrainSplit.SplitByBaselineExitStrict(
                 ordered: orderedRecords,
-                entrySelector: static r => r.Causal.EntryUtc,
-                trainUntilUtc: new TrainUntilUtc(_trainUntilUtc),
+                entrySelector: static r => r.Causal.RawEntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: NyTz,
                 tag: "sl.records");
 

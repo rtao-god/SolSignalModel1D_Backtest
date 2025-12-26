@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Reports.Model;
+using SolSignalModel1D_Backtest.Reports.Model;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting
 	{

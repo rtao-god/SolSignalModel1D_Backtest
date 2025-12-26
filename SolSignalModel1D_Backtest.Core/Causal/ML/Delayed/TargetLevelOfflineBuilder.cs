@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Delayed;
@@ -21,7 +21,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
         public static List<TargetLevelSample> Build(
             List<BacktestRecord> rows,
             IReadOnlyList<Candle1h> sol1h,
-            IReadOnlyDictionary<DayKeyUtc, Candle6h> sol6hByDayKey)
+            IReadOnlyDictionary<EntryDayKeyUtc, Candle6h> sol6hByDayKey)
         {
             var result = new List<TargetLevelSample>((rows?.Count ?? 0) * 2);
             if (rows == null || rows.Count == 0) return result;
@@ -30,7 +30,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 
             foreach (var r in rows)
             {
-                var dayKey = r.Causal.DayKeyUtc;
+                var dayKey = r.EntryDayKeyUtc;
 
                 if (!sol6hByDayKey.TryGetValue(dayKey, out var dayCandle))
                     continue;
@@ -45,7 +45,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
                         $"dayMinMove={dayMinMove}. Fix RowBuilder/MinMoveEngine; do not default here.");
                 }
 
-                var entryUtcTyped = r.Causal.EntryUtc;
+                var entryUtcTyped = new EntryUtc(r.Causal.EntryUtc.Value);
                 DateTime endUtc;
 
                 try
@@ -79,7 +79,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
             List<TargetLevelSample> sink,
             BacktestRecord r,
             DateTime entryUtc,
-            DayKeyUtc dayKey,
+            EntryDayKeyUtc dayKey,
             List<Candle1h> dayHours,
             IReadOnlyList<Candle1h> allHours,
             double entryPrice,

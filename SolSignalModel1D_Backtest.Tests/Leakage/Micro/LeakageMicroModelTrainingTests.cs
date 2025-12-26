@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
@@ -122,7 +122,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
                 if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var exitUtc))
                     continue;
 
-                var exitDayKey = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
+                var exitDayKey = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
                 if (exitDayKey.Value <= trainUntilUtc.ExitDayKeyUtc.Value)
                     continue;
 

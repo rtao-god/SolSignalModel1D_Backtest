@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
@@ -15,7 +15,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
     /// <summary>
     /// SlDatasetBuilder:
     /// - использует только дни, у которых entry <= trainUntil и baseline-exit <= trainUntil;
-    /// - не зависит от хвоста (DayKeyUtc > trainUntil).
+    /// - не зависит от хвоста (EntryDayKeyUtc > trainUntil).
     /// </summary>
     public sealed class LeakageSlDatasetTests
     {
@@ -24,7 +24,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
         {
             var allRows = BuildSyntheticRows(30, out var sol6hDict, out var sol1m);
 
-            var maxDayKeyUtc = allRows.Last().Causal.DayKeyUtc.Value;
+            var maxDayKeyUtc = allRows.Last().Causal.EntryDayKeyUtc.Value;
             var trainUntil = maxDayKeyUtc.AddDays(-10);
 
             var rowsA = CloneRows(allRows);
@@ -50,8 +50,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
                 slPct: 0.05,
                 strongSelector: null);
 
-            Assert.All(dsA.MorningRows, r => Assert.True(r.Causal.DayKeyUtc.Value <= trainUntil));
-            Assert.All(dsB.MorningRows, r => Assert.True(r.Causal.DayKeyUtc.Value <= trainUntil));
+            Assert.All(dsA.MorningRows, r => Assert.True(r.Causal.EntryDayKeyUtc.Value <= trainUntil));
+            Assert.All(dsB.MorningRows, r => Assert.True(r.Causal.EntryDayKeyUtc.Value <= trainUntil));
 
             Assert.Equal(dsA.Samples.Count, dsB.Samples.Count);
 
@@ -123,24 +123,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
             sol6hDict = dict6h;
             sol1m = all1m;
 
-            return rows.OrderBy(r => r.Causal.DayKeyUtc.Value).ToList();
+            return rows.OrderBy(r => r.Causal.EntryDayKeyUtc.Value).ToList();
         }
 
-        private static BacktestRecord CreateBacktestRecord(EntryUtc entryUtc, bool isMorning, double minMove)
+        private static BacktestRecord CreateBacktestRecord(NyTradingEntryUtc entryUtc, bool isMorning, double minMove)
         {
-            var vec = BuildVector64Deterministic(entryUtc.Value);
-
-            var dayKey = new DayKeyUtc(new DateTime(
-                entryUtc.Value.Year,
-                entryUtc.Value.Month,
-                entryUtc.Value.Day,
-                0, 0, 0,
-                DateTimeKind.Utc));
+            var rawEntryUtc = entryUtc.AsEntryUtc();
+            var vec = BuildVector64Deterministic(rawEntryUtc.Value);
 
             var causal = new CausalPredictionRecord
             {
                 EntryUtc = entryUtc,
-                DayKeyUtc = dayKey,
                 FeaturesVector = vec,
                 Features = new CausalFeatures { IsMorning = isMorning },
                 PredLabel = 1,
@@ -168,8 +161,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 
             var forward = new ForwardOutcomes
             {
-                DayKeyUtc = dayKey,
-                WindowEndUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, NyWindowing.NyTz).Value,
+                EntryUtc = rawEntryUtc,
+                WindowEndUtc = NyWindowing.ComputeBaselineExitUtc(rawEntryUtc, NyWindowing.NyTz).Value,
                 Entry = 100.0,
                 MaxHigh24 = 105.0,
                 MinLow24 = 95.0,
@@ -220,7 +213,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 
             foreach (var r in rows)
             {
-                if (r.Causal.DayKeyUtc.Value <= trainUntilUtc)
+                if (r.Causal.EntryDayKeyUtc.Value <= trainUntilUtc)
                 {
                     res.Add(r);
                     continue;

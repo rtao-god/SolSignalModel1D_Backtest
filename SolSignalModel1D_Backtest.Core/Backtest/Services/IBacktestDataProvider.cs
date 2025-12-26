@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Backtest.Services
+namespace SolSignalModel1D_Backtest.Core.Backtest.Services
 	{
 	/// <summary>
 	/// Контракт для сервиса, который собирает все исходные данные для бэктеста:

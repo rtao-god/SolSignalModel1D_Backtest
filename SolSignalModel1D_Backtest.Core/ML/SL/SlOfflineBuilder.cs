@@ -1,6 +1,5 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
@@ -51,22 +50,21 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
 
             foreach (var r in rows)
             {
-                var entry = r.Causal.EntryUtc;
+                // r.Causal.EntryUtc имеет тип NyTradingEntryUtc, но TryCreateNyTradingEntryUtc принимает EntryUtc.
+                // Конвертируем через UTC-момент (Value), поведение остаётся прежним: не-утро/выходные будут отфильтрованы.
+                var entryUtc = new EntryUtc(r.Causal.EntryUtc.Value);
 
-                if (!NyWindowing.TryCreateNyTradingEntryUtc(entry, nyTz, out var nyEntryUtc))
-                    continue;
-
-                if (!NyWindowing.IsNyMorning(nyEntryUtc, nyTz))
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(entryUtc, nyTz, out var nyEntryUtc))
                     continue;
 
                 hasAnyMorning = true;
 
-                DateTime entryUtc = nyEntryUtc.Value;
+                DateTime entryUtcMoment = nyEntryUtc.Value;
 
-                if (!sol6hDict.TryGetValue(entryUtc, out var c6))
+                if (!sol6hDict.TryGetValue(entryUtcMoment, out var c6))
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] 6h candle not found for morning entry {entryUtc:O}. " +
+                        $"[sl-offline] 6h candle not found for morning entry {entryUtcMoment:O}. " +
                         "Проверь согласование OpenTimeUtc 6h и EntryUtc.");
                 }
 
@@ -74,19 +72,19 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                 if (entryPrice <= 0)
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] Non-positive entry price from 6h close for {entryUtc:O}: entry={entryPrice}.");
+                        $"[sl-offline] Non-positive entry price from 6h close for {entryUtcMoment:O}: entry={entryPrice}.");
                 }
 
                 double dayMinMove = r.MinMove;
                 if (dayMinMove <= 0.0 || double.IsNaN(dayMinMove) || double.IsInfinity(dayMinMove))
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] Invalid dayMinMove (MinMove) for {entryUtc:O}: {dayMinMove}.");
+                        $"[sl-offline] Invalid dayMinMove (MinMove) for {entryUtcMoment:O}: {dayMinMove}.");
                 }
 
                 bool strongSignal = strongSelector?.Invoke(r) ?? true;
 
-                using var _ = Infra.Causality.CausalityGuard.Begin("SlOfflineBuilder.Build(morning)", entryUtc);
+                using var _ = Infra.Causality.CausalityGuard.Begin("SlOfflineBuilder.Build(morning)", entryUtcMoment);
 
                 DateTime exitUtcExclusive;
                 try
@@ -96,23 +94,23 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                 catch (Exception ex)
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] Failed to compute baseline-exit for entry {entryUtc:O}.",
+                        $"[sl-offline] Failed to compute baseline-exit for entry {entryUtcMoment:O}.",
                         ex);
                 }
 
-                if (exitUtcExclusive <= entryUtc)
+                if (exitUtcExclusive <= entryUtcMoment)
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] Invalid baseline window: exitUtcExclusive <= entryUtc for entry {entryUtc:O}, exit={exitUtcExclusive:O}.");
+                        $"[sl-offline] Invalid baseline window: exitUtcExclusive <= entryUtc for entry {entryUtcMoment:O}, exit={exitUtcExclusive:O}.");
                 }
 
-                int startIdx = LowerBoundOpenTimeUtc(sol1mLocal, entryUtc);
+                int startIdx = LowerBoundOpenTimeUtc(sol1mLocal, entryUtcMoment);
                 int endIdxExclusive = LowerBoundOpenTimeUtc(sol1mLocal, exitUtcExclusive);
 
                 if (endIdxExclusive <= startIdx)
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] No 1m candles in baseline window for entry {entryUtc:O}, exitEx={exitUtcExclusive:O}. " +
+                        $"[sl-offline] No 1m candles in baseline window for entry {entryUtcMoment:O}, exitEx={exitUtcExclusive:O}. " +
                         $"Computed range=[{startIdx}; {endIdxExclusive}).");
                 }
 
@@ -130,7 +128,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                     if (labelRes == HourlyTradeResult.SlFirst || labelRes == HourlyTradeResult.TpFirst)
                     {
                         var feats = SlFeatureBuilder.Build(
-                            entryUtc: entryUtc,
+                            entryUtc: entryUtcMoment,
                             goLong: true,
                             strongSignal: strongSignal,
                             dayMinMove: dayMinMove,
@@ -148,7 +146,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                         {
                             Label = labelRes == HourlyTradeResult.SlFirst,
                             Features = feats,
-                            EntryUtc = entryUtc
+                            EntryUtc = entryUtcMoment
                         });
                     }
                 }
@@ -167,7 +165,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                     if (labelRes == HourlyTradeResult.SlFirst || labelRes == HourlyTradeResult.TpFirst)
                     {
                         var feats = SlFeatureBuilder.Build(
-                            entryUtc: entryUtc,
+                            entryUtc: entryUtcMoment,
                             goLong: false,
                             strongSignal: strongSignal,
                             dayMinMove: dayMinMove,
@@ -185,7 +183,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                         {
                             Label = labelRes == HourlyTradeResult.SlFirst,
                             Features = feats,
-                            EntryUtc = entryUtc
+                            EntryUtc = entryUtcMoment
                         });
                     }
                 }

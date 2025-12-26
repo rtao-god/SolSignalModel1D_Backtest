@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Backtest;
 using SolSignalModel1D_Backtest.Core.Backtest.Services;
 
 namespace SolSignalModel1D_Backtest.Api.Services

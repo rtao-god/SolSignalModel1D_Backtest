@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Reports.Reporting
+namespace SolSignalModel1D_Backtest.Reports.Reporting
 	{
 	/// <summary>
 	/// Уровень детализации таблицы:

@@ -1,4 +1,4 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
@@ -30,8 +30,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.Shared
             }
 
             // Период печатаем по day-key (00:00 UTC), без DateTime-extensions.
-            var minDate = evalRows.Min(r => ToCausalDayUtc(r.Causal.DayKeyUtc.Value));
-            var maxDate = evalRows.Max(r => ToCausalDayUtc(r.Causal.DayKeyUtc.Value));
+            var minDate = evalRows.Min(r => ToCausalDayUtc(r.Causal.EntryDayKeyUtc.Value));
+            var maxDate = evalRows.Max(r => ToCausalDayUtc(r.Causal.EntryDayKeyUtc.Value));
             Console.WriteLine($"[pfi:daily: {datasetTag}] rows={evalRows.Count}, period={minDate:yyyy-MM-dd}..{maxDate:yyyy-MM-dd}");
 
             // Единая логика разбиения на датасеты как в обучении (move/dir-normal/dir-down).

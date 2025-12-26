@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
                     throw new InvalidOperationException("[rows-leak] AllRows contains null item.");
 
                 var entryUtc = CausalTimeKey.EntryUtc(rec);
-                var dayKey = entryUtc.DayKeyUtc.Value;
+                var dayKey = entryUtc.EntryDayKeyUtc.Value;
 
                 var targets = new List<(string Name, double Value)>();
 
@@ -99,7 +99,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
             {
                 if (rec == null) continue;
 
-                var dayKey = CausalTimeKey.DayKeyUtc(rec).Value;
+                var dayKey = CausalTimeKey.EntryDayKeyUtc(rec).Value;
 
                 if (!futureTargetsByDayKey.TryGetValue(dayKey, out var targets) || targets.Count == 0)
                     continue;

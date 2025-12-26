@@ -8,7 +8,7 @@ namespace SolSignalModel1D_Backtest.Api.Controllers
 	[Route ("[controller]")]
 	public class WeatherForecastController : ControllerBase
 		{
-		// Статический набор текстовых описаний для примера
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		private static readonly string[] Summaries = new[]
 		{
 			"Freezing", "Bracing", "Chilly", "Cool", "Mild",
@@ -25,7 +25,7 @@ namespace SolSignalModel1D_Backtest.Api.Controllers
 		[HttpGet (Name = "GetWeatherForecast")]
 		public IEnumerable<WeatherForecast> Get ()
 			{
-			// Простая генерация тестовых данных — 5 дней с рандомной температурой
+			// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ 5 пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 			return Enumerable
 				.Range (1, 5)
 				.Select (index => new WeatherForecast

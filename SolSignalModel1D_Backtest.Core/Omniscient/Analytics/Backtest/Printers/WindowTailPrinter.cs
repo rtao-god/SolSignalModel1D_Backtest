@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
@@ -12,7 +12,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 {
     public static class WindowTailPrinter
     {
-        private static DayKeyUtc DayKeyUtc(BacktestRecord r) => CausalTimeKey.DayKeyUtc(r);
+        private static EntryDayKeyUtc EntryDayKeyUtc(BacktestRecord r) => r.EntryDayKeyUtc;
 
         public static void PrintBlockTails(
             IReadOnlyList<LabeledCausalRow> mornings,
@@ -33,7 +33,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
             if (takeDays <= 0) throw new ArgumentOutOfRangeException(nameof(takeDays), "takeDays must be > 0.");
             if (mornings.Count == 0) return;
 
-            var byDate = recs.ToDictionary(r => DayKeyUtc(r), r => r);
+            var byDate = recs.ToDictionary(r => EntryDayKeyUtc(r), r => r);
 
             ConsoleStyler.WriteHeader($"=== {title}: {takeDays} → {skipDays} ===");
 
@@ -51,15 +51,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
                 blockIdx++;
 
-                var blockStartDate = DayKeyUtc(block.First());
-                var blockEndDate = DayKeyUtc(lastRec);
+                var blockStartDate = EntryDayKeyUtc(block.First());
+                var blockEndDate = EntryDayKeyUtc(lastRec);
 
-                var key = DayKeyUtc(lastRec);
+                var key = EntryDayKeyUtc(lastRec);
                 if (!byDate.TryGetValue(key, out var dayRec))
                 {
                     throw new InvalidOperationException(
                         $"[window-tail] Internal mismatch: byDate has no key={key.Value:O}. " +
-                        "Это означает, что ключи словаря повреждены или DayKeyUtc(...) нестабилен.");
+                        "Это означает, что ключи словаря повреждены или EntryDayKeyUtc(...) нестабилен.");
                 }
 
                 ConsoleStyler.WriteHeader(
@@ -106,7 +106,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
             Console.WriteLine();
         }
 
-        private static void PrintPolicyTradesForDay(DayKeyUtc dayKeyUtc, IEnumerable<BacktestPolicyResult> policyResults)
+        private static void PrintPolicyTradesForDay(EntryDayKeyUtc dayKeyUtc, IEnumerable<BacktestPolicyResult> policyResults)
         {
             ConsoleStyler.WriteHeader("Per-policy trades (this day)");
             var t = new TextTable();

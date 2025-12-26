@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
+namespace SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators
 	{
 	/// <summary>
 	/// Агрегированная статистика по стратегии:

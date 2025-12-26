@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Core.Analytics.MinMove
+namespace SolSignalModel1D_Backtest.Core.Analytics.MinMove
 	{
 
 	/// <summary>

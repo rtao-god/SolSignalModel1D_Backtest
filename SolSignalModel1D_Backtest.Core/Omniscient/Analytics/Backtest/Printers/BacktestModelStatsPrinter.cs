@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -24,7 +24,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
             double dailyTpPct,
             double dailySlPct,
             TimeZoneInfo nyTz,
-            DayKeyUtc trainUntilExitDayKeyUtc)
+            ExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             if (records == null) throw new ArgumentNullException(nameof(records));
             if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
@@ -40,11 +40,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
             }
 
             var ordered = records
-                .OrderBy(r => r.Causal.DayKeyUtc.Value)
+                .OrderBy(r => r.EntryDayKeyUtc.Value)
                 .ToList();
 
-            var minDateUtc = ordered.First().Causal.DayKeyUtc.Value;
-            var maxDateUtc = ordered.Last().Causal.DayKeyUtc.Value;
+            var minDateUtc = ordered.First().EntryDayKeyUtc.Value;
+            var maxDateUtc = ordered.Last().EntryDayKeyUtc.Value;
 
             Console.WriteLine(
                 $"[model-stats] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
@@ -76,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
             var fromRecentUtc = maxDateUtc.AddDays(-RecentDays);
             var recentRecords = ordered
-                .Where(r => r.Causal.DayKeyUtc.Value >= fromRecentUtc)
+                .Where(r => r.EntryDayKeyUtc.Value >= fromRecentUtc)
                 .ToList();
 
             if (recentRecords.Count == 0)
@@ -118,309 +118,264 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
             Console.WriteLine();
         }
 
-        // ===== 1) Дневная путаница (3 класса) =====
+        private static void PrintDailyConfusion(DailyConfusionStats daily, string? scopeLabel = null)
+        {
+            var title = scopeLabel == null
+                ? "Daily label confusion (3-class)"
+                : $"Daily label confusion (3-class) [{scopeLabel}]";
 
-        private static void PrintDailyConfusion ( DailyConfusionStats daily, string? scopeLabel = null )
-			{
-			var title = scopeLabel == null
-				? "Daily label confusion (3-class)"
-				: $"Daily label confusion (3-class) [{scopeLabel}]";
+            ConsoleStyler.WriteHeader(title);
 
-			ConsoleStyler.WriteHeader (title);
+            var t = new TextTable();
+            t.AddHeader("true label", "pred 0", "pred 1", "pred 2", "correct", "total", "acc %");
 
-			var t = new TextTable ();
-			t.AddHeader ("true label", "pred 0", "pred 1", "pred 2", "correct", "total", "acc %");
+            double baseline = 100.0 / 3.0;
 
-			// «Бросок монеты» для 3 классов — 1/3 ≈ 33.3%
-			double baseline = 100.0 / 3.0;
+            foreach (var row in daily.Rows)
+            {
+                var line = new[]
+                {
+                    row.LabelName,
+                    row.Pred0.ToString(),
+                    row.Pred1.ToString(),
+                    row.Pred2.ToString(),
+                    row.Correct.ToString(),
+                    row.Total.ToString(),
+                    $"{row.AccuracyPct:0.0}%"
+                };
 
-			foreach (var row in daily.Rows)
-				{
-				var line = new[]
-				{
-					row.LabelName,
-					row.Pred0.ToString(),
-					row.Pred1.ToString(),
-					row.Pred2.ToString(),
-					row.Correct.ToString(),
-					row.Total.ToString(),
-					$"{row.AccuracyPct:0.0}%"
-				};
+                var color = row.AccuracyPct >= baseline
+                    ? ConsoleStyler.GoodColor
+                    : ConsoleStyler.BadColor;
 
-				var color = row.AccuracyPct >= baseline
-					? ConsoleStyler.GoodColor
-					: ConsoleStyler.BadColor;
+                t.AddColoredRow(color, line);
+            }
 
-				t.AddColoredRow (color, line);
-				}
+            t.AddRow(
+                "Accuracy (overall)",
+                "",
+                "",
+                "",
+                daily.OverallCorrect.ToString(),
+                daily.OverallTotal.ToString(),
+                $"{daily.OverallAccuracyPct:0.0}%"
+            );
 
-			// Overall без цвета
-			t.AddRow (
-				"Accuracy (overall)",
-				"",
-				"",
-				"",
-				daily.OverallCorrect.ToString (),
-				daily.OverallTotal.ToString (),
-				$"{daily.OverallAccuracyPct:0.0}%"
-			);
+            t.WriteToConsole();
+        }
 
-			t.WriteToConsole ();
-			}
+        private static void PrintTrendDirectionConfusion(TrendDirectionStats trend, string? scopeLabel = null)
+        {
+            var title = scopeLabel == null
+                ? "Trend-direction confusion (DOWN vs UP)"
+                : $"Trend-direction confusion (DOWN vs UP) [{scopeLabel}]";
 
-		// ===== 2) Путаница по тренду (UP vs DOWN) =====
+            ConsoleStyler.WriteHeader(title);
 
-		/// <summary>
-		/// Печать путаницы только по направлению рынка:
-		/// использует уже посчитанные TrendDirectionStats.
-		/// </summary>
-		private static void PrintTrendDirectionConfusion ( TrendDirectionStats trend, string? scopeLabel = null )
-			{
-			var title = scopeLabel == null
-				? "Trend-direction confusion (DOWN vs UP)"
-				: $"Trend-direction confusion (DOWN vs UP) [{scopeLabel}]";
+            var t = new TextTable();
+            t.AddHeader("true trend", "pred DOWN", "pred UP", "correct", "total", "acc %");
 
-			ConsoleStyler.WriteHeader (title);
+            double baseline = 50.0;
 
-			var t = new TextTable ();
-			t.AddHeader ("true trend", "pred DOWN", "pred UP", "correct", "total", "acc %");
+            foreach (var row in trend.Rows)
+            {
+                var line = new[]
+                {
+                    row.Name,
+                    row.PredDown.ToString(),
+                    row.PredUp.ToString(),
+                    row.Correct.ToString(),
+                    row.Total.ToString(),
+                    $"{row.AccuracyPct:0.0}%"
+                };
 
-			double baseline = 50.0; // «бросок монеты»
+                var color = row.AccuracyPct >= baseline
+                    ? ConsoleStyler.GoodColor
+                    : ConsoleStyler.BadColor;
 
-			foreach (var row in trend.Rows)
-				{
-				var line = new[]
-				{
-					row.Name,
-					row.PredDown.ToString(),
-					row.PredUp.ToString(),
-					row.Correct.ToString(),
-					row.Total.ToString(),
-					$"{row.AccuracyPct:0.0}%"
-				};
+                t.AddColoredRow(color, line);
+            }
 
-				var color = row.AccuracyPct >= baseline
-					? ConsoleStyler.GoodColor
-					: ConsoleStyler.BadColor;
+            var overallColor = trend.OverallAccuracyPct >= baseline
+                ? ConsoleStyler.GoodColor
+                : ConsoleStyler.BadColor;
 
-				t.AddColoredRow (color, line);
-				}
+            t.AddColoredRow(
+                overallColor,
+                "Accuracy (overall)",
+                "",
+                "",
+                trend.OverallCorrect.ToString(),
+                trend.OverallTotal.ToString(),
+                $"{trend.OverallAccuracyPct:0.0}%"
+            );
 
-			var overallColor = trend.OverallAccuracyPct >= baseline
-				? ConsoleStyler.GoodColor
-				: ConsoleStyler.BadColor;
+            t.WriteToConsole();
+        }
 
-			t.AddColoredRow (
-				overallColor,
-				"Accuracy (overall)",
-				"",
-				"",
-				trend.OverallCorrect.ToString (),
-				trend.OverallTotal.ToString (),
-				$"{trend.OverallAccuracyPct:0.0}%"
-			);
+        private static void PrintSlStats(SlStats sl)
+        {
+            var confusion = sl.Confusion;
+            var metrics = sl.Metrics;
 
-			t.WriteToConsole ();
-			}
+            ConsoleStyler.WriteHeader("SL-model confusion (runtime, path-based)");
 
-		// ===== 3) SL-модель, path-based через 1m =====
+            var t = new TextTable();
+            t.AddHeader("day type", "pred LOW", "pred HIGH");
+            t.AddRow("TP-day", confusion.TpLow.ToString(), confusion.TpHigh.ToString());
+            t.AddRow("SL-day", confusion.SlLow.ToString(), confusion.SlHigh.ToString());
+            t.AddRow("SL saved (potential)", confusion.SlSaved.ToString(), "");
+            t.WriteToConsole();
+            Console.WriteLine();
 
-		/// <summary>
-		/// Печать полной статистики SL-модели:
-		/// - confusion-таблица;
-		/// - основные метрики;
-		/// - цветной summary;
-		/// - sweep по порогам.
-		/// Все данные берутся из SlStats.
-		/// </summary>
-		private static void PrintSlStats ( SlStats sl )
-			{
-			var confusion = sl.Confusion;
-			var metrics = sl.Metrics;
+            ConsoleStyler.WriteHeader("SL-model metrics (runtime)");
+            var mTab = new TextTable();
+            mTab.AddHeader("metric", "value");
+            mTab.AddRow("coverage (scored / signal days)", $"{metrics.Coverage * 100.0:0.0}%  ({confusion.ScoredDays}/{confusion.TotalSignalDays})");
+            mTab.AddRow("TPR / Recall (SL-day)", $"{metrics.Tpr * 100.0:0.0}%");
+            mTab.AddRow("FPR (TP-day)", $"{metrics.Fpr * 100.0:0.0}%");
+            mTab.AddRow("Precision (SL-day)", $"{metrics.Precision * 100.0:0.0}%");
+            mTab.AddRow("F1 (SL-day)", $"{metrics.F1:0.000}");
+            mTab.AddRow("PR-AUC (approx)", $"{metrics.PrAuc:0.000}");
+            mTab.WriteToConsole();
 
-			// Confusion
-			ConsoleStyler.WriteHeader ("SL-model confusion (runtime, path-based)");
+            PrintSlSummaryLine(
+                metrics.Coverage,
+                metrics.Tpr,
+                metrics.Fpr,
+                metrics.Precision,
+                metrics.F1,
+                metrics.PrAuc);
 
-			var t = new TextTable ();
-			t.AddHeader ("day type", "pred LOW", "pred HIGH");
-			t.AddRow ("TP-day", confusion.TpLow.ToString (), confusion.TpHigh.ToString ());
-			t.AddRow ("SL-day", confusion.SlLow.ToString (), confusion.SlHigh.ToString ());
-			t.AddRow ("SL saved (potential)", confusion.SlSaved.ToString (), "");
-			t.WriteToConsole ();
-			Console.WriteLine ();
+            PrintSlThresholdSweep(sl);
+        }
 
-			// Метрики
-			ConsoleStyler.WriteHeader ("SL-model metrics (runtime)");
-			var mTab = new TextTable ();
-			mTab.AddHeader ("metric", "value");
-			mTab.AddRow ("coverage (scored / signal days)", $"{metrics.Coverage * 100.0:0.0}%  ({confusion.ScoredDays}/{confusion.TotalSignalDays})");
-			mTab.AddRow ("TPR / Recall (SL-day)", $"{metrics.Tpr * 100.0:0.0}%");
-			mTab.AddRow ("FPR (TP-day)", $"{metrics.Fpr * 100.0:0.0}%");
-			mTab.AddRow ("Precision (SL-day)", $"{metrics.Precision * 100.0:0.0}%");
-			mTab.AddRow ("F1 (SL-day)", $"{metrics.F1:0.000}");
-			mTab.AddRow ("PR-AUC (approx)", $"{metrics.PrAuc:0.000}");
-			mTab.WriteToConsole ();
+        private static void PrintSlSummaryLine(
+            double coverage,
+            double tpr,
+            double fpr,
+            double precision,
+            double f1,
+            double prAuc)
+        {
+            double covPct = coverage * 100.0;
+            double tprPct = tpr * 100.0;
+            double fprPct = fpr * 100.0;
+            double precPct = precision * 100.0;
 
-			// Цветной summary — логика порогов/цвета сохранена.
-			PrintSlSummaryLine (
-				metrics.Coverage,
-				metrics.Tpr,
-				metrics.Fpr,
-				metrics.Precision,
-				metrics.F1,
-				metrics.PrAuc);
+            bool good =
+                covPct >= 50.0 &&
+                tprPct >= 60.0 &&
+                fprPct <= 40.0 &&
+                f1 >= 0.40;
 
-			// Sweep по порогам
-			PrintSlThresholdSweep (sl);
-			}
+            var color = good ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
 
-		/// <summary>
-		/// Одна цветная строка по SL-модели:
-		/// cov, TPR, FPR, Precision, F1, PR-AUC.
-		/// Условно зелёный, если TPR/F1 ок и FPR не слишком большой; иначе красный.
-		/// </summary>
-		private static void PrintSlSummaryLine (
-			double coverage,
-			double tpr,
-			double fpr,
-			double precision,
-			double f1,
-			double prAuc )
-			{
-			double covPct = coverage * 100.0;
-			double tprPct = tpr * 100.0;
-			double fprPct = fpr * 100.0;
-			double precPct = precision * 100.0;
+            string summary =
+                $"SL-model summary: " +
+                $"cov={covPct:0.0}%, " +
+                $"TPR={tprPct:0.0}%, " +
+                $"FPR={fprPct:0.0}%, " +
+                $"Prec={precPct:0.0}%, " +
+                $"F1={f1:0.000}, " +
+                $"PR-AUC={prAuc:0.000}";
 
-			bool good =
-				covPct >= 50.0 &&      // хотя бы половина signal-дней реально скорится
-				tprPct >= 60.0 &&      // TPR ощутимо выше броска монеты
-				fprPct <= 40.0 &&      // FPR не хуже 40%
-				f1 >= 0.40;            // F1 не полный мусор
+            WriteColoredLine(color, summary);
+        }
 
-			var color = good ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+        private static void PrintSlThresholdSweep(SlStats sl)
+        {
+            ConsoleStyler.WriteHeader("SL threshold sweep (runtime)");
 
-			string summary =
-				$"SL-model summary: " +
-				$"cov={covPct:0.0}%, " +
-				$"TPR={tprPct:0.0}%, " +
-				$"FPR={fprPct:0.0}%, " +
-				$"Prec={precPct:0.0}%, " +
-				$"F1={f1:0.000}, " +
-				$"PR-AUC={prAuc:0.000}";
+            var thresholds = sl.Thresholds;
+            var confusion = sl.Confusion;
 
-			WriteColoredLine (color, summary);
-			}
+            if (thresholds == null || thresholds.Count == 0)
+            {
+                Console.WriteLine("[sl-thr] no days with both TP/SL outcome and SlProb > 0 – sweep skipped.");
+                return;
+            }
 
-		/// <summary>
-		/// Sweep по порогам вероятности SL-модели на OOS-наборе.
-		/// Печатает таблицу:
-		/// thr, TPR(SL), FPR(TP), pred HIGH %, high / total.
-		/// Данные берутся из SlStats.Thresholds и SlStats.Confusion.
-		/// </summary>
-		private static void PrintSlThresholdSweep ( SlStats sl )
-			{
-			ConsoleStyler.WriteHeader ("SL threshold sweep (runtime)");
+            Console.WriteLine($"[sl-thr] base set: totalDays={confusion.TotalOutcomeDays}, SL-days={confusion.TotalSlDays}, TP-days={confusion.TotalTpDays}");
 
-			var thresholds = sl.Thresholds;
-			var confusion = sl.Confusion;
+            var t = new TextTable();
+            t.AddHeader("thr", "TPR(SL)", "FPR(TP)", "pred HIGH %", "high / total");
 
-			if (thresholds == null || thresholds.Count == 0)
-				{
-				Console.WriteLine ("[sl-thr] no days with both TP/SL outcome and SlProb > 0 – sweep skipped.");
-				return;
-				}
+            foreach (var row in thresholds)
+            {
+                var cells = new[]
+                {
+                    row.Threshold.ToString("0.00"),
+                    $"{row.TprPct:0.0}%",
+                    $"{row.FprPct:0.0}%",
+                    $"{row.PredHighPct:0.0}%",
+                    $"{row.HighTotal}/{row.TotalDays}"
+                };
 
-			Console.WriteLine ($"[sl-thr] base set: totalDays={confusion.TotalOutcomeDays}, SL-days={confusion.TotalSlDays}, TP-days={confusion.TotalTpDays}");
+                var color = row.IsGood
+                    ? ConsoleStyler.GoodColor
+                    : ConsoleStyler.BadColor;
 
-			var t = new TextTable ();
-			t.AddHeader ("thr", "TPR(SL)", "FPR(TP)", "pred HIGH %", "high / total");
+                t.AddColoredRow(color, cells);
+            }
 
-			foreach (var row in thresholds)
-				{
-				var cells = new[]
-				{
-					row.Threshold.ToString("0.00"),
-					$"{row.TprPct:0.0}%",
-					$"{row.FprPct:0.0}%",
-					$"{row.PredHighPct:0.0}%",
-					$"{row.HighTotal}/{row.TotalDays}"
-				};
+            t.WriteToConsole();
+        }
 
-				var color = row.IsGood
-					? ConsoleStyler.GoodColor
-					: ConsoleStyler.BadColor;
+        private static void RunShuffleSanityTest(IReadOnlyList<BacktestRecord> recordsForMetrics)
+        {
+            if (recordsForMetrics == null || recordsForMetrics.Count == 0)
+            {
+                Console.WriteLine("[model-stats][shuffle] no records for sanity test – skipped.");
+                return;
+            }
 
-				t.AddColoredRow (color, cells);
-				}
+            var filtered = recordsForMetrics
+                .Where(r => r.TrueLabel is >= 0 and <= 2
+                            && r.PredLabel is >= 0 and <= 2)
+                .ToList();
 
-			t.WriteToConsole ();
-			}
+            if (filtered.Count == 0)
+            {
+                Console.WriteLine("[model-stats][shuffle] no valid (true,pred) pairs – skipped.");
+                return;
+            }
 
-		/// <summary>
-		/// Простейший sanity-тест:
-		/// - берёт текущие (TrueLabel, PredLabel) по recent-окну;
-		/// - случайно перемешивает TrueLabel между днями;
-		/// - считает accuracy для той же PredLabel.
-		/// Если расчёт метрик нормальный, accuracy на shuffled должна быть ~33% для 3 классов.
-		/// Если там тоже ~70–80%, значит где-то баг в логике подсчёта.
-		/// </summary>
-		private static void RunShuffleSanityTest ( IReadOnlyList<BacktestRecord> recordsForMetrics )
-			{
-			if (recordsForMetrics == null || recordsForMetrics.Count == 0)
-				{
-				Console.WriteLine ("[model-stats][shuffle] no records for sanity test – skipped.");
-				return;
-				}
+            var labels = filtered
+                .Select(r => r.TrueLabel)
+                .ToArray();
 
-			// Берём только валидные пары 0/1/2.
-			var filtered = recordsForMetrics
-				.Where (r => r.TrueLabel is >= 0 and <= 2
-							&& r.PredLabel is >= 0 and <= 2)
-				.ToList ();
+            var rng = new Random(123);
 
-			if (filtered.Count == 0)
-				{
-				Console.WriteLine ("[model-stats][shuffle] no valid (true,pred) pairs – skipped.");
-				return;
-				}
+            for (int i = labels.Length - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (labels[i], labels[j]) = (labels[j], labels[i]);
+            }
 
-			var labels = filtered
-				.Select (r => r.TrueLabel)
-				.ToArray ();
+            int diag = 0;
+            int n = filtered.Count;
 
-			// Фишер–Йетс с фиксированным сидом, чтобы результат был воспроизводим.
-			var rng = new Random (123);
+            for (int i = 0; i < n; i++)
+            {
+                if (labels[i] == filtered[i].PredLabel)
+                {
+                    diag++;
+                }
+            }
 
-			for (int i = labels.Length - 1; i > 0; i--)
-				{
-				int j = rng.Next (i + 1);
-				(labels[i], labels[j]) = (labels[j], labels[i]);
-				}
+            double accPct = (double)diag / n * 100.0;
 
-			int diag = 0;
-			int n = filtered.Count;
+            Console.WriteLine(
+                $"[model-stats][shuffle] sanity acc on shuffled labels = {accPct:0.0}% (n={n})");
+        }
 
-			for (int i = 0; i < n; i++)
-				{
-				if (labels[i] == filtered[i].PredLabel)
-					{
-					diag++;
-					}
-				}
-
-			double accPct = (double) diag / n * 100.0;
-
-			Console.WriteLine (
-				$"[model-stats][shuffle] sanity acc on shuffled labels = {accPct:0.0}% (n={n})");
-			}
-
-		private static void WriteColoredLine ( ConsoleColor color, string text )
-			{
-			var prev = Console.ForegroundColor;
-			Console.ForegroundColor = color;
-			Console.WriteLine (text);
-			Console.ForegroundColor = prev;
-			}
-		}
-	}
+        private static void WriteColoredLine(ConsoleColor color, string text)
+        {
+            var prev = Console.ForegroundColor;
+            Console.ForegroundColor = color;
+            Console.WriteLine(text);
+            Console.ForegroundColor = prev;
+        }
+    }
+}

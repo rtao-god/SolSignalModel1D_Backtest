@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
@@ -35,7 +35,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
             if (ctx.TrainUntilUtc == default)
                 throw new InvalidOperationException("[sl] ctx.TrainUntilUtc is default (uninitialized).");
 
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
 
             var samples = new List<SlSample>();
 
@@ -51,17 +51,17 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
                     continue;
 
                 double slProb = c.SlProb
-                    ?? throw new InvalidOperationException($"[sl] SlProb is null for day={c.DayKeyUtc} (SL layer not evaluated).");
+                    ?? throw new InvalidOperationException($"[sl] SlProb is null for day={c.EntryDayKeyUtc} (SL layer not evaluated).");
 
                 bool slHigh = c.SlHighDecision
-                    ?? throw new InvalidOperationException($"[sl] SlHighDecision is null for day={c.DayKeyUtc} (SL layer not evaluated).");
+                    ?? throw new InvalidOperationException($"[sl] SlHighDecision is null for day={c.EntryDayKeyUtc} (SL layer not evaluated).");
 
                 if (slProb < 0.0 || slProb > 1.0)
                 {
                     var badRange = new SelfCheckResult
                     {
                         Success = false,
-                        Summary = $"[sl] обнаружена SlProb вне диапазона [0,1]: {slProb:0.000} на day={c.DayKeyUtc}."
+                        Summary = $"[sl] обнаружена SlProb вне диапазона [0,1]: {slProb:0.000} на day={c.EntryDayKeyUtc}."
                     };
                     badRange.Errors.Add("[sl] SlProb должен лежать в [0,1].");
                     return badRange;
@@ -73,7 +73,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
                     var bad = new SelfCheckResult
                     {
                         Success = false,
-                        Summary = $"[sl] invalid Causal.MinMove={dayMinMove:0.######} for day={c.DayKeyUtc}."
+                        Summary = $"[sl] invalid Causal.MinMove={dayMinMove:0.######} for day={c.EntryDayKeyUtc}."
                     };
                     bad.Errors.Add("[sl] Causal.MinMove must be finite and > 0. Fix upstream MinMove computation/NyWindowing.");
                     return bad;

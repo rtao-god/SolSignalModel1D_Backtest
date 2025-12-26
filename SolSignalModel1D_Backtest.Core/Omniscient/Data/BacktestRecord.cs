@@ -1,8 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using System;
+using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 {
@@ -75,8 +75,25 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public int? TargetLevelClass => Causal.TargetLevelClass;
 
         // ===== Time keys (strong-typed) =====
-        public Time.EntryUtc EntryUtc => Forward.EntryUtc;
-        public Time.DayKeyUtc DayKeyUtc => Forward.EntryUtc.DayKeyUtc;
+        public EntryUtc EntryUtc => Forward.EntryUtc;
+        public EntryDayKeyUtc EntryDayKeyUtc => Forward.EntryDayKeyUtc;
+
+        public void EnsureEntryUtcCoherenceOrThrow()
+        {
+            var forward = EntryUtc.Value;
+            var causal = TradingEntryUtc.Value;
+
+            if (forward != causal)
+                throw new InvalidOperationException(
+                    $"[BacktestRecord] EntryUtc mismatch: Forward.EntryUtc={forward:O} vs Causal.TradingEntryUtc={causal:O}");
+        }
+
+        // Back-compat (temporary): prefer EntryDayKeyUtc.
+        [Obsolete("Use EntryDayKeyUtc (explicit entry day-key).", error: false)]
+        public EntryDayKeyUtc DayKeyUtc => EntryDayKeyUtc;
+
+        // Causal boundary: trading entry (weekend impossible by type).
+        public NyTradingEntryUtc TradingEntryUtc => Causal.EntryUtc;
 
         // ===== Omniscient execution facts =====
         public DelayedExecutionFacts? DelayedExecution { get; set; }

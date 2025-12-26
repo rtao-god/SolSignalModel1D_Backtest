@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 

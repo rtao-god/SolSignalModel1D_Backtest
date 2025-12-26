@@ -1,26 +1,24 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest
 {
     public partial class Program
     {
         private static DateTime _trainUntilUtc;
-        private static DayKeyUtc _trainUntilExitDayKeyUtc;
+        private static ExitDayKeyUtc _trainUntilExitDayKeyUtc;
 
         private static EntryUtc ToEntryUtc(EntryUtc entry) => entry;
         private static EntryUtc ToEntryUtc(NyTradingEntryUtc entry) => entry.AsEntryUtc();
 
-        private static PredictionEngine CreatePredictionEngineOrFallback(List<LabeledCausalRow> allRows)
+        private static PredictionEngine CreatePredictionEngineOrFallback(
+            List<LabeledCausalRow> allRows
+        )
         {
             PredictionEngine.DebugAllowDisabledModels = false;
 
@@ -42,11 +40,11 @@ namespace SolSignalModel1D_Backtest
                 holdoutDays: HoldoutDays,
                 nyTz: NyTz);
 
-            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-               entrySelector: r => ToEntryUtc(r.Causal.EntryUtc),
+                entrySelector: r => ToEntryUtc(r.Causal.EntryUtc),
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: NyTz);
 
@@ -79,7 +77,7 @@ namespace SolSignalModel1D_Backtest
                 finalTrainRows = ordered;
 
                 _trainUntilUtc = DeriveMaxBaselineExitUtc(rows: ordered, nyTz: NyTz);
-                _trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(_trainUntilUtc);
+                _trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(_trainUntilUtc);
             }
             else
             {

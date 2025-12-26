@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
@@ -12,7 +12,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
         public List<LabeledCausalRow> MoveTrainRows { get; }
         public List<LabeledCausalRow> DirNormalRows { get; }
         public List<LabeledCausalRow> DirDownRows { get; }
-        public DayKeyUtc TrainUntilExitDayKeyUtc { get; }
+
+        public ExitDayKeyUtc TrainUntilExitDayKeyUtc { get; }
 
         public string TrainUntilIsoDate => TrainUntilExitDayKeyUtc.ToString();
 
@@ -21,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
             List<LabeledCausalRow> moveTrainRows,
             List<LabeledCausalRow> dirNormalRows,
             List<LabeledCausalRow> dirDownRows,
-            DayKeyUtc trainUntilExitDayKeyUtc)
+            ExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             TrainRows = trainRows ?? throw new ArgumentNullException(nameof(trainRows));
             MoveTrainRows = moveTrainRows ?? throw new ArgumentNullException(nameof(moveTrainRows));
@@ -40,15 +41,17 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
         private static readonly TimeZoneInfo NyTz = NyWindowing.NyTz;
 
         /// <summary>
-        /// Каноничный контракт: boundary строго DayKeyUtc (exit-day-key).
+        /// Каноничный контракт:
+        /// - boundary: ExitDayKeyUtc (exit-day-key);
+        /// - исключения: EntryDayKeyUtc (entry-day-key).
         /// </summary>
         public static DailyDataset Build(
             List<LabeledCausalRow> allRows,
-            DayKeyUtc trainUntilExitDayKeyUtc,
+            ExitDayKeyUtc trainUntilExitDayKeyUtc,
             bool balanceMove,
             bool balanceDir,
             double balanceTargetFrac,
-            HashSet<DayKeyUtc>? dayKeysToExclude = null)
+            HashSet<EntryDayKeyUtc>? dayKeysToExclude = null)
         {
             if (allRows == null) throw new ArgumentNullException(nameof(allRows));
             if (trainUntilExitDayKeyUtc.IsDefault)
@@ -60,18 +63,26 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 .OrderBy(EntryUtcInstant)
                 .ToList();
 
-            var split = NyTrainSplit.SplitByBaselineExit(
-                ordered: ordered,
-                entrySelector: static r => new EntryUtc(r.EntryUtc.Value),
-                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
-                nyTz: NyTz);
+            var trainRows = new List<LabeledCausalRow>(ordered.Count);
 
-            var trainRows = split.Train is List<LabeledCausalRow> tl ? tl : split.Train.ToList();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var r = ordered[i];
+
+                var cls = NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: new EntryUtc(r.EntryUtc.Value),
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyTz,
+                    baselineExitDayKeyUtc: out _);
+
+                if (cls == NyTrainSplit.EntryClass.Train)
+                    trainRows.Add(r);
+            }
 
             if (dayKeysToExclude != null && dayKeysToExclude.Count > 0)
             {
                 trainRows = trainRows
-                    .Where(r => !dayKeysToExclude.Contains(r.DayKeyUtc))
+                    .Where(r => !dayKeysToExclude.Contains(r.EntryDayKeyUtc))
                     .ToList();
             }
 
@@ -92,7 +103,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc);
         }
 
-        [Obsolete("Use Build(..., DayKeyUtc trainUntilExitDayKeyUtc, ..., HashSet<DayKeyUtc>? dayKeysToExclude).")]
+        [Obsolete("Use Build(..., ExitDayKeyUtc trainUntilExitDayKeyUtc, ..., HashSet<EntryDayKeyUtc>? dayKeysToExclude).")]
         public static DailyDataset Build(
             List<LabeledCausalRow> allRows,
             DateTime trainUntilUtc00,
@@ -103,19 +114,19 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
         {
             if (allRows == null) throw new ArgumentNullException(nameof(allRows));
 
-            var trainUntilDayKey = DayKeyUtc.FromUtcOrThrow(trainUntilUtc00);
+            var trainUntilExitDayKey = ExitDayKeyUtc.FromUtcOrThrow(trainUntilUtc00);
 
-            HashSet<DayKeyUtc>? dayKeysToExclude = null;
+            HashSet<EntryDayKeyUtc>? dayKeysToExclude = null;
             if (datesToExcludeUtc00 != null && datesToExcludeUtc00.Count > 0)
             {
-                dayKeysToExclude = new HashSet<DayKeyUtc>();
+                dayKeysToExclude = new HashSet<EntryDayKeyUtc>();
                 foreach (var dt in datesToExcludeUtc00)
-                    dayKeysToExclude.Add(DayKeyUtc.FromUtcOrThrow(dt));
+                    dayKeysToExclude.Add(EntryDayKeyUtc.FromUtcMomentOrThrow(dt));
             }
 
             return Build(
                 allRows: allRows,
-                trainUntilExitDayKeyUtc: trainUntilDayKey,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKey,
                 balanceMove: balanceMove,
                 balanceDir: balanceDir,
                 balanceTargetFrac: balanceTargetFrac,

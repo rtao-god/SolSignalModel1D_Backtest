@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using SolSignalModel1D_Backtest.Core.Infra;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Candles

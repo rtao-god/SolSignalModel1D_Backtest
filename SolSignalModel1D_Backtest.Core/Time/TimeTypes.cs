@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace SolSignalModel1D_Backtest.Core.Time
 {
@@ -109,9 +109,6 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
     /// <summary>
     /// Causal stamp: EntryUtc + NyTradingDay + BaselineExitUtc.
-    /// Инварианты:
-    /// - BaselineExitUtc определён (weekend entry запрещён для causal);
-    /// - BaselineExitUtc.Value > EntryUtc.Value.
     /// </summary>
     public readonly record struct CausalStamp(
         EntryUtc EntryUtc,

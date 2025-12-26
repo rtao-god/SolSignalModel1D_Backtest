@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Causal.Time;

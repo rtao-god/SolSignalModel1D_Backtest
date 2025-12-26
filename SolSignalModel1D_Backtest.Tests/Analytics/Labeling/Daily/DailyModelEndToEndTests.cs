@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
@@ -135,7 +135,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
         /// <summary>
         /// Day-key (00:00 UTC) для сообщений/диапазонов/словарей.
         /// </summary>
-        private static DateTime DayKeyUtc(LabeledCausalRow r) => CausalTimeKey.DayKeyUtc(r).Value;
+        private static DateTime DayKeyUtc(LabeledCausalRow r) => CausalTimeKey.EntryDayKeyUtc(r).Value;
 
         private static List<LabeledCausalRow> BuildMonotonicHistory()
         {
