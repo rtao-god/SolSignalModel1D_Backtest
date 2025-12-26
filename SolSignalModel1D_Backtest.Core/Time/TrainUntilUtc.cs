@@ -26,5 +26,10 @@ namespace SolSignalModel1D_Backtest.Core.Time
         }
 
         public string IsoDate => Value.ToString("yyyy-MM-dd");
+
+        /// <summary>
+        /// Day-key (00:00Z) границы trainUntil в терминах baseline-exit.
+        /// </summary>
+        public DayKeyUtc ExitDayKeyUtc => DayKeyUtc.FromUtcMomentOrThrow(Value);
     }
 }

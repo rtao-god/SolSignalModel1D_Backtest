@@ -1,10 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+﻿using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Utils;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
@@ -29,12 +30,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 			ConsoleStyler.WriteHeader ("==== SL EFFECT ON PNL (matched with / without SL) ====");
 
-			var gatedDays = new HashSet<DateTime> (
+            var gatedDays = new HashSet<DayKeyUtc>(
 				records
-					.Where (r => r.SlHighDecision == true)
-					.Select (r => r.DateUtc.ToCausalDateUtc()));
+					.Where(r => r.SlHighDecision == true)
+					.Select(r => CausalTimeKey.DayKeyUtc(r)));
 
-			var globalDeltas = new List<double> ();
+            var globalDeltas = new List<double> ();
 			var globalGatedDeltas = new List<double> ();
 			var globalBaselineNoSl = new List<double> ();
 
@@ -60,10 +61,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 						perPolicyDeltas.Add (delta);
 						globalDeltas.Add (delta);
 
-						bool isGatedDay = gatedDays.Contains (tw.DateUtc.ToCausalDateUtc())
-							&& string.Equals (tw.Source, "Daily", StringComparison.OrdinalIgnoreCase);
+                        bool isGatedDay =
+							gatedDays.Contains(DayKeyUtc.FromUtcMomentOrThrow(tw.DateUtc))
+							&& string.Equals(tw.Source, "Daily", StringComparison.OrdinalIgnoreCase);
 
-						if (isGatedDay)
+                        if (isGatedDay)
 							{
 							perPolicyGatedDeltas.Add (delta);
 							globalGatedDeltas.Add (delta);

@@ -1,12 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+﻿using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
@@ -25,27 +26,24 @@ namespace SolSignalModel1D_Backtest
         {
             // Локальный хелпер: печатает диапазон дат и распределение по day-of-week.
             // selector обязан возвращать "дневной ключ" (DayKeyUtc) или другой стабильный идентификатор.
-            static void DumpRange<T>(string label, IReadOnlyList<T> items, Func<T, DateTime> selector)
+            static void DumpRange<T>(string label, IReadOnlyList<T> items, Func<T, DayKeyUtc> selector)
             {
-                // Пустой список логируем отдельно.
                 if (items == null || items.Count == 0)
                 {
                     Console.WriteLine($"[{label}] empty");
                     return;
                 }
 
-                // Собираем значения, чтобы один раз посчитать min/max и гистограмму.
-                var dates = items.Select(selector).ToList();
+                var keys = items.Select(selector).ToList();
 
-                var min = dates.Min();
-                var max = dates.Max();
+                var min = keys.Min(k => k.Value);
+                var max = keys.Max(k => k.Value);
 
-                // Даты здесь ожидаются как day-key, чтобы DayOfWeek был интерпретируем.
                 Console.WriteLine(
                     $"[{label}] range = [{min:yyyy-MM-dd} ({min.DayOfWeek}); {max:yyyy-MM-dd} ({max.DayOfWeek})], count={items.Count}");
 
-                // Простая гистограмма по дням недели — полезна, чтобы увидеть пропуски/перекосы.
-                var dowHist = dates
+                var dowHist = keys
+                    .Select(k => k.Value)
                     .GroupBy(d => d.DayOfWeek)
                     .OrderBy(g => g.Key)
                     .Select(g => $"{g.Key}={g.Count()}")
@@ -67,10 +65,10 @@ namespace SolSignalModel1D_Backtest
             var records = await LoadPredictionRecordsAsync(mornings, solAll6h, engine);
 
             // Логируем результат по day-key (стабильное сопоставление "дней").
-            DumpRange("records", records, r => r.DayKeyUtc);
+            DumpRange("mornings", mornings, r => CausalTimeKey.DayKeyUtc(r));
 
             // Диагностика: распределение предиктов на train/oos (использует внутренние правила разбиения).
-            DumpDailyPredHistograms(records, _trainUntilUtc);
+            DumpRange("records", records, r => CausalTimeKey.DayKeyUtc(r));
 
             Console.WriteLine($"[records] built = {records.Count}");
 

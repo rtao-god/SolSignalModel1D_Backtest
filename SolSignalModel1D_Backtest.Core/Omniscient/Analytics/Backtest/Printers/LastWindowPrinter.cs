@@ -22,8 +22,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			var t = new TextTable ();
 			t.AddHeader ("date", "side", "pred", "micro", "fact", "entry", "maxH", "minL", "close", "closePnL%");
 
-			foreach (var r in lastWindowRecords.OrderBy (x => x.DateUtc))
-				{
+            foreach (var r in lastWindowRecords.OrderBy(x => x.Causal.DayKeyUtc.Value))
+            {
 				bool goLong = r.PredLabel == 2 || r.PredLabel == 1 && r.PredMicroUp;
 				bool goShort = r.PredLabel == 0 || r.PredLabel == 1 && r.PredMicroDown;
 				string side = goLong ? "LONG" : goShort ? "SHORT" : "-";
@@ -57,10 +57,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 						};
 
 				var color = closePnlPct >= 0 ? ConsoleStyler.GoodColor : ConsoleStyler.BadColor;
+                var day = r.Causal.DayKeyUtc.Value;
 
-				t.AddColoredRow (color,
-					r.DateUtc.ToString ("yyyy-MM-dd"),
-					side,
+                t.AddColoredRow (color,
+                    day.ToString("yyyy-MM-dd"),
+                    side,
 					pred,
 					microStr,
 					fact,

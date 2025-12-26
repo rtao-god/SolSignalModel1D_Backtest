@@ -2,146 +2,125 @@
 using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Utils;
-
+using System;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
-	{
-	/// <summary>
-	/// Печать «модельных» статистик по дневной схеме/SL-модели в разрезе сегментов:
-	/// - Train (DateUtc <= trainUntilUtc);
-	/// - OOS (DateUtc > trainUntilUtc);
-	/// - Recent (последние N дней);
-	/// - Full history.
-	/// Вся математика расчёта вынесена в BacktestModelStatsSnapshotBuilder /
-	/// BacktestModelStatsMultiSnapshotBuilder, здесь только подготовка сегментов и вывод.
-	/// </summary>
-	public static class BacktestModelStatsPrinter
-		{
-		/// <summary>
-		/// Основная точка входа:
-		/// - строит мульти-снимок по Train/OOS/Recent/Full через BacktestModelStatsMultiSnapshotBuilder;
-		/// - логирует метаданные (runKind, граница train, объёмы сегментов);
-		/// - печатает для каждого сегмента:
-		///   * дневную путаницу (3 класса),
-		///   * путаницу по тренду (DOWN vs UP),
-		///   * статистику SL-модели.
-		/// </summary>
-		public static void Print (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<Candle1m> sol1m,
-			double dailyTpPct,
-			double dailySlPct,
-			TimeZoneInfo nyTz,
-			DateTime trainUntilUtc )
-			{
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (sol1m == null) throw new ArgumentNullException (nameof (sol1m));
-			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+{
+    /// <summary>
+    /// Печать «модельных» статистик по дневной схеме/SL-модели в разрезе сегментов:
+    /// - Train (exit-day-key <= trainUntilExitDayKey);
+    /// - OOS (exit-day-key > trainUntilExitDayKey);
+    /// - Recent (последние N дней);
+    /// - Full history.
+    /// </summary>
+    public static class BacktestModelStatsPrinter
+    {
+        public static void Print(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<Candle1m> sol1m,
+            double dailyTpPct,
+            double dailySlPct,
+            TimeZoneInfo nyTz,
+            DayKeyUtc trainUntilExitDayKeyUtc)
+        {
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault) throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
-			ConsoleStyler.WriteHeader ("==== MODEL STATS ====");
+            ConsoleStyler.WriteHeader("==== MODEL STATS ====");
 
-			if (records.Count == 0)
-				{
-				Console.WriteLine ("[model-stats] no records, nothing to print.");
-				return;
-				}
+            if (records.Count == 0)
+            {
+                Console.WriteLine("[model-stats] no records, nothing to print.");
+                return;
+            }
 
-			// --- 0) Логируем полный период и сортируем по дате ---
-			var ordered = records
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+            var ordered = records
+                .OrderBy(r => r.Causal.DayKeyUtc.Value)
+                .ToList();
 
-			var minDateUtc = ordered.First ().DateUtc;
-			var maxDateUtc = ordered.Last ().DateUtc;
+            var minDateUtc = ordered.First().Causal.DayKeyUtc.Value;
+            var maxDateUtc = ordered.Last().Causal.DayKeyUtc.Value;
 
-			Console.WriteLine (
-				$"[model-stats] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
-				$"totalRecords = {ordered.Count}");
+            Console.WriteLine(
+                $"[model-stats] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
+                $"totalRecords = {ordered.Count}");
 
-			// --- 1) Граница train/OOS и размер recent-окна ---
-			// Берём реальную trainUntil из верхнего уровня пайплайна (Program).
-			// Это гарантирует, что train/OOS в метриках совпадает с тем, как обучалась модель.
-			const int RecentDays = 240;
-			var runKind = ModelRunKind.Analytics; // консольный Backtest-пайплайн — аналитический режим.
+            const int RecentDays = 240;
+            var runKind = ModelRunKind.Analytics;
 
-			var multi = BacktestModelStatsMultiSnapshotBuilder.Build (
-				allRecords: ordered,
-				sol1m: sol1m,
-				nyTz: nyTz,
-				dailyTpPct: dailyTpPct,
-				dailySlPct: dailySlPct,
-				trainUntilUtc: trainUntilUtc,
-				recentDays: RecentDays,
-				runKind: runKind);
+            var multi = BacktestModelStatsMultiSnapshotBuilder.Build(
+                allRecords: ordered,
+                sol1m: sol1m,
+                nyTz: nyTz,
+                dailyTpPct: dailyTpPct,
+                dailySlPct: dailySlPct,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                recentDays: RecentDays,
+                runKind: runKind);
 
-			// --- 2) Общие метаданные запуска ---
-			var meta = multi.Meta;
+            var meta = multi.Meta;
 
-			Console.WriteLine (
-				$"[model-stats] runKind={meta.RunKind}, " +
-				$"trainUntil={meta.TrainUntilUtc:yyyy-MM-dd}, " +
-				$"train={meta.TrainRecordsCount}, " +
-				$"oos={meta.OosRecordsCount}, " +
-				$"total={meta.TotalRecordsCount}, " +
-				$"recentDays={meta.RecentDays}, " +
-				$"recentRecords={meta.RecentRecordsCount}");
+            Console.WriteLine(
+                $"[model-stats] runKind={meta.RunKind}, " +
+                $"trainUntil={meta.TrainUntilIsoDate}, " +
+                $"train={meta.TrainRecordsCount}, " +
+                $"oos={meta.OosRecordsCount}, " +
+                $"total={meta.TotalRecordsCount}, " +
+                $"recentDays={meta.RecentDays}, " +
+                $"recentRecords={meta.RecentRecordsCount}");
 
-			// --- 3) Sanity-check: shuffle accuracy на recent-окне ---
-			// Используем то же определение recent, что и билдер (last RecentDays),
-			// но только для проверки математики accuracy.
-			var fromRecentUtc = maxDateUtc.AddDays (-RecentDays);
-			var recentRecords = ordered
-				.Where (r => r.DateUtc >= fromRecentUtc)
-				.ToList ();
+            var fromRecentUtc = maxDateUtc.AddDays(-RecentDays);
+            var recentRecords = ordered
+                .Where(r => r.Causal.DayKeyUtc.Value >= fromRecentUtc)
+                .ToList();
 
-			if (recentRecords.Count == 0)
-				{
-				recentRecords = ordered;
-				}
+            if (recentRecords.Count == 0)
+            {
+                recentRecords = ordered;
+            }
 
-			RunShuffleSanityTest (recentRecords);
+            RunShuffleSanityTest(recentRecords);
 
-			// --- 4) Печать сегментов в стабильном порядке:
-			// OOS → Train → Recent → Full.
-			PrintSegmentIfExists (multi, ModelStatsSegmentKind.OosOnly, "OOS segment");
-			PrintSegmentIfExists (multi, ModelStatsSegmentKind.TrainOnly, "Train segment");
-			PrintSegmentIfExists (multi, ModelStatsSegmentKind.RecentWindow, "Recent segment");
-			PrintSegmentIfExists (multi, ModelStatsSegmentKind.FullHistory, "Full-history segment");
-			}
+            PrintSegmentIfExists(multi, ModelStatsSegmentKind.OosOnly, "OOS segment");
+            PrintSegmentIfExists(multi, ModelStatsSegmentKind.TrainOnly, "Train segment");
+            PrintSegmentIfExists(multi, ModelStatsSegmentKind.RecentWindow, "Recent segment");
+            PrintSegmentIfExists(multi, ModelStatsSegmentKind.FullHistory, "Full-history segment");
+        }
 
-		private static void PrintSegmentIfExists (
-			BacktestModelStatsMultiSnapshot multi,
-			ModelStatsSegmentKind kind,
-			string segmentTitle )
-			{
-			var segment = multi.Segments
-				.FirstOrDefault (s => s.Kind == kind);
+        private static void PrintSegmentIfExists(
+            BacktestModelStatsMultiSnapshot multi,
+            ModelStatsSegmentKind kind,
+            string segmentTitle)
+        {
+            var segment = multi.Segments
+                .FirstOrDefault(s => s.Kind == kind);
 
-			if (segment == null)
-				return;
+            if (segment == null)
+                return;
 
-			ConsoleStyler.WriteHeader (
-				$"{segmentTitle}: {segment.Label} " +
-				$"[{segment.FromDateUtc:yyyy-MM-dd}..{segment.ToDateUtc:yyyy-MM-dd}, " +
-				$"records={segment.RecordsCount}]");
+            ConsoleStyler.WriteHeader(
+                $"{segmentTitle}: {segment.Label} " +
+                $"[{segment.FromDateUtc:yyyy-MM-dd}..{segment.ToDateUtc:yyyy-MM-dd}, " +
+                $"records={segment.RecordsCount}]");
 
-			// 1) Обычная 3-классовая путаница
-			PrintDailyConfusion (segment.Stats.Daily, scopeLabel: segment.Label);
-			Console.WriteLine ();
+            PrintDailyConfusion(segment.Stats.Daily, scopeLabel: segment.Label);
+            Console.WriteLine();
 
-			// 2) Путаница по тренду (UP vs DOWN)
-			PrintTrendDirectionConfusion (segment.Stats.Trend, scopeLabel: segment.Label);
-			Console.WriteLine ();
+            PrintTrendDirectionConfusion(segment.Stats.Trend, scopeLabel: segment.Label);
+            Console.WriteLine();
 
-			// 3) SL-модель (path-based по 1m)
-			PrintSlStats (segment.Stats.Sl);
-			Console.WriteLine ();
-			}
+            PrintSlStats(segment.Stats.Sl);
+            Console.WriteLine();
+        }
 
-		// ===== 1) Дневная путаница (3 класса) =====
+        // ===== 1) Дневная путаница (3 класса) =====
 
-		private static void PrintDailyConfusion ( DailyConfusionStats daily, string? scopeLabel = null )
+        private static void PrintDailyConfusion ( DailyConfusionStats daily, string? scopeLabel = null )
 			{
 			var title = scopeLabel == null
 				? "Daily label confusion (3-class)"

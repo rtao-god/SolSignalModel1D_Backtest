@@ -22,8 +22,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Daily
             if (trainRows.Count == 0)
                 throw new InvalidOperationException("[daily-train] trainRows is empty.");
 
-            // Инвариант: вход отсортирован по day-key (00:00 UTC) строго по возрастанию.
-            SeriesGuards.EnsureStrictlyAscendingUtc(trainRows, r => r.Causal.DayKeyUtc.Value, "daily-train.trainRows");
+            // Инвариант: вход отсортирован по entryUtc (UTC) строго по возрастанию.
+            // DayKeyUtc может повторяться внутри одного дня (intraday ряды).
+            SeriesGuards.EnsureStrictlyAscendingUtc(
+                trainRows,
+                r => r.EntryUtc.Value,
+                "daily-train.trainRows");
 
             // ===== 1) Move: все дни =====
             if (balanceMove)

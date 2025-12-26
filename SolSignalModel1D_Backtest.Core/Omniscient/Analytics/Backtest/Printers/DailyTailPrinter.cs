@@ -22,12 +22,12 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			if (records == null || records.Count == 0) return;
 
-			var lastDate = records.Max (r => r.DateUtc);
-			var rec = records.First (r => r.DateUtc == lastDate);
+            var lastDay = records.Max(r => CausalTimeKey.DayKeyUtc(r).Value);
+            var rec = records.First(r => CausalTimeKey.DayKeyUtc(r).Value == lastDay);
 
-			ConsoleStyler.WriteHeader ($"=== LAST DAY @ {lastDate:yyyy-MM-dd} ===");
+            ConsoleStyler.WriteHeader($"=== LAST DAY @ {lastDay:yyyy-MM-dd} ===");
 
-			var head = new TextTable ();
+            var head = new TextTable ();
 			head.AddHeader ("field", "value");
 			head.AddRow ("pred", ClassToStr (rec.PredLabel));
 			head.AddRow ("micro", rec.PredMicroUp ? "UP" : rec.PredMicroDown ? "DOWN" : "—");
@@ -51,7 +51,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			foreach (var pr in policyResults.OrderBy (x => x.PolicyName))
 				{
 				var dayTrades = pr.Trades?
-					.Where (tr => tr.DateUtc.ToCausalDateUtc() == lastDate.ToCausalDateUtc())
+					.Where (tr => tr.DateUtc.ToCausalDateUtc() == lastDay.ToCausalDateUtc())
 					.OrderBy (tr => tr.EntryTimeUtc)
 					.ToList () ?? new List<PnLTrade> ();
 

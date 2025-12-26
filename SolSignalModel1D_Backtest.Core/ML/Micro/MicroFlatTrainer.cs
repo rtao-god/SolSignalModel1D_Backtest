@@ -22,14 +22,14 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
             if (rows.Count == 0)
                 throw new ArgumentException("rows must be non-empty.", nameof(rows));
 
-            // Инвариант: EntryUtc всегда UTC.
+            // Инвариант: NyTradingEntryUtc.Value всегда UTC.
             for (int i = 0; i < rows.Count; i++)
             {
-                var entryUtc = rows[i].EntryUtc.Value;
-                if (entryUtc.Kind != DateTimeKind.Utc)
+                var entryUtcDt = rows[i].EntryUtc.Value;
+                if (entryUtcDt.Kind != DateTimeKind.Utc)
                 {
                     throw new InvalidOperationException(
-                        $"[2stage-micro] rows[{i}].EntryUtc must be UTC, got Kind={entryUtc.Kind}, Date={entryUtc:O}.");
+                        $"[2stage-micro] rows[{i}].EntryUtc must be UTC, got Kind={entryUtcDt.Kind}, Date={entryUtcDt:O}.");
                 }
             }
 
@@ -199,31 +199,26 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
             bool hasAny = false;
-            DateTime maxExit = default;
+            DateTime maxExitUtc = default;
 
             for (int i = 0; i < rows.Count; i++)
             {
-                var entry = rows[i].EntryUtc;
-                var entryUtc = entry.Value;
+                var entryUtc = rows[i].EntryUtc;
+                var entryUtcDt = entryUtc.Value;
 
-                if (entryUtc.Kind != DateTimeKind.Utc)
+                if (entryUtcDt.Kind != DateTimeKind.Utc)
                 {
                     throw new InvalidOperationException(
-                        $"[2stage-micro] entryUtc must be UTC. idx={i}, date={entryUtc:O}, kind={entryUtc.Kind}.");
+                        $"[2stage-micro] entryUtc must be UTC. idx={i}, date={entryUtcDt:O}, kind={entryUtcDt.Kind}.");
                 }
 
-                if (NyWindowing.IsWeekendInNy(entry, nyTz))
-                {
-                    // Здесь weekend — ошибка инварианта: rows уже каузальные entry-точки.
-                    throw new InvalidOperationException(
-                        $"[2stage-micro] weekend entry in train rows (baseline-exit undefined): {entryUtc:O}.");
-                }
+                // Weekend-check здесь не нужен: NyTradingEntryUtc по контракту не может быть weekend.
+                // При нарушении инварианта NyWindowing.ComputeBaselineExitUtc(NyTradingEntryUtc, ...) упадёт fail-fast.
+                var exitUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz).Value;
 
-                var exitUtc = NyWindowing.ComputeBaselineExitUtc(entry, nyTz).Value;
-
-                if (!hasAny || exitUtc > maxExit)
+                if (!hasAny || exitUtc > maxExitUtc)
                 {
-                    maxExit = exitUtc;
+                    maxExitUtc = exitUtc;
                     hasAny = true;
                 }
             }
@@ -231,7 +226,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.Micro
             if (!hasAny)
                 throw new InvalidOperationException("[2stage-micro] failed to derive max baseline-exit: no working-day entries.");
 
-            return maxExit;
+            return maxExitUtc;
         }
     }
 }

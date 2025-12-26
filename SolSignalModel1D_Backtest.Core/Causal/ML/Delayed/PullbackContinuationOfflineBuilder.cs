@@ -3,6 +3,7 @@ using SolSignalModel1D_Backtest.Core.Data;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils.Time;
 using System;
@@ -57,15 +58,15 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 				// EntryUtc = реальный timestamp входа, а не day-key.
 				var entryUtc = CausalTimeKey.EntryUtc (r);
 
-				if (!sol6hDict.TryGetValue (entryUtc, out var day6h))
-					{
-					throw new InvalidOperationException (
-						$"[pullback-offline] sol6hDict has no key for entryUtc={entryUtc:O}. " +
-						"Это рассинхрон данных: sol6hDict должен ключиться по 6h OpenTimeUtc и покрывать все entryUtc из rows.");
-					}
+                if (!sol6hDict.TryGetValue(entryUtc.Value, out var day6h))
+                {
+                    throw new InvalidOperationException(
+                        $"[pullback-offline] sol6hDict has no key for entryUtc={entryUtc:O}. " +
+                        "Это рассинхрон данных: sol6hDict должен ключиться по 6h OpenTimeUtc и покрывать все entryUtc из rows.");
+                }
 
-				// Для каузального entry используем только Open.
-				double entry = day6h.Open;
+                // Для каузального entry используем только Open.
+                double entry = day6h.Open;
 				if (entry <= 0.0)
 					throw new InvalidOperationException ($"[pullback-offline] Invalid entry price (day6h.Open) for entryUtc={entryUtc:O}: {entry}.");
 
@@ -78,24 +79,24 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 					}
 
 				DateTime endUtc;
-				try { endUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, NyTz); }
-				catch (Exception ex)
+                try { endUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, NyTz).Value; }
+                catch (Exception ex)
 					{
 					throw new InvalidOperationException (
 						$"Failed to compute baseline exit for entryUtc={entryUtc:o}, tz={NyTz.Id}.",
 						ex);
 					}
 
-				var dayHours = allHours
-					.Where (h => h.OpenTimeUtc >= entryUtc && h.OpenTimeUtc < endUtc)
-					.ToList ();
+                var dayHours = allHours
+					.Where(h => h.OpenTimeUtc >= entryUtc.Value && h.OpenTimeUtc < endUtc)
+					.ToList();
 
-				if (dayHours.Count == 0)
+                if (dayHours.Count == 0)
 					throw new InvalidOperationException ($"[pullback-offline] No 1h candles in window. entryUtc={entryUtc:O}, endUtc={endUtc:O}.");
 
-				BuildForDir (res, r, entryUtc, dayHours, allHours, entry, minMove, goLong: true, NyTz);
-				BuildForDir (res, r, entryUtc, dayHours, allHours, entry, minMove, goLong: false, NyTz);
-				}
+                BuildForDir(res, r, entryUtc.Value, dayHours, allHours, entry, minMove, goLong: true, NyTz);
+                BuildForDir(res, r, entryUtc.Value, dayHours, allHours, entry, minMove, goLong: false, NyTz);
+            }
 
 			return res;
 			}

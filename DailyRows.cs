@@ -120,14 +120,14 @@ namespace SolSignalModel1D_Backtest
 
 			for (int i = 0; i < rows.Count; i++)
 				{
-                var entryUtc = rows[i].Causal.EntryUtc;
+                var entryUtc = rows[i].Causal.EntryUtc.Value;
 
                 if (entryUtc.Kind != DateTimeKind.Utc)
-					throw new InvalidOperationException ($"[rows] Causal.DateUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
+                    throw new InvalidOperationException($"[rows] Causal.DateUtc must be UTC, got Kind={entryUtc.Kind}, t={entryUtc:O}.");
 
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (entryUtc, NyTz);
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(entryUtc, NyTz);
 
-				if (!hist.TryGetValue (ny.Hour, out var cnt))
+                if (!hist.TryGetValue (ny.Hour, out var cnt))
 					cnt = 0;
 
 				hist[ny.Hour] = cnt + 1;

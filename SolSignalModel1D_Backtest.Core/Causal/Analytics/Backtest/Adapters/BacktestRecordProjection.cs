@@ -10,30 +10,34 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Adapters
         public static BacktestAggRow ToAggRow(this BacktestRecord r)
         {
             if (r == null) throw new ArgumentNullException(nameof(r));
+            if (r.Causal == null) throw new InvalidOperationException("[proj] BacktestRecord.Causal is null.");
+            if (r.Forward == null) throw new InvalidOperationException("[proj] BacktestRecord.Forward is null.");
+
+            var entryUtc = r.Causal.EntryUtc.Value;
 
             if (r.PredMicroUp && r.PredMicroDown)
             {
                 throw new InvalidOperationException(
-                    $"[proj] Invalid micro prediction flags: both PredMicroUp and PredMicroDown are true for {r.EntryUtc:O}.");
+                    $"[proj] Invalid micro prediction flags: both PredMicroUp and PredMicroDown are true for {entryUtc:O}.");
             }
 
             if (r.FactMicroUp && r.FactMicroDown)
             {
                 throw new InvalidOperationException(
-                    $"[proj] Invalid micro fact flags: both FactMicroUp and FactMicroDown are true for {r.EntryUtc:O}.");
+                    $"[proj] Invalid micro fact flags: both FactMicroUp and FactMicroDown are true for {entryUtc:O}.");
             }
 
             if (r.SlProb is not double slProb)
             {
                 throw new InvalidOperationException(
-                    $"[proj] SlProb is null for {r.EntryUtc:O}. " +
+                    $"[proj] SlProb is null for {entryUtc:O}. " +
                     "Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
             }
 
             if (r.SlHighDecision is not bool slHighDecision)
             {
                 throw new InvalidOperationException(
-                    $"[proj] SlHighDecision is null for {r.EntryUtc:O}. " +
+                    $"[proj] SlHighDecision is null for {entryUtc:O}. " +
                     "Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
             }
 

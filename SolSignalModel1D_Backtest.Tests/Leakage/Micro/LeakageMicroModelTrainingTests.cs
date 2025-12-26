@@ -2,267 +2,265 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
-	{
-	public sealed class LeakageMicroModelTrainingTests
-		{
-		[Fact]
-		public void MicroDataset_IsFutureBlind_ToOosTailMutation_ByTrainBoundary ()
-			{
-			var nyTz = NyWindowing.NyTz;
+{
+    public sealed class LeakageMicroModelTrainingTests
+    {
+        [Fact]
+        public void MicroDataset_IsFutureBlind_ToOosTailMutation_ByTrainBoundary()
+        {
+            var nyTz = NyWindowing.NyTz;
 
-			// Строим NY-weekday входы; weekend запрещён контрактом TrainBoundary/MicroDatasetBuilder.
-			var datesUtc = BuildNyWeekdayEntriesUtc (
-				startUtc: new DateTime (2024, 1, 2, 12, 0, 0, DateTimeKind.Utc),
-				count: 260,
-				nyTz: nyTz);
+            var datesUtc = BuildNyWeekdayEntriesUtc(
+                startUtc: new DateTime(2024, 1, 2, 12, 0, 0, DateTimeKind.Utc),
+                count: 260,
+                nyTz: nyTz);
 
-			var allRows = BuildSyntheticRows (datesUtc);
+            var allRows = BuildSyntheticRows(datesUtc, nyTz);
 
-			// trainUntil берём как baseline-exit близко к концу ряда.
-			var pivotEntry = datesUtc[^40];
-			var pivotExit = NyWindowing.ComputeBaselineExitUtc (pivotEntry, nyTz);
-			var trainUntilUtc = pivotExit.AddMinutes (1);
+            var pivotEntry = new EntryUtc(datesUtc[^40]);
+            var pivotExit = NyWindowing.ComputeBaselineExitUtc(pivotEntry, nyTz);
+            var trainUntil = new TrainUntilUtc(pivotExit.Value.AddMinutes(1));
 
-			var boundary = new TrainBoundary (trainUntilUtc, nyTz);
+            var rowsA = CloneRows(allRows);
+            var rowsB = CloneRows(allRows);
 
-			var rowsA = CloneRows (allRows);
-			var rowsB = CloneRows (allRows);
+            MutateOosTail(rowsB, trainUntil, nyTz);
 
-			MutateOosTail (rowsB, boundary);
+            var dsA = MicroDatasetBuilder.Build(rowsA, trainUntil);
+            var dsB = MicroDatasetBuilder.Build(rowsB, trainUntil);
 
-			var dsA = MicroDatasetBuilder.Build (rowsA, trainUntilUtc);
-			var dsB = MicroDatasetBuilder.Build (rowsB, trainUntilUtc);
+            AssertRowsEqual(dsA.TrainRows, dsB.TrainRows);
+            AssertRowsEqual(dsA.MicroRows, dsB.MicroRows);
 
-			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
-			AssertRowsEqual (dsA.MicroRows, dsB.MicroRows);
+            Assert.DoesNotContain(dsA.TrainRows, r =>
+            {
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(r.EntryUtc.Value, nyTz);
+                return ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+            });
+        }
 
-			// Дополнительный инвариант: в train-части нет weekend (иначе MicroDatasetBuilder должен был упасть).
-			Assert.DoesNotContain (dsA.TrainRows, r =>
-			{
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (r.DateUtc, nyTz);
-				return ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
-			});
-			}
+        private static List<DateTime> BuildNyWeekdayEntriesUtc(DateTime startUtc, int count, TimeZoneInfo nyTz)
+        {
+            if (startUtc.Kind != DateTimeKind.Utc)
+                throw new ArgumentException("startUtc must be UTC.", nameof(startUtc));
+            if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), count, "count must be > 0.");
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-		private static List<DateTime> BuildNyWeekdayEntriesUtc ( DateTime startUtc, int count, TimeZoneInfo nyTz )
-			{
-			if (startUtc.Kind != DateTimeKind.Utc)
-				throw new ArgumentException ("startUtc must be UTC.", nameof (startUtc));
-			if (count <= 0) throw new ArgumentOutOfRangeException (nameof (count), count, "count must be > 0.");
-			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+            var res = new List<DateTime>(count);
+            var dt = startUtc;
 
-			var res = new List<DateTime> (count);
-			var dt = startUtc;
+            while (res.Count < count)
+            {
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(dt, nyTz);
+                if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+                    res.Add(dt);
 
-			while (res.Count < count)
-				{
-				var ny = TimeZoneInfo.ConvertTimeFromUtc (dt, nyTz);
-				if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
-					res.Add (dt);
+                dt = dt.AddDays(1);
+            }
 
-				dt = dt.AddDays (1);
-				}
+            return res;
+        }
 
-			return res;
-			}
+        private static List<LabeledCausalRow> BuildSyntheticRows(IReadOnlyList<DateTime> datesUtc, TimeZoneInfo nyTz)
+        {
+            var rows = new List<LabeledCausalRow>(datesUtc.Count);
 
-		private static List<LabeledCausalRow> BuildSyntheticRows ( IReadOnlyList<DateTime> datesUtc )
-			{
-			var rows = new List<LabeledCausalRow> (datesUtc.Count);
+            for (int i = 0; i < datesUtc.Count; i++)
+            {
+                bool isMicro = (i % 3 == 0);
+                bool microUp = isMicro && (i % 6 == 0);
+                bool microDown = isMicro && !microUp;
 
-			for (int i = 0; i < datesUtc.Count; i++)
-				{
-				bool isMicro = (i % 3 == 0);
-				bool microUp = isMicro && (i % 6 == 0);
-				bool microDown = isMicro && !microUp;
+                int trueLabel = isMicro ? 1 : 2;
 
-				// TrueLabel для микро-слоя не используется напрямую, но держим смысл:
-				// micro = flat-day (1), иначе non-flat (2).
-				int trueLabel = isMicro ? 1 : 2;
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(datesUtc[i]), nyTz, out var nyEntry))
+                    throw new InvalidOperationException($"[test] expected NY trading entry, got weekend? t={datesUtc[i]:O}");
 
-				rows.Add (MakeRow (
-					dateUtc: datesUtc[i],
-					idx: i,
-					trueLabel: trueLabel,
-					isMicro: isMicro,
-					microUp: microUp,
-					microDown: microDown,
-					mutated: false));
-				}
+                rows.Add(MakeRow(
+                    entryUtc: nyEntry,
+                    idx: i,
+                    trueLabel: trueLabel,
+                    isMicro: isMicro,
+                    microUp: microUp,
+                    microDown: microDown,
+                    mutated: false));
+            }
 
-			return rows;
-			}
+            return rows;
+        }
 
-		private static List<LabeledCausalRow> CloneRows ( List<LabeledCausalRow> src )
-			{
-			var res = new List<LabeledCausalRow> (src.Count);
+        private static List<LabeledCausalRow> CloneRows(List<LabeledCausalRow> src)
+        {
+            var res = new List<LabeledCausalRow>(src.Count);
 
-			for (int i = 0; i < src.Count; i++)
-				{
-				var r = src[i];
-				res.Add (new LabeledCausalRow (
-					causal: CloneCausal (r.Causal),
-					trueLabel: r.TrueLabel,
-					factMicroUp: r.FactMicroUp,
-					factMicroDown: r.FactMicroDown));
-				}
+            for (int i = 0; i < src.Count; i++)
+            {
+                var r = src[i];
+                res.Add(new LabeledCausalRow(
+                    causal: CloneCausal(r.Causal),
+                    trueLabel: r.TrueLabel,
+                    factMicroUp: r.FactMicroUp,
+                    factMicroDown: r.FactMicroDown));
+            }
 
-			return res;
-			}
+            return res;
+        }
 
-		private static void MutateOosTail ( List<LabeledCausalRow> rows, TrainBoundary boundary )
-			{
-			for (int i = 0; i < rows.Count; i++)
-				{
-				var r = rows[i];
+        private static void MutateOosTail(List<LabeledCausalRow> rows, TrainUntilUtc trainUntilUtc, TimeZoneInfo nyTz)
+        {
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
 
-				// Мутируем только то, что boundary НЕ считает train по baseline-exit контракту.
-				if (boundary.IsTrainEntry (r.DateUtc))
-					continue;
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var exitUtc))
+                    continue;
 
-				bool newUp = !r.FactMicroUp;
-				bool newDown = !r.FactMicroDown;
+                var exitDayKey = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
+                if (exitDayKey.Value <= trainUntilUtc.ExitDayKeyUtc.Value)
+                    continue;
 
-				rows[i] = MakeRow (
-					dateUtc: r.DateUtc,
-					idx: i,
-					trueLabel: r.TrueLabel,
-					isMicro: newUp || newDown,
-					microUp: newUp,
-					microDown: newDown,
-					mutated: true);
-				}
-			}
+                bool newUp = !r.FactMicroUp;
+                bool newDown = !r.FactMicroDown;
 
-		private static void AssertRowsEqual ( IReadOnlyList<LabeledCausalRow> xs, IReadOnlyList<LabeledCausalRow> ys )
-			{
-			Assert.Equal (xs.Count, ys.Count);
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var nyEntry))
+                    throw new InvalidOperationException($"[test] entry unexpectedly not NY-trading. t={r.EntryUtc.Value:O}");
 
-			for (int i = 0; i < xs.Count; i++)
-				{
-				var a = xs[i];
-				var b = ys[i];
+                rows[i] = MakeRow(
+                    entryUtc: nyEntry,
+                    idx: i,
+                    trueLabel: r.TrueLabel,
+                    isMicro: newUp || newDown,
+                    microUp: newUp,
+                    microDown: newDown,
+                    mutated: true);
+            }
+        }
 
-				Assert.Equal (a.DateUtc, b.DateUtc);
-				Assert.Equal (a.TrueLabel, b.TrueLabel);
-				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
-				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
+        private static void AssertRowsEqual(IReadOnlyList<LabeledCausalRow> xs, IReadOnlyList<LabeledCausalRow> ys)
+        {
+            Assert.Equal(xs.Count, ys.Count);
 
-				var va = a.Causal.FeaturesVector.ToArray ();
-				var vb = b.Causal.FeaturesVector.ToArray ();
+            for (int i = 0; i < xs.Count; i++)
+            {
+                var a = xs[i];
+                var b = ys[i];
 
-				Assert.Equal (va.Length, vb.Length);
-				for (int j = 0; j < va.Length; j++)
-					Assert.Equal (va[j], vb[j]);
-				}
-			}
+                Assert.Equal(a.EntryUtc.Value, b.EntryUtc.Value);
+                Assert.Equal(a.TrueLabel, b.TrueLabel);
+                Assert.Equal(a.FactMicroUp, b.FactMicroUp);
+                Assert.Equal(a.FactMicroDown, b.FactMicroDown);
 
-		private static CausalDataRow CloneCausal ( CausalDataRow c ) =>
-			new CausalDataRow (
-				dateUtc: c.DateUtc,
-				regimeDown: c.RegimeDown,
-				isMorning: c.IsMorning,
-				hardRegime: c.HardRegime,
-				minMove: c.MinMove,
+                var va = a.Causal.FeaturesVector.ToArray();
+                var vb = b.Causal.FeaturesVector.ToArray();
 
-				solRet30: c.SolRet30,
-				btcRet30: c.BtcRet30,
-				solBtcRet30: c.SolBtcRet30,
+                Assert.Equal(va.Length, vb.Length);
+                for (int j = 0; j < va.Length; j++)
+                    Assert.Equal(va[j], vb[j]);
+            }
+        }
 
-				solRet1: c.SolRet1,
-				solRet3: c.SolRet3,
-				btcRet1: c.BtcRet1,
-				btcRet3: c.BtcRet3,
+        private static CausalDataRow CloneCausal(CausalDataRow c) =>
+            new CausalDataRow(
+                entryUtc: c.EntryUtc,
+                regimeDown: c.RegimeDown,
+                isMorning: c.IsMorning,
+                hardRegime: c.HardRegime,
+                minMove: c.MinMove,
 
-				fngNorm: c.FngNorm,
-				dxyChg30: c.DxyChg30,
-				goldChg30: c.GoldChg30,
+                solRet30: c.SolRet30,
+                btcRet30: c.BtcRet30,
+                solBtcRet30: c.SolBtcRet30,
 
-				btcVs200: c.BtcVs200,
+                solRet1: c.SolRet1,
+                solRet3: c.SolRet3,
+                btcRet1: c.BtcRet1,
+                btcRet3: c.BtcRet3,
 
-				solRsiCenteredScaled: c.SolRsiCenteredScaled,
-				rsiSlope3Scaled: c.RsiSlope3Scaled,
+                fngNorm: c.FngNorm,
+                dxyChg30: c.DxyChg30,
+                goldChg30: c.GoldChg30,
 
-				gapBtcSol1: c.GapBtcSol1,
-				gapBtcSol3: c.GapBtcSol3,
+                btcVs200: c.BtcVs200,
 
-				atrPct: c.AtrPct,
-				dynVol: c.DynVol,
+                solRsiCenteredScaled: c.SolRsiCenteredScaled,
+                rsiSlope3Scaled: c.RsiSlope3Scaled,
 
-				solAboveEma50: c.SolAboveEma50,
-				solEma50vs200: c.SolEma50vs200,
-				btcEma50vs200: c.BtcEma50vs200);
+                gapBtcSol1: c.GapBtcSol1,
+                gapBtcSol3: c.GapBtcSol3,
 
-		private static LabeledCausalRow MakeRow (
-			DateTime dateUtc,
-			int idx,
-			int trueLabel,
-			bool isMicro,
-			bool microUp,
-			bool microDown,
-			bool mutated )
-			{
-			if (dateUtc.Kind != DateTimeKind.Utc)
-				throw new ArgumentException ("dateUtc must be UTC.", nameof (dateUtc));
-			if (microUp && microDown)
-				throw new InvalidOperationException ("microUp and microDown cannot be true одновременно.");
-			if (!isMicro && (microUp || microDown))
-				throw new InvalidOperationException ("Non-micro day cannot have microUp/microDown flags.");
+                atrPct: c.AtrPct,
+                dynVol: c.DynVol,
 
-			// Фича, которая явно кодирует направление микро-дня:
-			// для microUp -> +2, для microDown -> -2, для non-micro -> 0.
-			double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
+                solAboveEma50: c.SolAboveEma50,
+                solEma50vs200: c.SolEma50vs200,
+                btcEma50vs200: c.BtcEma50vs200);
 
-			// Для mutated-ветки делаем значения сильно отличающимися, но конечными.
-			double m = mutated ? 9999.0 : 1.0;
+        private static LabeledCausalRow MakeRow(
+            NyTradingEntryUtc entryUtc,
+            int idx,
+            int trueLabel,
+            bool isMicro,
+            bool microUp,
+            bool microDown,
+            bool mutated)
+        {
+            if (entryUtc.IsDefault)
+                throw new ArgumentException("entryUtc must be initialized.", nameof(entryUtc));
+            if (microUp && microDown)
+                throw new InvalidOperationException("microUp and microDown cannot be true одновременно.");
+            if (!isMicro && (microUp || microDown))
+                throw new InvalidOperationException("Non-micro day cannot have microUp/microDown flags.");
 
-			var causal = new CausalDataRow (
-				dateUtc: dateUtc,
-				regimeDown: false,
-				isMorning: true,
-				hardRegime: 0,
-				minMove: 0.03,
+            double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
+            double m = mutated ? 9999.0 : 1.0;
 
-				solRet30: dir * m,
-				btcRet30: 0.01 * (idx + 1) * m,
-				solBtcRet30: 0.001 * (idx + 1) * m,
+            var causal = new CausalDataRow(
+                entryUtc: entryUtc,
+                regimeDown: false,
+                isMorning: true,
+                hardRegime: 0,
+                minMove: 0.03,
 
-				solRet1: 0.002 * (idx + 1) * m,
-				solRet3: 0.003 * (idx + 1) * m,
-				btcRet1: 0.004 * (idx + 1) * m,
-				btcRet3: 0.005 * (idx + 1) * m,
+                solRet30: dir * m,
+                btcRet30: 0.01 * (idx + 1) * m,
+                solBtcRet30: 0.001 * (idx + 1) * m,
 
-				fngNorm: 0.10 * m,
-				dxyChg30: -0.02 * m,
-				goldChg30: 0.01 * m,
+                solRet1: 0.002 * (idx + 1) * m,
+                solRet3: 0.003 * (idx + 1) * m,
+                btcRet1: 0.004 * (idx + 1) * m,
+                btcRet3: 0.005 * (idx + 1) * m,
 
-				btcVs200: 0.2 * m,
+                fngNorm: 0.10 * m,
+                dxyChg30: -0.02 * m,
+                goldChg30: 0.01 * m,
 
-				solRsiCenteredScaled: 0.3 * m,
-				rsiSlope3Scaled: 0.4 * m,
+                btcVs200: 0.2 * m,
 
-				gapBtcSol1: 0.01 * m,
-				gapBtcSol3: 0.02 * m,
+                solRsiCenteredScaled: 0.3 * m,
+                rsiSlope3Scaled: 0.4 * m,
 
-				atrPct: 0.05 * m,
-				dynVol: 0.06 * m,
+                gapBtcSol1: 0.01 * m,
+                gapBtcSol3: 0.02 * m,
 
-				solAboveEma50: 1.0 * m,
-				solEma50vs200: 0.1 * m,
-				btcEma50vs200: 0.2 * m);
+                atrPct: 0.05 * m,
+                dynVol: 0.06 * m,
 
-			return new LabeledCausalRow (
-				causal: causal,
-				trueLabel: trueLabel,
-				factMicroUp: microUp,
-				factMicroDown: microDown);
-			}
-		}
-	}
+                solAboveEma50: 1.0 * m,
+                solEma50vs200: 0.1 * m,
+                btcEma50vs200: 0.2 * m);
+
+            return new LabeledCausalRow(
+                causal: causal,
+                trueLabel: trueLabel,
+                factMicroUp: microUp,
+                factMicroDown: microDown);
+        }
+    }
+}

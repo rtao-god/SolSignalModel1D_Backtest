@@ -29,11 +29,11 @@ namespace SolSignalModel1D_Backtest
 			SeriesGuards.EnsureStrictlyAscendingUtc (solAll1h, c => c.OpenTimeUtc, "bootstrap.solAll1h");
 			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "bootstrap.sol1m");
 
-			// Для дневных строк ключ — их каузальная дата/время.
-			SeriesGuards.EnsureStrictlyAscendingUtc (allRows, r => r.Causal.DateUtc, "bootstrap.allRows");
-			SeriesGuards.EnsureStrictlyAscendingUtc (mornings, r => r.Causal.DateUtc, "bootstrap.mornings");
+            // Для дневных строк ключ — их каузальная дата/время.
+            SeriesGuards.EnsureStrictlyAscendingUtc(allRows, r => r.Causal.EntryUtc.Value, "bootstrap.allRows");
+            SeriesGuards.EnsureStrictlyAscendingUtc(mornings, r => r.Causal.EntryUtc.Value, "bootstrap.mornings");
 
-			Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
+            Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
 			if (mornings.Count == 0)
 				throw new InvalidOperationException ("[rows] После фильтров нет утренних точек.");
 

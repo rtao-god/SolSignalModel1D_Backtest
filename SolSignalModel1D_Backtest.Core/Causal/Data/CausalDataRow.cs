@@ -120,7 +120,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
                 throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
 
             EntryUtc = entryUtc;
-            DayKeyUtc = DayKeyUtc.NormalizeUtc(entryUtc.Value);
+            DayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(entryUtc.Value);
 
             RegimeDown = regimeDown;
             IsMorning = isMorning;

@@ -7,538 +7,537 @@ using System.Globalization;
 using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction
-	{
-	/// <summary>
-	/// Единственная точка, где считается "текущий прогноз":
-	/// - выбор последней записи;
-	/// - forward 24h (если присутствует в записи);
-	/// - торговые планы по всем политикам и веткам BASE/ANTI-D.
-	///
-	/// Важный инвариант:
-	/// политики плеча здесь строго каузальные (ICausalLeveragePolicy → CausalPredictionRecord),
-	/// чтобы исключить утечки через доступ к forward-фактам.
-	/// </summary>
-	public static class CurrentPredictionSnapshotBuilder
-		{
-		/// <summary>
-		/// Размер окна истории (в днях) для бэкфилла "текущего прогноза".
-		/// </summary>
-		public const int DefaultHistoryWindowDays = 60;
-
-		/// <summary>
-		/// "Текущий" прогноз: берётся последняя запись по времени.
-		/// </summary>
-		public static CurrentPredictionSnapshot Build (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ICausalLeveragePolicy> policies,
-			double walletBalanceUsd )
-			{
-			if (records == null)
-				throw new ArgumentNullException (
-					nameof (records),
-					"[current] records == null при построении CurrentPredictionSnapshot — нарушен инвариант пайплайна");
-
-			if (records.Count == 0)
-				throw new InvalidOperationException (
-					"[current] records пустой при построении CurrentPredictionSnapshot — нет ни одной записи");
-
-			var last = records
-				.OrderBy (r => r.DateUtc)
-				.Last ();
-
-			return BuildFromRecord (last, policies, walletBalanceUsd);
-			}
-
-		/// <summary>
-		/// Строит снапшот "текущего прогноза" по конкретной записи.
-		/// </summary>
-		public static CurrentPredictionSnapshot BuildFromRecord (
-			BacktestRecord rec,
-			IReadOnlyList<ICausalLeveragePolicy> policies,
-			double walletBalanceUsd )
-			{
-			if (rec == null)
-				throw new ArgumentNullException (
-					nameof (rec),
-					"[current] rec == null при построении CurrentPredictionSnapshot — нарушен инвариант пайплайна");
-
-			if (policies == null)
-				throw new ArgumentNullException (
-					nameof (policies),
-					"[current] policies == null при построении CurrentPredictionSnapshot");
-
-			if (policies.Count == 0)
-				throw new InvalidOperationException (
-					"[current] список политик пуст при построении CurrentPredictionSnapshot");
-
-			if (rec.Entry <= 0.0)
-				throw new InvalidOperationException ("[current] Entry <= 0 — нельзя построить CurrentPredictionSnapshot.");
-
-			// Каузальная часть должна существовать всегда; отсутствие — поломка сборки BacktestRecord.
-			_ = rec.Causal ?? throw new InvalidOperationException ("[current] rec.Causal is null — causal layer missing.");
-
-			var snapshot = new CurrentPredictionSnapshot
-				{
-				GeneratedAtUtc = DateTime.UtcNow,
-				PredictionDateUtc = rec.DateUtc,
-				PredLabel = rec.PredLabel,
-				PredLabelDisplay = FormatLabel (rec),
-				MicroDisplay = FormatMicro (rec),
-				RegimeDown = rec.RegimeDown,
-
-				// SL-слой обязателен для текущего снапшота: отсутствие — ошибка пайплайна.
-				SlProb = rec.SlProb ?? throw new InvalidOperationException ("[current] SlProb is null — SL layer missing."),
-				SlHighDecision = rec.SlHighDecision ?? throw new InvalidOperationException ("[current] SlHighDecision is null — SL layer missing."),
-
-				Entry = rec.Entry,
-				MinMove = rec.MinMove,
-				Reason = rec.Reason,
-
-				WalletBalanceUsd = walletBalanceUsd
-				};
-
-			// Forward 24h опционален: либо есть весь набор (>0), либо отсутствует целиком (все 0).
-			bool hasAnyForward =
-				rec.MaxHigh24 != 0.0 ||
-				rec.MinLow24 != 0.0 ||
-				rec.Close24 != 0.0;
-
-			bool hasAllForward =
-				rec.MaxHigh24 > 0.0 &&
-				rec.MinLow24 > 0.0 &&
-				rec.Close24 > 0.0;
-
-			if (hasAnyForward && !hasAllForward)
-				{
-				throw new InvalidOperationException (
-					"[current] Forward24h данные заполнены частично: " +
-					$"MaxHigh24={rec.MaxHigh24:0.####}, MinLow24={rec.MinLow24:0.####}, Close24={rec.Close24:0.####}. " +
-					"Ожидается либо полный набор, либо полное отсутствие.");
-				}
-
-			if (hasAllForward)
-				{
-				snapshot.Forward24h = new Forward24hSnapshot
-					{
-					MaxHigh = rec.MaxHigh24,
-					MinLow = rec.MinLow24,
-					Close = rec.Close24
-					};
-				}
-
-			foreach (var policy in policies)
-				{
-				AppendRowsForPolicy (snapshot, rec, policy, walletBalanceUsd);
-				}
-
-			BuildExplanationItems (snapshot, rec);
-
-			return snapshot;
-			}
-
-		/// <summary>
-		/// История снапшотов за окно historyWindowDays назад от текущего UTC-дня.
-		/// </summary>
-		public static IReadOnlyList<CurrentPredictionSnapshot> BuildHistory (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ICausalLeveragePolicy> policies,
-			double walletBalanceUsd,
-			int historyWindowDays )
-			{
-			if (records == null)
-				throw new ArgumentNullException (
-					nameof (records),
-					"[current] records == null при построении истории CurrentPredictionSnapshot");
-
-			if (records.Count == 0)
-				throw new InvalidOperationException (
-					"[current] records пустой при построении истории CurrentPredictionSnapshot");
-
-			if (historyWindowDays <= 0)
-				throw new ArgumentOutOfRangeException (
-					nameof (historyWindowDays),
-					"[current] historyWindowDays должен быть > 0 при построении истории CurrentPredictionSnapshot");
-
-			var cutoffUtc = DateTime.UtcNow.ToCausalDateUtc ().AddDays (-historyWindowDays);
-
-			var ordered = records
-				.Where (r => r.DateUtc >= cutoffUtc)
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
-
-			var result = new List<CurrentPredictionSnapshot> (ordered.Count);
-
-			foreach (var rec in ordered)
-				{
-				result.Add (BuildFromRecord (rec, policies, walletBalanceUsd));
-				}
-
-			return result;
-			}
-
-		/// <summary>
-		/// Снапшот для конкретной календарной даты (UTC).
-		/// </summary>
-		public static CurrentPredictionSnapshot BuildForDate (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ICausalLeveragePolicy> policies,
-			double walletBalanceUsd,
-			DateTime predictionDateUtc )
-			{
-			if (records == null)
-				throw new ArgumentNullException (
-					nameof (records),
-					"[current] records == null при построении CurrentPredictionSnapshot по дате");
-
-			if (records.Count == 0)
-				throw new InvalidOperationException (
-					"[current] records пустой при построении CurrentPredictionSnapshot по дате");
-
-			var targetDateUtc = predictionDateUtc.ToCausalDateUtc ();
-
-			var recForDay = records
-				.OrderBy (r => r.DateUtc)
-				.LastOrDefault (r => r.DateUtc.ToCausalDateUtc () == targetDateUtc);
-
-			if (recForDay == null)
-				{
-				throw new InvalidOperationException (
-					$"[current] Не найдена запись для даты {targetDateUtc:yyyy-MM-dd} (UTC) при построении CurrentPredictionSnapshot.");
-				}
-
-			return BuildFromRecord (recForDay, policies, walletBalanceUsd);
-			}
-
-		private static void BuildExplanationItems (
-			CurrentPredictionSnapshot snapshot,
-			BacktestRecord rec )
-			{
-			if (snapshot == null)
-				throw new ArgumentNullException (nameof (snapshot));
-
-			var items = snapshot.ExplanationItems;
-			items.Clear ();
-
-			int rank = 1;
-
-			items.Add (new CurrentPredictionExplanationItem
-				{
-				Kind = "model",
-				Name = "daily",
-				Description = $"Дневная модель (Daily): класс {snapshot.PredLabelDisplay}",
-				Rank = rank++
-				});
-
-			if (snapshot.PredLabel == 1 && !string.IsNullOrWhiteSpace (snapshot.MicroDisplay))
-				{
-				items.Add (new CurrentPredictionExplanationItem
-					{
-					Kind = "model",
-					Name = "micro_1m",
-					Description = $"Микро-модель (1m): {snapshot.MicroDisplay}",
-					Rank = rank++
-					});
-				}
-
-			double slProb = snapshot.SlProb
-				?? throw new InvalidOperationException ("[current] SlProb is null in snapshot — SL layer missing.");
-
-			bool isRiskDay = snapshot.SlHighDecision
-				?? throw new InvalidOperationException ("[current] SlHighDecision is null in snapshot — SL layer missing.");
-
-			items.Add (new CurrentPredictionExplanationItem
-				{
-				Kind = "model",
-				Name = "sl",
-				Description =
-					$"SL-модель: вероятность стопа {slProb:0.0} %, " +
-					$"решение = {(isRiskDay ? "HIGH (рискованный день)" : "OK (обычный день)")}",
-				Value = slProb,
-				Rank = rank++
-				});
-
-			items.Add (new CurrentPredictionExplanationItem
-				{
-				Kind = "model",
-				Name = "regime",
-				Description = snapshot.RegimeDown
-					? "Режим рынка: DOWN (фаза снижения, защитный режим)"
-					: "Режим рынка: NORMAL (обычный режим)",
-				Rank = rank++
-				});
-
-			items.Add (new CurrentPredictionExplanationItem
-				{
-				Kind = "metric",
-				Name = "min_move",
-				Description = $"MinMove: {snapshot.MinMove:0.0000} ({snapshot.MinMove * 100.0:0.0} %)",
-				Value = snapshot.MinMove,
-				Rank = rank++
-				});
-
-			if (snapshot.Forward24h != null)
-				{
-				items.Add (new CurrentPredictionExplanationItem
-					{
-					Kind = "metric",
-					Name = "forward_24h_max_high",
-					Description = $"Baseline 24h MaxHigh: {snapshot.Forward24h.MaxHigh:0.0000}",
-					Value = snapshot.Forward24h.MaxHigh,
-					Rank = rank++
-					});
-
-				items.Add (new CurrentPredictionExplanationItem
-					{
-					Kind = "metric",
-					Name = "forward_24h_min_low",
-					Description = $"Baseline 24h MinLow: {snapshot.Forward24h.MinLow:0.0000}",
-					Value = snapshot.Forward24h.MinLow,
-					Rank = rank++
-					});
-
-				items.Add (new CurrentPredictionExplanationItem
-					{
-					Kind = "metric",
-					Name = "forward_24h_close",
-					Description = $"Baseline 24h Close: {snapshot.Forward24h.Close:0.0000}",
-					Value = snapshot.Forward24h.Close,
-					Rank = rank++
-					});
-				}
-
-			bool hasDirection = TryGetDirection (rec, out var goLongModel, out _);
-
-			if (hasDirection && isRiskDay)
-				{
-				string baseDir = goLongModel ? "LONG" : "SHORT";
-				string antiDir = goLongModel ? "SHORT" : "LONG";
-
-				items.Add (new CurrentPredictionExplanationItem
-					{
-					Kind = "policy",
-					Name = "anti_d_override",
-					Description =
-						"Ветка ANTI-D активна: базовая дневная модель даёт " + baseDir +
-						", SL-модель пометила день как рискованный → ветка ANTI-D торгует в обратную сторону (" + antiDir + ").",
-					Rank = rank++
-					});
-				}
-			}
-
-		private static void AppendRowsForPolicy (
-			CurrentPredictionSnapshot snapshot,
-			BacktestRecord rec,
-			ICausalLeveragePolicy policy,
-			double walletBalanceUsd )
-			{
-			if (policy == null)
-				throw new ArgumentNullException (nameof (policy));
-
-			var causal = rec.Causal ?? throw new InvalidOperationException ("[current] rec.Causal is null — causal layer missing.");
-
-			bool hasDir = TryGetDirection (rec, out var goLongModel, out _);
-			bool isRiskDay = rec.SlHighDecision ?? throw new InvalidOperationException ("[current] SlHighDecision is null — SL layer missing.");
-
-			double leverage = policy.ResolveLeverage (causal);
-
-			if (double.IsNaN (leverage) || double.IsInfinity (leverage) || leverage <= 0.0)
-				throw new InvalidOperationException ($"[current] policy '{policy.Name}' returned invalid leverage={leverage} for {rec.DateUtc:yyyy-MM-dd}.");
-
-			string policyName = string.IsNullOrWhiteSpace (policy.Name) ? policy.GetType ().Name : policy.Name;
-
-				{
-				bool skipped = !hasDir || isRiskDay;
-				bool goLongBase = goLongModel;
-
-				var row = BuildRow (
-					policyName,
-					branch: "BASE",
-					rec: rec,
-					isRiskDay: isRiskDay,
-					hasDirection: hasDir,
-					skipped: skipped,
-					goLong: goLongBase,
-					leverage: leverage,
-					walletBalanceUsd: walletBalanceUsd);
-
-				snapshot.PolicyRows.Add (row);
-				}
-
-				{
-				bool skipped = !hasDir || !isRiskDay;
-				bool goLongAntiD = goLongModel;
-
-				if (!skipped && hasDir)
-					goLongAntiD = !goLongModel;
-
-				var row = BuildRow (
-					policyName,
-					branch: "ANTI-D",
-					rec: rec,
-					isRiskDay: isRiskDay,
-					hasDirection: hasDir,
-					skipped: skipped,
-					goLong: goLongAntiD,
-					leverage: leverage,
-					walletBalanceUsd: walletBalanceUsd);
-
-				snapshot.PolicyRows.Add (row);
-				}
-			}
-
-		private static CurrentPredictionPolicyRow BuildRow (
-			string policyName,
-			string branch,
-			BacktestRecord rec,
-			bool isRiskDay,
-			bool hasDirection,
-			bool skipped,
-			bool goLong,
-			double leverage,
-			double walletBalanceUsd )
-			{
-			var row = new CurrentPredictionPolicyRow
-				{
-				PolicyName = policyName,
-				Branch = branch,
-				IsRiskDay = isRiskDay,
-				HasDirection = hasDirection,
-				Skipped = skipped,
-				Direction = (!hasDirection || skipped) ? "-" : (goLong ? "LONG" : "SHORT"),
-				Leverage = leverage,
-				Entry = rec.Entry
-				};
-
-			if (!skipped)
-				{
-				var plan = BuildTradePlan (rec, goLong, leverage, walletBalanceUsd);
-
-				row.SlPct = plan.SlPct;
-				row.TpPct = plan.TpPct;
-				row.SlPrice = plan.SlPrice;
-				row.TpPrice = plan.TpPrice;
-				row.PositionUsd = plan.PositionUsd;
-				row.PositionQty = plan.PositionQty;
-				row.LiqPrice = plan.LiqPrice;
-				row.LiqDistPct = plan.LiqDistPct;
-				}
-
-			return row;
-			}
-
-		private sealed class TradePlan
-			{
-			public double SlPct { get; init; }
-			public double TpPct { get; init; }
-			public double SlPrice { get; init; }
-			public double TpPrice { get; init; }
-			public double? PositionUsd { get; init; }
-			public double? PositionQty { get; init; }
-			public double? LiqPrice { get; init; }
-			public double? LiqDistPct { get; init; }
-			}
-
-		private static TradePlan BuildTradePlan (
-			BacktestRecord rec,
-			bool goLong,
-			double leverage,
-			double walletBalanceUsd )
-			{
-			double entry = rec.Entry;
-			if (entry <= 0.0)
-				throw new InvalidOperationException ("[current] Entry <= 0 — нельзя построить торговый план.");
-
-			if (rec.MinMove <= 0.0)
-				{
-				throw new InvalidOperationException (
-					$"[current] MinMove <= 0 ({rec.MinMove:0.########}) — нельзя построить торговый план без валидной оценки волатильности.");
-				}
-
-			double baseMinMove = rec.MinMove;
-
-			// Risk-контур плана: это не “заглушка”, а явная политика ограничений.
-			double slPct = baseMinMove;
-			if (slPct < 0.01) slPct = 0.01;
-			else if (slPct > 0.04) slPct = 0.04;
-
-			double tpPct = slPct * 1.5;
-			if (tpPct < 0.015) tpPct = 0.015;
-
-			double slPrice = goLong
-				? entry * (1.0 - slPct)
-				: entry * (1.0 + slPct);
-
-			double tpPrice = goLong
-				? entry * (1.0 + tpPct)
-				: entry * (1.0 - tpPct);
-
-			double? posUsd = null;
-			double? posQty = null;
-			double? liqPrice = null;
-			double? liqDistPct = null;
-
-			if (walletBalanceUsd > 0.0)
-				{
-				posUsd = walletBalanceUsd * leverage;
-				posQty = posUsd / entry;
-
-				if (leverage > 1.0)
-					{
-					const double mmr = 0.004;
-
-					liqPrice = goLong
-						? entry * (leverage - 1.0) / (leverage * (1.0 - mmr))
-						: entry * (1.0 + leverage) / (leverage * (1.0 + mmr));
-
-					if (liqPrice.HasValue)
-						{
-						liqDistPct = goLong
-							? (entry - liqPrice.Value) / entry * 100.0
-							: (liqPrice.Value - entry) / entry * 100.0;
-						}
-					}
-				}
-
-			return new TradePlan
-				{
-				SlPct = slPct * 100.0,
-				TpPct = tpPct * 100.0,
-				SlPrice = slPrice,
-				TpPrice = tpPrice,
-				PositionUsd = posUsd,
-				PositionQty = posQty,
-				LiqPrice = liqPrice,
-				LiqDistPct = liqDistPct
-				};
-			}
-
-		private static bool TryGetDirection (
-			BacktestRecord rec,
-			out bool goLong,
-			out bool goShort )
-			{
-			goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
-			goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
-			return goLong || goShort;
-			}
-
-		private static string FormatLabel ( BacktestRecord r )
-			{
-			return r.PredLabel switch
-				{
-					0 => "0 (down)",
-					1 => "1 (flat)",
-					2 => "2 (up)",
-					_ => r.PredLabel.ToString (CultureInfo.InvariantCulture)
-					};
-			}
-
-		private static string FormatMicro ( BacktestRecord r )
-			{
-			if (r.PredLabel != 1) return "не используется (не flat)";
-			if (r.PredMicroUp) return "micro UP";
-			if (r.PredMicroDown) return "micro DOWN";
-			return "—";
-			}
-		}
-	}
+{
+    /// <summary>
+    /// Единственная точка, где считается "текущий прогноз":
+    /// - выбор последней записи;
+    /// - forward 24h (если присутствует в записи);
+    /// - торговые планы по всем политикам и веткам BASE/ANTI-D.
+    ///
+    /// Важный инвариант:
+    /// политики плеча здесь строго каузальные (ICausalLeveragePolicy → CausalPredictionRecord),
+    /// чтобы исключить утечки через доступ к forward-фактам.
+    /// </summary>
+    public static class CurrentPredictionSnapshotBuilder
+    {
+        /// <summary>
+        /// Размер окна истории (в днях) для бэкфилла "текущего прогноза".
+        /// </summary>
+        public const int DefaultHistoryWindowDays = 60;
+
+        /// <summary>
+        /// "Текущий" прогноз: берётся последняя запись по времени.
+        /// </summary>
+        public static CurrentPredictionSnapshot Build(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd)
+        {
+            if (records == null)
+                throw new ArgumentNullException(
+                    nameof(records),
+                    "[current] records == null при построении CurrentPredictionSnapshot — нарушен инвариант пайплайна");
+
+            if (records.Count == 0)
+                throw new InvalidOperationException(
+                    "[current] records пустой при построении CurrentPredictionSnapshot — нет ни одной записи");
+
+            var last = records
+                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value)
+                .Last();
+
+            return BuildFromRecord(last, policies, walletBalanceUsd);
+        }
+
+        /// <summary>
+        /// Строит снапшот "текущего прогноза" по конкретной записи.
+        /// </summary>
+        public static CurrentPredictionSnapshot BuildFromRecord(
+            BacktestRecord rec,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd)
+        {
+            if (rec == null)
+                throw new ArgumentNullException(
+                    nameof(rec),
+                    "[current] rec == null при построении CurrentPredictionSnapshot — нарушен инвариант пайплайна");
+
+            if (policies == null)
+                throw new ArgumentNullException(
+                    nameof(policies),
+                    "[current] policies == null при построении CurrentPredictionSnapshot");
+
+            if (policies.Count == 0)
+                throw new InvalidOperationException(
+                    "[current] список политик пуст при построении CurrentPredictionSnapshot");
+
+            if (rec.Entry <= 0.0)
+                throw new InvalidOperationException("[current] Entry <= 0 — нельзя построить CurrentPredictionSnapshot.");
+
+            var causal = rec.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.");
+            var predictionDayUtc = causal.DayKeyUtc.Value;
+
+            var snapshot = new CurrentPredictionSnapshot
+            {
+                GeneratedAtUtc = DateTime.UtcNow,
+                PredictionDateUtc = predictionDayUtc,
+                PredLabel = rec.PredLabel,
+                PredLabelDisplay = FormatLabel(rec),
+                MicroDisplay = FormatMicro(rec),
+                RegimeDown = rec.RegimeDown,
+
+                SlProb = rec.SlProb ?? throw new InvalidOperationException("[current] SlProb is null — SL layer missing."),
+                SlHighDecision = rec.SlHighDecision ?? throw new InvalidOperationException("[current] SlHighDecision is null — SL layer missing."),
+
+                Entry = rec.Entry,
+                MinMove = rec.MinMove,
+                Reason = rec.Reason,
+
+                WalletBalanceUsd = walletBalanceUsd
+            };
+
+            bool hasAnyForward =
+                rec.MaxHigh24 != 0.0 ||
+                rec.MinLow24 != 0.0 ||
+                rec.Close24 != 0.0;
+
+            bool hasAllForward =
+                rec.MaxHigh24 > 0.0 &&
+                rec.MinLow24 > 0.0 &&
+                rec.Close24 > 0.0;
+
+            if (hasAnyForward && !hasAllForward)
+            {
+                throw new InvalidOperationException(
+                    "[current] Forward24h данные заполнены частично: " +
+                    $"MaxHigh24={rec.MaxHigh24:0.####}, MinLow24={rec.MinLow24:0.####}, Close24={rec.Close24:0.####}. " +
+                    "Ожидается либо полный набор, либо полное отсутствие.");
+            }
+
+            if (hasAllForward)
+            {
+                snapshot.Forward24h = new Forward24hSnapshot
+                {
+                    MaxHigh = rec.MaxHigh24,
+                    MinLow = rec.MinLow24,
+                    Close = rec.Close24
+                };
+            }
+
+            foreach (var policy in policies)
+            {
+                AppendRowsForPolicy(snapshot, rec, policy, walletBalanceUsd);
+            }
+
+            BuildExplanationItems(snapshot, rec);
+
+            return snapshot;
+        }
+
+        /// <summary>
+        /// История снапшотов за окно historyWindowDays назад от текущего UTC-дня.
+        /// </summary>
+        public static IReadOnlyList<CurrentPredictionSnapshot> BuildHistory(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd,
+            int historyWindowDays)
+        {
+            if (records == null)
+                throw new ArgumentNullException(
+                    nameof(records),
+                    "[current] records == null при построении истории CurrentPredictionSnapshot");
+
+            if (records.Count == 0)
+                throw new InvalidOperationException(
+                    "[current] records пустой при построении истории CurrentPredictionSnapshot");
+
+            if (historyWindowDays <= 0)
+                throw new ArgumentOutOfRangeException(
+                    nameof(historyWindowDays),
+                    "[current] historyWindowDays должен быть > 0 при построении истории CurrentPredictionSnapshot");
+
+            var cutoffUtc = DateTime.UtcNow.ToCausalDateUtc().AddDays(-historyWindowDays);
+
+            var ordered = records
+                .Where(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value >= cutoffUtc)
+                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value)
+                .ToList();
+
+            var result = new List<CurrentPredictionSnapshot>(ordered.Count);
+
+            foreach (var rec in ordered)
+            {
+                result.Add(BuildFromRecord(rec, policies, walletBalanceUsd));
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Снапшот для конкретной календарной даты (UTC).
+        /// </summary>
+        public static CurrentPredictionSnapshot BuildForDate(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd,
+            DateTime predictionDateUtc)
+        {
+            if (records == null)
+                throw new ArgumentNullException(
+                    nameof(records),
+                    "[current] records == null при построении CurrentPredictionSnapshot по дате");
+
+            if (records.Count == 0)
+                throw new InvalidOperationException(
+                    "[current] records пустой при построении CurrentPredictionSnapshot по дате");
+
+            var targetDateUtc = predictionDateUtc.ToCausalDateUtc();
+
+            var recForDay = records
+                .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value)
+                .LastOrDefault(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).DayKeyUtc.Value == targetDateUtc);
+
+            if (recForDay == null)
+            {
+                throw new InvalidOperationException(
+                    $"[current] Не найдена запись для даты {targetDateUtc:yyyy-MM-dd} (UTC) при построении CurrentPredictionSnapshot.");
+            }
+
+            return BuildFromRecord(recForDay, policies, walletBalanceUsd);
+        }
+
+        private static void BuildExplanationItems(
+            CurrentPredictionSnapshot snapshot,
+            BacktestRecord rec)
+        {
+            if (snapshot == null)
+                throw new ArgumentNullException(nameof(snapshot));
+
+            var items = snapshot.ExplanationItems;
+            items.Clear();
+
+            int rank = 1;
+
+            items.Add(new CurrentPredictionExplanationItem
+            {
+                Kind = "model",
+                Name = "daily",
+                Description = $"Дневная модель (Daily): класс {snapshot.PredLabelDisplay}",
+                Rank = rank++
+            });
+
+            if (snapshot.PredLabel == 1 && !string.IsNullOrWhiteSpace(snapshot.MicroDisplay))
+            {
+                items.Add(new CurrentPredictionExplanationItem
+                {
+                    Kind = "model",
+                    Name = "micro_1m",
+                    Description = $"Микро-модель (1m): {snapshot.MicroDisplay}",
+                    Rank = rank++
+                });
+            }
+
+            double slProb = snapshot.SlProb
+                ?? throw new InvalidOperationException("[current] SlProb is null in snapshot — SL layer missing.");
+
+            bool isRiskDay = snapshot.SlHighDecision
+                ?? throw new InvalidOperationException("[current] SlHighDecision is null in snapshot — SL layer missing.");
+
+            items.Add(new CurrentPredictionExplanationItem
+            {
+                Kind = "model",
+                Name = "sl",
+                Description =
+                    $"SL-модель: вероятность стопа {slProb:0.0} %, " +
+                    $"решение = {(isRiskDay ? "HIGH (рискованный день)" : "OK (обычный день)")}",
+                Value = slProb,
+                Rank = rank++
+            });
+
+            items.Add(new CurrentPredictionExplanationItem
+            {
+                Kind = "model",
+                Name = "regime",
+                Description = snapshot.RegimeDown
+                    ? "Режим рынка: DOWN (фаза снижения, защитный режим)"
+                    : "Режим рынка: NORMAL (обычный режим)",
+                Rank = rank++
+            });
+
+            items.Add(new CurrentPredictionExplanationItem
+            {
+                Kind = "metric",
+                Name = "min_move",
+                Description = $"MinMove: {snapshot.MinMove:0.0000} ({snapshot.MinMove * 100.0:0.0} %)",
+                Value = snapshot.MinMove,
+                Rank = rank++
+            });
+
+            if (snapshot.Forward24h != null)
+            {
+                items.Add(new CurrentPredictionExplanationItem
+                {
+                    Kind = "metric",
+                    Name = "forward_24h_max_high",
+                    Description = $"Baseline 24h MaxHigh: {snapshot.Forward24h.MaxHigh:0.0000}",
+                    Value = snapshot.Forward24h.MaxHigh,
+                    Rank = rank++
+                });
+
+                items.Add(new CurrentPredictionExplanationItem
+                {
+                    Kind = "metric",
+                    Name = "forward_24h_min_low",
+                    Description = $"Baseline 24h MinLow: {snapshot.Forward24h.MinLow:0.0000}",
+                    Value = snapshot.Forward24h.MinLow,
+                    Rank = rank++
+                });
+
+                items.Add(new CurrentPredictionExplanationItem
+                {
+                    Kind = "metric",
+                    Name = "forward_24h_close",
+                    Description = $"Baseline 24h Close: {snapshot.Forward24h.Close:0.0000}",
+                    Value = snapshot.Forward24h.Close,
+                    Rank = rank++
+                });
+            }
+
+            bool hasDirection = TryGetDirection(rec, out var goLongModel, out _);
+
+            if (hasDirection && isRiskDay)
+            {
+                string baseDir = goLongModel ? "LONG" : "SHORT";
+                string antiDir = goLongModel ? "SHORT" : "LONG";
+
+                items.Add(new CurrentPredictionExplanationItem
+                {
+                    Kind = "policy",
+                    Name = "anti_d_override",
+                    Description =
+                        "Ветка ANTI-D активна: базовая дневная модель даёт " + baseDir +
+                        ", SL-модель пометила день как рискованный → ветка ANTI-D торгует в обратную сторону (" + antiDir + ").",
+                    Rank = rank++
+                });
+            }
+        }
+
+        private static void AppendRowsForPolicy(
+            CurrentPredictionSnapshot snapshot,
+            BacktestRecord rec,
+            ICausalLeveragePolicy policy,
+            double walletBalanceUsd)
+        {
+            if (policy == null)
+                throw new ArgumentNullException(nameof(policy));
+
+            var causal = rec.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.");
+
+            bool hasDir = TryGetDirection(rec, out var goLongModel, out _);
+            bool isRiskDay = rec.SlHighDecision ?? throw new InvalidOperationException("[current] SlHighDecision is null — SL layer missing.");
+
+            double leverage = policy.ResolveLeverage(causal);
+
+            var day = causal.DayKeyUtc.Value;
+
+            if (double.IsNaN(leverage) || double.IsInfinity(leverage) || leverage <= 0.0)
+                throw new InvalidOperationException($"[current] policy '{policy.Name}' returned invalid leverage={leverage} for {day:yyyy-MM-dd}.");
+
+            string policyName = string.IsNullOrWhiteSpace(policy.Name) ? policy.GetType().Name : policy.Name;
+
+            {
+                bool skipped = !hasDir || isRiskDay;
+                bool goLongBase = goLongModel;
+
+                var row = BuildRow(
+                    policyName,
+                    branch: "BASE",
+                    rec: rec,
+                    isRiskDay: isRiskDay,
+                    hasDirection: hasDir,
+                    skipped: skipped,
+                    goLong: goLongBase,
+                    leverage: leverage,
+                    walletBalanceUsd: walletBalanceUsd);
+
+                snapshot.PolicyRows.Add(row);
+            }
+
+            {
+                bool skipped = !hasDir || !isRiskDay;
+                bool goLongAntiD = goLongModel;
+
+                if (!skipped && hasDir)
+                    goLongAntiD = !goLongModel;
+
+                var row = BuildRow(
+                    policyName,
+                    branch: "ANTI-D",
+                    rec: rec,
+                    isRiskDay: isRiskDay,
+                    hasDirection: hasDir,
+                    skipped: skipped,
+                    goLong: goLongAntiD,
+                    leverage: leverage,
+                    walletBalanceUsd: walletBalanceUsd);
+
+                snapshot.PolicyRows.Add(row);
+            }
+        }
+
+        private static CurrentPredictionPolicyRow BuildRow(
+            string policyName,
+            string branch,
+            BacktestRecord rec,
+            bool isRiskDay,
+            bool hasDirection,
+            bool skipped,
+            bool goLong,
+            double leverage,
+            double walletBalanceUsd)
+        {
+            var row = new CurrentPredictionPolicyRow
+            {
+                PolicyName = policyName,
+                Branch = branch,
+                IsRiskDay = isRiskDay,
+                HasDirection = hasDirection,
+                Skipped = skipped,
+                Direction = (!hasDirection || skipped) ? "-" : (goLong ? "LONG" : "SHORT"),
+                Leverage = leverage,
+                Entry = rec.Entry
+            };
+
+            if (!skipped)
+            {
+                var plan = BuildTradePlan(rec, goLong, leverage, walletBalanceUsd);
+
+                row.SlPct = plan.SlPct;
+                row.TpPct = plan.TpPct;
+                row.SlPrice = plan.SlPrice;
+                row.TpPrice = plan.TpPrice;
+                row.PositionUsd = plan.PositionUsd;
+                row.PositionQty = plan.PositionQty;
+                row.LiqPrice = plan.LiqPrice;
+                row.LiqDistPct = plan.LiqDistPct;
+            }
+
+            return row;
+        }
+
+        private sealed class TradePlan
+        {
+            public double SlPct { get; init; }
+            public double TpPct { get; init; }
+            public double SlPrice { get; init; }
+            public double TpPrice { get; init; }
+            public double? PositionUsd { get; init; }
+            public double? PositionQty { get; init; }
+            public double? LiqPrice { get; init; }
+            public double? LiqDistPct { get; init; }
+        }
+
+        private static TradePlan BuildTradePlan(
+            BacktestRecord rec,
+            bool goLong,
+            double leverage,
+            double walletBalanceUsd)
+        {
+            double entry = rec.Entry;
+            if (entry <= 0.0)
+                throw new InvalidOperationException("[current] Entry <= 0 — нельзя построить торговый план.");
+
+            if (rec.MinMove <= 0.0)
+            {
+                throw new InvalidOperationException(
+                    $"[current] MinMove <= 0 ({rec.MinMove:0.########}) — нельзя построить торговый план без валидной оценки волатильности.");
+            }
+
+            double baseMinMove = rec.MinMove;
+
+            double slPct = baseMinMove;
+            if (slPct < 0.01) slPct = 0.01;
+            else if (slPct > 0.04) slPct = 0.04;
+
+            double tpPct = slPct * 1.5;
+            if (tpPct < 0.015) tpPct = 0.015;
+
+            double slPrice = goLong
+                ? entry * (1.0 - slPct)
+                : entry * (1.0 + slPct);
+
+            double tpPrice = goLong
+                ? entry * (1.0 + tpPct)
+                : entry * (1.0 - tpPct);
+
+            double? posUsd = null;
+            double? posQty = null;
+            double? liqPrice = null;
+            double? liqDistPct = null;
+
+            if (walletBalanceUsd > 0.0)
+            {
+                posUsd = walletBalanceUsd * leverage;
+                posQty = posUsd / entry;
+
+                if (leverage > 1.0)
+                {
+                    const double mmr = 0.004;
+
+                    liqPrice = goLong
+                        ? entry * (leverage - 1.0) / (leverage * (1.0 - mmr))
+                        : entry * (1.0 + leverage) / (leverage * (1.0 + mmr));
+
+                    if (liqPrice.HasValue)
+                    {
+                        liqDistPct = goLong
+                            ? (entry - liqPrice.Value) / entry * 100.0
+                            : (liqPrice.Value - entry) / entry * 100.0;
+                    }
+                }
+            }
+
+            return new TradePlan
+            {
+                SlPct = slPct * 100.0,
+                TpPct = tpPct * 100.0,
+                SlPrice = slPrice,
+                TpPrice = tpPrice,
+                PositionUsd = posUsd,
+                PositionQty = posQty,
+                LiqPrice = liqPrice,
+                LiqDistPct = liqDistPct
+            };
+        }
+
+        private static bool TryGetDirection(
+            BacktestRecord rec,
+            out bool goLong,
+            out bool goShort)
+        {
+            goLong = rec.PredLabel == 2 || (rec.PredLabel == 1 && rec.PredMicroUp);
+            goShort = rec.PredLabel == 0 || (rec.PredLabel == 1 && rec.PredMicroDown);
+            return goLong || goShort;
+        }
+
+        private static string FormatLabel(BacktestRecord r)
+        {
+            return r.PredLabel switch
+            {
+                0 => "0 (down)",
+                1 => "1 (flat)",
+                2 => "2 (up)",
+                _ => r.PredLabel.ToString(CultureInfo.InvariantCulture)
+            };
+        }
+
+        private static string FormatMicro(BacktestRecord r)
+        {
+            if (r.PredLabel != 1) return "не используется (не flat)";
+            if (r.PredMicroUp) return "micro UP";
+            if (r.PredMicroDown) return "micro DOWN";
+            return "—";
+        }
+    }
+}

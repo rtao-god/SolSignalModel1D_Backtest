@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 
 namespace SolSignalModel1D_Backtest.Core.Data.Time
@@ -24,12 +23,10 @@ namespace SolSignalModel1D_Backtest.Core.Data.Time
 
             foreach (var c in all)
             {
-                if (NyWindowing.IsWeekendInNy(c.OpenTimeUtc, nyTz))
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(c.OpenTimeUtc, nyTz);
+                if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
                     continue;
 
-                var ny = TimeZoneInfo.ConvertTimeFromUtc(c.OpenTimeUtc, nyTz);
-
-                // Логика прежняя, но без ручного DST:
                 // - "утро": 07 или 08 local (зима/лето),
                 // - "день": 13 или 14 local (зима/лето).
                 if (ny.Hour is 7 or 8 or 13 or 14)

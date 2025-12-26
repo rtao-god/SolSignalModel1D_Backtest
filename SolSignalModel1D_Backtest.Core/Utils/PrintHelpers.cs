@@ -7,9 +7,9 @@ namespace SolSignalModel1D_Backtest.Core.Utils
 	{
 	public static class PrintHelpers
 		{
-		private static DateTime EntryUtc ( BacktestRecord r ) => CausalTimeKey.EntryUtc (r);
+        private static DateTime EntryUtc(BacktestRecord r) => CausalTimeKey.EntryUtc(r).Value;
 
-		public static string ClassToRu ( int cls )
+        public static string ClassToRu ( int cls )
 			{
 			return cls switch
 				{

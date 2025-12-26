@@ -6,294 +6,299 @@ using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.ML.SL;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
-	{
-	public partial class Program
-		{
-		/// <summary>
-		/// Тренируем SL-модель на train-only наборе (TrainOnly&lt;BacktestRecord&gt;)
-		/// и применяем её ко всем records (runtime overlay).
-		/// Инвариант: TrainOnly создан через TrainBoundary.SplitStrict, значит:
-		/// - weekend/excluded невозможны;
-		/// - OOS физически не может попасть в обучение.
-		/// </summary>
-		private static void TrainAndApplySlModelOffline (
-			TrainOnly<BacktestRecord> trainRecords,
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<Candle1h> sol1h,
-			IReadOnlyList<Candle1m> sol1m,
-			IReadOnlyList<Candle6h> solAll6h )
-			{
-			if (trainRecords == null) throw new ArgumentNullException (nameof (trainRecords));
-			if (trainRecords.Count == 0)
-				throw new InvalidOperationException ("[sl-offline] trainRecords is empty – SL-model cannot be trained.");
+{
+    public partial class Program
+    {
+        private static void TrainAndApplySlModelOffline(
+            TrainOnly<BacktestRecord> trainRecords,
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<Candle1h> sol1h,
+            IReadOnlyList<Candle1m> sol1m,
+            IReadOnlyList<Candle6h> solAll6h)
+        {
+            if (trainRecords == null) throw new ArgumentNullException(nameof(trainRecords));
+            if (trainRecords.Count == 0)
+                throw new InvalidOperationException("[sl-offline] trainRecords is empty – SL-model cannot be trained.");
 
-			if (records == null)
-				throw new ArgumentNullException (nameof (records), "[sl-offline] records is null.");
+            if (records == null)
+                throw new ArgumentNullException(nameof(records), "[sl-offline] records is null.");
 
-			if (solAll6h == null || solAll6h.Count == 0)
-				throw new InvalidOperationException ("[sl-offline] solAll6h is null or empty – expected non-empty 6h series.");
+            if (solAll6h == null || solAll6h.Count == 0)
+                throw new InvalidOperationException("[sl-offline] solAll6h is null or empty – expected non-empty 6h series.");
 
-			if (sol1m == null || sol1m.Count == 0)
-				throw new InvalidOperationException ("[sl-offline] sol1m is null or empty – 1m candles are required for SL-model.");
+            if (sol1m == null || sol1m.Count == 0)
+                throw new InvalidOperationException("[sl-offline] sol1m is null or empty – 1m candles are required for SL-model.");
 
-			if (sol1h == null || sol1h.Count == 0)
-				throw new InvalidOperationException ("[sl-offline] sol1h is null or empty – 1h candles are required for SL-model.");
+            if (sol1h == null || sol1h.Count == 0)
+                throw new InvalidOperationException("[sl-offline] sol1h is null or empty – 1h candles are required for SL-model.");
 
-			double[] strongMinMoveThresholds = { 0.025, 0.030, 0.035 };
-			const double MainStrongMinMoveThreshold = 0.030;
+            static DateTime EntryUtc(BacktestRecord r) => r.Causal.EntryUtc.Value;
 
-			Console.WriteLine (
-				$"[sl-offline] trainRecords={trainRecords.Count}, tag='{trainRecords.Tag}', trainUntilUtc={trainRecords.TrainUntilUtc:O}");
+            double[] strongMinMoveThresholds = { 0.025, 0.030, 0.035 };
+            const double MainStrongMinMoveThreshold = 0.030;
 
-			if (records.Count > 0)
-				{
-				var inMin = records.Min (r => r.DateUtc);
-				var inMax = records.Max (r => r.DateUtc);
-				Console.WriteLine ($"[sl-offline] input records period = {inMin:yyyy-MM-dd}..{inMax:yyyy-MM-dd}, count={records.Count}");
-				}
+            Console.WriteLine(
+                $"[sl-offline] trainRecords={trainRecords.Count}, tag='{trainRecords.Tag}', trainUntilUtc={trainRecords.TrainUntilUtc:O}");
 
-			var slTrainMin = trainRecords.Min (r => r.DateUtc);
-			var slTrainMax = trainRecords.Max (r => r.DateUtc);
-			Console.WriteLine (
-				$"[sl-offline] train period = {slTrainMin:yyyy-MM-dd}..{slTrainMax:yyyy-MM-dd}");
+            if (records.Count > 0)
+            {
+                var inMin = records.Min(EntryUtc);
+                var inMax = records.Max(EntryUtc);
+                Console.WriteLine($"[sl-offline] input records period = {inMin:yyyy-MM-dd}..{inMax:yyyy-MM-dd}, count={records.Count}");
+            }
 
-			// Словарь 6h для оффлайн-лейблов.
-			var sol6hDict = solAll6h.ToDictionary (c => c.OpenTimeUtc, c => c);
+            var slTrainMin = trainRecords.Min(EntryUtc);
+            var slTrainMax = trainRecords.Max(EntryUtc);
+            Console.WriteLine(
+                $"[sl-offline] train period = {slTrainMin:yyyy-MM-dd}..{slTrainMax:yyyy-MM-dd}");
 
-			var samplesByThreshold = new Dictionary<double, List<SlHitSample>> ();
+            var sol6hDict = solAll6h.ToDictionary(c => c.OpenTimeUtc, c => c);
 
-			foreach (var thr in strongMinMoveThresholds)
-				{
-				Func<BacktestRecord, bool> strongSelector = r =>
-				{
-					var mm = r.MinMove;
+            var samplesByThreshold = new Dictionary<double, List<SlHitSample>>();
 
-					if (double.IsNaN (mm) || double.IsInfinity (mm) || mm <= 0)
-						{
-						throw new InvalidOperationException (
-							$"[sl-offline] Invalid MinMove in record: date={r.DateUtc:O}, MinMove={mm}.");
-						}
+            foreach (var thr in strongMinMoveThresholds)
+            {
+                Func<BacktestRecord, bool> strongSelector = r =>
+                {
+                    var mm = r.MinMove;
 
-					return SlStrongUtils.IsStrongByMinMove (mm, r.RegimeDown, thr);
-				};
+                    if (double.IsNaN(mm) || double.IsInfinity(mm) || mm <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"[sl-offline] Invalid MinMove in record: entry={EntryUtc(r):O}, MinMove={mm}.");
+                    }
 
-				var samples = SlOfflineBuilder.Build (
-					rows: trainRecords,
-					sol1h: sol1h,
-					sol1m: sol1m,
-					sol6hDict: sol6hDict,
-					tpPct: 0.03,
-					slPct: 0.05,
-					strongSelector: strongSelector
-				);
+                    return SlStrongUtils.IsStrongByMinMove(mm, r.RegimeDown, thr);
+                };
 
-				samplesByThreshold[thr] = samples;
+                var samples = SlOfflineBuilder.Build(
+                    rows: trainRecords,
+                    sol1h: sol1h,
+                    sol1m: sol1m,
+                    sol6hDict: sol6hDict,
+                    tpPct: 0.03,
+                    slPct: 0.05,
+                    strongSelector: strongSelector
+                );
 
-				int slCountThr = samples.Count (s => s.Label);
-				int tpCountThr = samples.Count - slCountThr;
+                samplesByThreshold[thr] = samples;
 
-				Console.WriteLine (
-					$"[sl-offline] thr={thr:0.000}: built samples = {samples.Count} (SL={slCountThr}, TP={tpCountThr})");
-				}
+                int slCountThr = samples.Count(s => s.Label);
+                int tpCountThr = samples.Count - slCountThr;
 
-			if (!samplesByThreshold.TryGetValue (MainStrongMinMoveThreshold, out var slSamples))
-				{
-				throw new InvalidOperationException (
-					$"[sl-offline] internal error: no samples for main threshold {MainStrongMinMoveThreshold:0.000}");
-				}
+                Console.WriteLine(
+                    $"[sl-offline] thr={thr:0.000}: built samples = {samples.Count} (SL={slCountThr}, TP={tpCountThr})");
+            }
 
-			if (slSamples.Count < 20)
-				throw new InvalidOperationException ($"[sl-offline] too few samples for SL-model: {slSamples.Count} < 20.");
+            if (!samplesByThreshold.TryGetValue(MainStrongMinMoveThreshold, out var slSamples))
+            {
+                throw new InvalidOperationException(
+                    $"[sl-offline] internal error: no samples for main threshold {MainStrongMinMoveThreshold:0.000}");
+            }
 
-			var trainer = new SlFirstTrainer ();
-			var asOf = trainRecords.Max (r => r.DateUtc);
-			var slModel = trainer.Train (slSamples, asOf);
-			var slEngine = trainer.CreateEngine (slModel);
+            if (slSamples.Count < 20)
+                throw new InvalidOperationException($"[sl-offline] too few samples for SL-model: {slSamples.Count} < 20.");
 
-			SlModelDiagnostics.LogFeatureImportanceOnSlModel (
-				samples: slSamples,
-				datasetTag: $"sl-train thr={MainStrongMinMoveThreshold:0.000}",
-				modelOverride: slModel,
-				featureNames: null);
+            var trainer = new SlFirstTrainer();
+            var asOf = trainRecords.Max(EntryUtc);
+            var slModel = trainer.Train(slSamples, asOf);
+            var slEngine = trainer.CreateEngine(slModel);
 
-			const float SlRiskThreshold = 0.55f;
+            SlModelDiagnostics.LogFeatureImportanceOnSlModel(
+                samples: slSamples,
+                datasetTag: $"sl-train thr={MainStrongMinMoveThreshold:0.000}",
+                modelOverride: slModel,
+                featureNames: null);
 
-			foreach (var kv in samplesByThreshold.OrderBy (kv => kv.Key))
-				{
-				double thr = kv.Key;
-				var samples = kv.Value;
+            const float SlRiskThreshold = 0.55f;
 
-				if (samples.Count == 0)
-					{
-					Console.WriteLine ($"[sl-train-debug:thr={thr:0.000}] no samples, skip.");
-					continue;
-					}
+            foreach (var kv in samplesByThreshold.OrderBy(kv => kv.Key))
+            {
+                double thr = kv.Key;
+                var samples = kv.Value;
 
-				PredictionEngine<SlHitSample, SlHitPrediction> engineForThisThr;
+                if (samples.Count == 0)
+                {
+                    Console.WriteLine($"[sl-train-debug:thr={thr:0.000}] no samples, skip.");
+                    continue;
+                }
 
-				if (Math.Abs (thr - MainStrongMinMoveThreshold) < 1e-9)
-					{
-					engineForThisThr = slEngine;
-					}
-				else
-					{
-					var tmpModel = trainer.Train (samples, asOf);
-					engineForThisThr = trainer.CreateEngine (tmpModel);
-					}
+                PredictionEngine<SlHitSample, SlHitPrediction> engineForThisThr;
 
-				DebugSlTrainMetrics (
-					samples,
-					engineForThisThr,
-					SlRiskThreshold,
-					tag: $"thr={thr:0.000}");
-				}
+                if (Math.Abs(thr - MainStrongMinMoveThreshold) < 1e-9)
+                {
+                    engineForThisThr = slEngine;
+                }
+                else
+                {
+                    var tmpModel = trainer.Train(samples, asOf);
+                    engineForThisThr = trainer.CreateEngine(tmpModel);
+                }
 
-			int scored = 0;
-			int predHighDays = 0;
-			int overlayApplied = 0;
+                DebugSlTrainMetrics(
+                    samples,
+                    engineForThisThr,
+                    SlRiskThreshold,
+                    tag: $"thr={thr:0.000}");
+            }
 
-			double minProb = double.PositiveInfinity;
-			double maxProb = double.NegativeInfinity;
-			double sumProb = 0.0;
-			int probCount = 0;
+            int scored = 0;
+            int predHighDays = 0;
+            int overlayApplied = 0;
 
-			foreach (var rec in records)
-				{
-				if (rec.Causal == null)
-					{
-					throw new InvalidOperationException (
-						$"[sl-runtime] BacktestRecord.Causal is null for date {rec.DateUtc:O}.");
-					}
+            double minProb = double.PositiveInfinity;
+            double maxProb = double.NegativeInfinity;
+            double sumProb = 0.0;
+            int probCount = 0;
 
-				var causal = rec.Causal;
+            foreach (var rec in records)
+            {
+                if (rec.Causal == null)
+                {
+                    throw new InvalidOperationException(
+                        $"[sl-runtime] BacktestRecord.Causal is null for entry {EntryUtc(rec):O}.");
+                }
 
-				bool goLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
-				bool goShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
+                var causal = rec.Causal;
 
-				if (!goLong && !goShort)
-					continue;
+                // Важно: после SL-стадии значения должны быть non-null для ВСЕХ дней.
+                // 0.0/false = "SL не применялся для дня" (например, нет направления/сделки).
+                causal.SlProb = 0.0;
+                causal.SlHighDecision = false;
 
-				var dayMinMove = causal.MinMove;
+                bool goLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
+                bool goShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
 
-				if (double.IsNaN (dayMinMove) || double.IsInfinity (dayMinMove) || dayMinMove <= 0)
-					{
-					throw new InvalidOperationException (
-						$"[sl-runtime] Invalid MinMove in causal record: date={rec.DateUtc:O}, MinMove={dayMinMove}.");
-					}
+                if (!goLong && !goShort)
+                    continue;
 
-				bool strong = SlStrongUtils.IsStrongByMinMove (dayMinMove, causal.RegimeDown, MainStrongMinMoveThreshold);
+                var dayMinMove = causal.MinMove;
 
-				double entryPrice = rec.Entry;
-				if (entryPrice <= 0)
-					{
-					throw new InvalidOperationException (
-						$"[sl-runtime] Non-positive entry price {entryPrice} for date {rec.DateUtc:O}.");
-					}
+                if (double.IsNaN(dayMinMove) || double.IsInfinity(dayMinMove) || dayMinMove <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"[sl-runtime] Invalid MinMove in causal record: entry={EntryUtc(rec):O}, MinMove={dayMinMove}.");
+                }
 
-				var slFeats = SlFeatureBuilder.Build (
-					entryUtc: rec.DateUtc,
-					goLong: goLong,
-					strongSignal: strong,
-					dayMinMove: dayMinMove,
-					entryPrice: entryPrice,
-					candles1h: sol1h
-				);
+                bool strong = SlStrongUtils.IsStrongByMinMove(dayMinMove, causal.RegimeDown, MainStrongMinMoveThreshold);
 
-				var slPred = slEngine.Predict (new SlHitSample
-					{
-					Label = false,
-					Features = slFeats,
-					EntryUtc = rec.DateUtc
-					});
+                double entryPrice = rec.Entry;
+                if (entryPrice <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"[sl-runtime] Non-positive entry price {entryPrice} for entry {EntryUtc(rec):O}.");
+                }
 
-				double p = slPred.Probability;
-				bool predHigh = slPred.PredictedLabel && p >= SlRiskThreshold;
+                var entryUtc = EntryUtc(rec);
 
-				causal.SlProb = p;
-				causal.SlHighDecision = predHigh;
-				scored++;
+                var slFeats = SlFeatureBuilder.Build(
+                    entryUtc: entryUtc,
+                    goLong: goLong,
+                    strongSignal: strong,
+                    dayMinMove: dayMinMove,
+                    entryPrice: entryPrice,
+                    candles1h: sol1h
+                );
 
-				SlOverlayApplier.Apply (
-					causal,
-					slProb: p,
-					goLong: goLong,
-					goShort: goShort,
-					strongSignal: strong);
+                var slPred = slEngine.Predict(new SlHitSample
+                {
+                    Label = false,
+                    Features = slFeats,
+                    EntryUtc = entryUtc
+                });
 
-				overlayApplied++;
+                double p = slPred.Probability;
+                bool predHigh = slPred.PredictedLabel && p >= SlRiskThreshold;
 
-				sumProb += p;
-				probCount++;
-				if (p < minProb) minProb = p;
-				if (p > maxProb) maxProb = p;
-				if (predHigh) predHighDays++;
-				}
+                causal.SlProb = p;
+                causal.SlHighDecision = predHigh;
 
-			if (records.Count > 0)
-				{
-				var recMin = records.Min (r => r.DateUtc);
-				var recMax = records.Max (r => r.DateUtc);
-				Console.WriteLine (
-					$"[sl-runtime] records period = {recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}, count = {records.Count}");
-				}
-			else
-				{
-				Console.WriteLine ("[sl-runtime] records: count=0");
-				}
+                scored++;
 
-			if (probCount > 0)
-				{
-				double avgProb = sumProb / probCount;
-				Console.WriteLine (
-					$"[sl-runtime] scored days = {scored}/{records.Count}, " +
-					$"overlayApplied={overlayApplied}, predHigh={predHighDays}, " +
-					$"prob range = [{minProb:0.000}..{maxProb:0.000}], avg={avgProb:0.000}, " +
-					$"thr={SlRiskThreshold:0.00}, strongMinMove={MainStrongMinMoveThreshold:P1}");
-				}
-			else
-				{
-				Console.WriteLine (
-					$"[sl-runtime] scored days = {scored}/{records.Count}, " +
-					"no SL-scores produced (no trading days with direction).");
-				}
-			}
+                SlOverlayApplier.Apply(
+                    causal,
+                    slProb: p,
+                    goLong: goLong,
+                    goShort: goShort,
+                    strongSignal: strong);
 
-		private static void DebugSlTrainMetrics (
-			List<SlHitSample> samples,
-			PredictionEngine<SlHitSample, SlHitPrediction> engine,
-			float riskThreshold,
-			string tag )
-			{
-			int trainPos = 0;
-			int trainNeg = 0;
-			int trainPredHigh = 0;
-			int trainTp = 0;
-			int trainFp = 0;
+                overlayApplied++;
 
-			foreach (var s in samples)
-				{
-				if (s.Label) trainPos++;
-				else trainNeg++;
+                sumProb += p;
+                probCount++;
+                if (p < minProb) minProb = p;
+                if (p > maxProb) maxProb = p;
+                if (predHigh) predHighDays++;
+            }
 
-				var pred = engine.Predict (s);
-				double p = pred.Probability;
-				bool high = pred.PredictedLabel && p >= riskThreshold;
-				if (!high) continue;
+            if (records.Count > 0)
+            {
+                var recMin = records.Min(EntryUtc);
+                var recMax = records.Max(EntryUtc);
+                Console.WriteLine(
+                    $"[sl-runtime] records period = {recMin:yyyy-MM-dd}..{recMax:yyyy-MM-dd}, count = {records.Count}");
+            }
+            else
+            {
+                Console.WriteLine("[sl-runtime] records: count=0");
+            }
 
-				trainPredHigh++;
-				if (s.Label) trainTp++;
-				else trainFp++;
-				}
+            if (probCount > 0)
+            {
+                double avgProb = sumProb / probCount;
+                Console.WriteLine(
+                    $"[sl-runtime] scored days = {scored}/{records.Count}, " +
+                    $"overlayApplied={overlayApplied}, predHigh={predHighDays}, " +
+                    $"prob range = [{minProb:0.000}..{maxProb:0.000}], avg={avgProb:0.000}, " +
+                    $"thr={SlRiskThreshold:0.00}, strongMinMove={MainStrongMinMoveThreshold:P1}");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"[sl-runtime] scored days = {scored}/{records.Count}, " +
+                    "no SL-scores produced (no trading days with direction).");
+            }
+        }
 
-			double tprTrain = trainPos > 0 ? (double) trainTp / trainPos : 0.0;
-			double fprTrain = trainNeg > 0 ? (double) trainFp / trainNeg : 0.0;
+        private static void DebugSlTrainMetrics(
+            List<SlHitSample> samples,
+            PredictionEngine<SlHitSample, SlHitPrediction> engine,
+            float riskThreshold,
+            string tag)
+        {
+            int trainPos = 0;
+            int trainNeg = 0;
+            int trainPredHigh = 0;
+            int trainTp = 0;
+            int trainFp = 0;
 
-			Console.WriteLine (
-				$"[sl-train-debug:{tag}] pos={trainPos}, neg={trainNeg}, predHigh={trainPredHigh}, " +
-				$"TPR={tprTrain:P1}, FPR={fprTrain:P1}, thr={riskThreshold:0.00}");
-			}
-		}
-	}
+            foreach (var s in samples)
+            {
+                if (s.Label) trainPos++;
+                else trainNeg++;
+
+                var pred = engine.Predict(s);
+                double p = pred.Probability;
+                bool high = pred.PredictedLabel && p >= riskThreshold;
+                if (!high) continue;
+
+                trainPredHigh++;
+                if (s.Label) trainTp++;
+                else trainFp++;
+            }
+
+            double tprTrain = trainPos > 0 ? (double)trainTp / trainPos : 0.0;
+            double fprTrain = trainNeg > 0 ? (double)trainFp / trainNeg : 0.0;
+
+            Console.WriteLine(
+                $"[sl-train-debug:{tag}] pos={trainPos}, neg={trainNeg}, predHigh={trainPredHigh}, " +
+                $"TPR={tprTrain:P1}, FPR={fprTrain:P1}, thr={riskThreshold:0.00}");
+        }
+    }
+}

@@ -1,5 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 	{
@@ -43,9 +44,12 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Labeling
 			TimeZoneInfo nyTz )
 			{
 			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
-			var exitUtcExclusive = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
-			return Create (allMinutesSortedUtc, entryUtc, exitUtcExclusive);
-			}
+            var exitUtcExclusive = NyWindowing
+				.ComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz)
+				.Value;
+
+            return Create(allMinutesSortedUtc, entryUtc, exitUtcExclusive);
+        }
 
 		public static Baseline1mWindow Create (
 			IReadOnlyList<Candle1m> allMinutesSortedUtc,

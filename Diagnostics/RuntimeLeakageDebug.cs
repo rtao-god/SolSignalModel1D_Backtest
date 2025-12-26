@@ -28,13 +28,13 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             }
 
             var ordered = records
-                .OrderBy(r => r.Causal.EntryUtc)
+                .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
-            var split = TrainSplitByBaselineExit.Split(
-                items: ordered,
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
                 entrySelector: r => r.Causal.EntryUtc,
-                trainUntilUtc: trainUntilUtc,
+                trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
                 nyTz: nyTz);
 
             var train = split.Train;
@@ -58,7 +58,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
                 for (int i = 0; i < xs.Count; i++)
                 {
                     var r = xs[i];
-                    if (r.Forward.TrueLabel == r.Causal.PredLabel)
+                    if (r.TrueLabel == r.Causal.PredLabel)
                         correct++;
                 }
 
@@ -70,7 +70,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             var oosAcc = Acc(oos);
 
             Console.WriteLine(
-                $"[leak-probe] trainUntil(baseline-exit) = {trainUntilUtc.IsoDate}, totalRecords = {ordered.Count}");
+                $"[leak-probe] trainUntil(exit-day-key) = {trainUntilUtc.ExitDayKeyUtc.Value:yyyy-MM-dd}, totalRecords = {ordered.Count}");
 
             Console.WriteLine(
                 $"[leak-probe] TRAIN: count={trainAcc.total}, correct={trainAcc.correct}, acc={trainAcc.acc:P2}");
@@ -88,23 +88,23 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             static void PrintRow(string kind, BacktestRecord r)
             {
                 var c = r.Causal;
-                var day = c.DayKeyUtc;
+                var dayKey = c.DayKeyUtc.Value;
 
                 Console.WriteLine(
-                    $"[leak-probe] {kind} {day:yyyy-MM-dd} " +
-                    $"true={r.Forward.TrueLabel} pred={c.PredLabel} " +
+                    $"[leak-probe] {kind} {dayKey:yyyy-MM-dd} " +
+                    $"true={r.TrueLabel} pred={c.PredLabel} " +
                     $"microUp={c.PredMicroUp} microDown={c.PredMicroDown} " +
                     $"minMove={c.MinMove:0.000}");
             }
 
             var trainSample = train
-                .OrderByDescending(r => r.Causal.EntryUtc)
+                .OrderByDescending(r => r.Causal.EntryUtc.Value)
                 .Take(boundarySampleCount)
-                .OrderBy(r => r.Causal.EntryUtc)
+                .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
             var oosSample = oos
-                .OrderBy(r => r.Causal.EntryUtc)
+                .OrderBy(r => r.Causal.EntryUtc.Value)
                 .Take(boundarySampleCount)
                 .ToList();
 

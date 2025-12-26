@@ -1,0 +1,59 @@
+﻿using System;
+using System.Linq;
+using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+
+namespace SolSignalModel1D_Backtest.Core.Time
+{
+    public static partial class NyTrainSplit
+    {
+        public sealed class SplitStrict<T>
+        {
+            public TrainOnly<T> Train { get; }
+            public IReadOnlyList<T> Oos { get; }
+
+            public SplitStrict(TrainOnly<T> train, IReadOnlyList<T> oos)
+            {
+                Train = train ?? throw new ArgumentNullException(nameof(train));
+                Oos = oos ?? throw new ArgumentNullException(nameof(oos));
+            }
+        }
+
+        public static SplitStrict<T> SplitByBaselineExitStrict<T>(
+            IReadOnlyList<T> ordered,
+            Func<T, EntryUtc> entrySelector,
+            TrainUntilUtc trainUntilUtc,
+            TimeZoneInfo nyTz,
+            string tag)
+        {
+            if (ordered == null) throw new ArgumentNullException(nameof(ordered));
+            if (entrySelector == null) throw new ArgumentNullException(nameof(entrySelector));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (string.IsNullOrWhiteSpace(tag)) throw new ArgumentException("tag must be non-empty.", nameof(tag));
+            if (trainUntilUtc.Value == default) throw new ArgumentException("trainUntilUtc must be initialized.", nameof(trainUntilUtc));
+
+            var split = SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: entrySelector,
+                trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
+                nyTz: nyTz);
+
+            if (split.Excluded.Count > 0)
+            {
+                var sample = split.Excluded
+                    .Take(Math.Min(10, split.Excluded.Count))
+                    .Select(x => entrySelector(x).Value.ToString("O"));
+
+                throw new InvalidOperationException(
+                    $"[{tag}] excluded entries exist (baseline-exit undefined). count={split.Excluded.Count}. sample=[{string.Join(", ", sample)}].");
+            }
+
+            var trainOnly = new TrainOnly<T>(
+                items: split.Train,
+                trainUntilUtc: trainUntilUtc.Value,
+                tag: tag);
+
+            return new SplitStrict<T>(trainOnly, split.Oos);
+        }
+    }
+}

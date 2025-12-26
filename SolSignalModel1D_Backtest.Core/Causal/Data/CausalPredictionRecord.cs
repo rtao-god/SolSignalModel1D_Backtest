@@ -126,35 +126,35 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data
         public double GetSlProbOrThrow()
         {
             if (SlProb is null)
-                throw new InvalidOperationException($"[causal] SL not evaluated for {EntryUtc.Value:O}, but SlProb requested.");
+                throw new InvalidOperationException($"[causal] SL not evaluated for day={DayKeyUtc}, but SlProb requested.");
             return SlProb.Value;
         }
 
         public bool GetSlHighDecisionOrThrow()
         {
             if (SlHighDecision is null)
-                throw new InvalidOperationException($"[causal] SL not evaluated for {EntryUtc.Value:O}, but SlHighDecision requested.");
+                throw new InvalidOperationException($"[causal] SL not evaluated for day={DayKeyUtc}, but SlHighDecision requested.");
             return SlHighDecision.Value;
         }
 
         public (double TpPct, double SlPct) GetDelayedTpSlOrThrow()
         {
             if (DelayedIntradayTpPct is null || DelayedIntradaySlPct is null)
-                throw new InvalidOperationException($"[causal] Delayed not evaluated for {EntryUtc.Value:O}, but TP/SL requested.");
+                throw new InvalidOperationException($"[causal] Delayed not evaluated for day={DayKeyUtc}, but TP/SL requested.");
             return (DelayedIntradayTpPct.Value, DelayedIntradaySlPct.Value);
         }
 
         public double GetFeatureOrThrow(double? v, string featureName)
         {
             if (v is null)
-                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for {EntryUtc.Value:O}.");
+                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for day={DayKeyUtc}.");
             return v.Value;
         }
 
         public bool GetFeatureOrThrow(bool? v, string featureName)
         {
             if (v is null)
-                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for {EntryUtc.Value:O}.");
+                throw new InvalidOperationException($"[causal] Feature '{featureName}' missing for day={DayKeyUtc}.");
             return v.Value;
         }
     }

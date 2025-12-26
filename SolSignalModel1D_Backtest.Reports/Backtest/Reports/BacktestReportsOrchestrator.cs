@@ -21,427 +21,433 @@ using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
-	{
-	public static class BacktestReportsOrchestrator
-		{
-		/// <summary>
-		/// Окно истории для бэкфилла "текущего прогноза" (по умолчанию 60 дней).
-		/// Это число можно легко править в будущем.
-		/// </summary>
-		public const int CurrentPredictionHistoryWindowDays = CurrentPredictionSnapshotBuilder.DefaultHistoryWindowDays;
+{
+    public static class BacktestReportsOrchestrator
+    {
+        /// <summary>
+        /// Окно истории для бэкфилла "текущего прогноза" (по умолчанию 60 дней).
+        /// Это число можно легко править в будущем.
+        /// </summary>
+        public const int CurrentPredictionHistoryWindowDays = CurrentPredictionSnapshotBuilder.DefaultHistoryWindowDays;
 
-		public static void SavePfiReports ()
-			{
-			try
-				{
-				var pfiSnapshots = FeatureImportanceSnapshots.GetSnapshots ();
+        private static DateTime RecordDayKeyUtc(BacktestRecord r)
+        {
+            if (r == null) throw new ArgumentNullException(nameof(r));
+            return r.Causal.DayKeyUtc.Value;
+        }
 
-				if (pfiSnapshots != null && pfiSnapshots.Count > 0)
-					{
-					var pfiReport = FeatureImportanceReportBuilder.BuildPerModelReport (
-						pfiSnapshots,
-						TableDetailLevel.Technical,
-						explicitTitle: "PFI по моделям (binary)"
-					);
+        public static void SavePfiReports()
+        {
+            try
+            {
+                var pfiSnapshots = FeatureImportanceSnapshots.GetSnapshots();
 
-					var storage = new ReportStorage ();
-					storage.Save (pfiReport);
+                if (pfiSnapshots != null && pfiSnapshots.Count > 0)
+                {
+                    var pfiReport = FeatureImportanceReportBuilder.BuildPerModelReport(
+                        pfiSnapshots,
+                        TableDetailLevel.Technical,
+                        explicitTitle: "PFI по моделям (binary)"
+                    );
 
-					Console.WriteLine ("[pfi-report] pfi_per_model report saved.");
+                    var storage = new ReportStorage();
+                    storage.Save(pfiReport);
 
-					var modelStatsReport = ModelStatsReportBuilder.BuildFromSnapshots (
-						pfiSnapshots,
-						explicitTitle: "Статистика моделей (PFI / AUC)"
-					);
+                    Console.WriteLine("[pfi-report] pfi_per_model report saved.");
 
-					modelStatsReport.Kind = "ml_model_stats";
+                    var modelStatsReport = ModelStatsReportBuilder.BuildFromSnapshots(
+                        pfiSnapshots,
+                        explicitTitle: "Статистика моделей (PFI / AUC)"
+                    );
 
-					storage.Save (modelStatsReport);
+                    modelStatsReport.Kind = "ml_model_stats";
 
-					Console.WriteLine ("[ml-model-stats] ml_model_stats report saved.");
-					}
-				else
-					{
-					Console.WriteLine ("[pfi-report] no PFI snapshots, report not built.");
-					}
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[pfi-report] error while building/saving PFI report: {ex.Message}");
-				}
-			}
+                    storage.Save(modelStatsReport);
 
-		/// <summary>
-		/// Сохраняет:
-		/// - backtest_summary (универсальный отчёт по PnL);
-		/// - backtest_baseline (упрощённый снапшот по политикам);
-		/// - backtest_model_stats (не PFI: confusion + SL-модель, теперь по сегментам Train/OOS/Recent/Full);
-		/// - policy_ratios (Sharpe/Sortino/Calmar по политикам baseline).
-		/// </summary>
-		public static void SaveBacktestReports (
-			IReadOnlyList<LabeledCausalRow> mornings,
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<Candle1m> sol1m,
-			IReadOnlyList<RollingLoop.PolicySpec> policies,
-			BacktestConfig backtestConfig,
-			TimeZoneInfo nyTz,
-			DateTime? trainUntilUtc )
-			{
-			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (sol1m == null) throw new ArgumentNullException (nameof (sol1m));
-			if (policies == null) throw new ArgumentNullException (nameof (policies));
-			if (backtestConfig == null) throw new ArgumentNullException (nameof (backtestConfig));
-			if (nyTz == null) throw new ArgumentNullException (nameof (nyTz));
+                    Console.WriteLine("[ml-model-stats] ml_model_stats report saved.");
+                }
+                else
+                {
+                    Console.WriteLine("[pfi-report] no PFI snapshots, report not built.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[pfi-report] error while building/saving PFI report: {ex.Message}");
+            }
+        }
 
-			// --- backtest_summary ---
-			try
-				{
-				var summary = BacktestEngine.RunBacktest (
-					mornings: mornings,
-					records: records,
-					candles1m: sol1m,
-					policies: policies,
-					config: backtestConfig
-				);
+        /// <summary>
+        /// Сохраняет:
+        /// - backtest_summary (универсальный отчёт по PnL);
+        /// - backtest_baseline (упрощённый снапшот по политикам);
+        /// - backtest_model_stats (не PFI: confusion + SL-модель, теперь по сегментам Train/OOS/Recent/Full);
+        /// - policy_ratios (Sharpe/Sortino/Calmar по политикам baseline).
+        /// </summary>
+        public static void SaveBacktestReports(
+            IReadOnlyList<LabeledCausalRow> mornings,
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<Candle1m> sol1m,
+            IReadOnlyList<RollingLoop.PolicySpec> policies,
+            BacktestConfig backtestConfig,
+            TimeZoneInfo nyTz,
+            DateTime? trainUntilUtc)
+        {
+            if (mornings == null) throw new ArgumentNullException(nameof(mornings));
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
+            if (policies == null) throw new ArgumentNullException(nameof(policies));
+            if (backtestConfig == null) throw new ArgumentNullException(nameof(backtestConfig));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-				BacktestSummaryPrinter.Print (summary);
+            // --- backtest_summary ---
+            try
+            {
+                var summary = BacktestEngine.RunBacktest(
+                    mornings: mornings,
+                    records: records,
+                    candles1m: sol1m,
+                    policies: policies,
+                    config: backtestConfig
+                );
 
-				var backtestReport = BacktestSummaryReportBuilder.Build (summary);
+                BacktestSummaryPrinter.Print(summary);
 
-				if (backtestReport == null)
-					{
-					Console.WriteLine ("[backtest-report] report not built (no data).");
-					}
-				else
-					{
-					var storage = new ReportStorage ();
-					storage.Save (backtestReport);
-					Console.WriteLine ("[backtest-report] backtest_summary report saved.");
-					}
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[backtest-report] error while building/saving report: {ex.Message}");
-				}
+                var backtestReport = BacktestSummaryReportBuilder.Build(summary);
 
-			// --- backtest_baseline ---
-			List<BacktestPolicyResult>? baselineResults = null;
+                if (backtestReport == null)
+                {
+                    Console.WriteLine("[backtest-report] report not built (no data).");
+                }
+                else
+                {
+                    var storage = new ReportStorage();
+                    storage.Save(backtestReport);
+                    Console.WriteLine("[backtest-report] backtest_summary report saved.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[backtest-report] error while building/saving report: {ex.Message}");
+            }
 
-			try
-				{
-				baselineResults = RollingLoop.SimulateAllPolicies (
-					policies: policies,
-					records: records,
-					useStopLoss: true,
-					config: backtestConfig,
-					useAnti: false
-				);
+            // --- backtest_baseline ---
+            List<BacktestPolicyResult>? baselineResults = null;
 
-				if (baselineResults.Count == 0)
-					{
-					Console.WriteLine ("[backtest-baseline] no baseline results (no policies or records).");
-					}
-				else
-					{
-					var snapshot = BacktestBaselineSnapshotBuilder.Build (
-						withSlBase: baselineResults,
-						dailyStopPct: backtestConfig.DailyStopPct,
-						dailyTpPct: backtestConfig.DailyTpPct,
-						configName: "default"
-					);
+            try
+            {
+                baselineResults = RollingLoop.SimulateAllPolicies(
+                    policies: policies,
+                    records: records,
+                    useStopLoss: true,
+                    config: backtestConfig,
+                    useAnti: false
+                );
 
-					var baselineStorage = new BacktestBaselineStorage ();
-					baselineStorage.Save (snapshot);
+                if (baselineResults.Count == 0)
+                {
+                    Console.WriteLine("[backtest-baseline] no baseline results (no policies or records).");
+                }
+                else
+                {
+                    var snapshot = BacktestBaselineSnapshotBuilder.Build(
+                        withSlBase: baselineResults,
+                        dailyStopPct: backtestConfig.DailyStopPct,
+                        dailyTpPct: backtestConfig.DailyTpPct,
+                        configName: "default"
+                    );
 
-					Console.WriteLine ("[backtest-baseline] snapshot saved.");
-					}
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[backtest-baseline] error while building/saving snapshot: {ex.Message}");
-				}
+                    var baselineStorage = new BacktestBaselineStorage();
+                    baselineStorage.Save(snapshot);
 
-			// --- backtest_model_stats ---
-			try
-				{
-				if (records.Count == 0)
-					{
-					Console.WriteLine ("[backtest-model-stats] no records, report not built.");
-					}
-				else
-					{
-					// 1) Упорядочиваем все PredictionRecord по дате для логов и срезов.
-					var orderedRecords = records
-						.OrderBy (r => r.DateUtc)
-						.ToList ();
+                    Console.WriteLine("[backtest-baseline] snapshot saved.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[backtest-baseline] error while building/saving snapshot: {ex.Message}");
+            }
 
-					var minDateUtc = orderedRecords.First ().DateUtc;
-					var maxDateUtc = orderedRecords.Last ().DateUtc;
+            // --- backtest_model_stats ---
+            try
+            {
+                if (records.Count == 0)
+                {
+                    Console.WriteLine("[backtest-model-stats] no records, report not built.");
+                }
+                else
+                {
+                    // Канонично для логов/срезов: по day-key.
+                    var orderedRecords = records
+                        .OrderBy(r => RecordDayKeyUtc(r))
+                        .ToList();
 
-					Console.WriteLine (
-						$"[backtest-model-stats] full period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
-						$"totalRecords = {orderedRecords.Count}");
+                    var minDayKeyUtc = RecordDayKeyUtc(orderedRecords.First());
+                    var maxDayKeyUtc = RecordDayKeyUtc(orderedRecords.Last());
 
-					// 2) Граница train/OOS:
-					// если внешняя граница не передана, считаем, что весь период — train.
-					var effectiveTrainUntilUtc = trainUntilUtc ?? maxDateUtc;
+                    Console.WriteLine(
+                        $"[backtest-model-stats] full period = {minDayKeyUtc:yyyy-MM-dd}..{maxDayKeyUtc:yyyy-MM-dd}, " +
+                        $"totalRecords = {orderedRecords.Count}");
 
-					var multi = BacktestModelStatsMultiSnapshotBuilder.Build (
-						allRecords: records,
-						sol1m: sol1m,
-						nyTz: nyTz,
-						dailyTpPct: backtestConfig.DailyTpPct,
-						dailySlPct: backtestConfig.DailyStopPct,
-						trainUntilUtc: trainUntilUtc ?? records.Max (r => r.DateUtc),
-						recentDays: 240,
-						runKind: ModelRunKind.Analytics
-					);
+                    var effectiveTrainUntilUtc00 = (trainUntilUtc ?? maxDayKeyUtc).ToCausalDateUtc();
+                    var trainUntilExitDayKeyUtc = Core.Time.DayKeyUtc.FromUtcOrThrow(effectiveTrainUntilUtc00);
 
-					var statsReport = BacktestModelStatsReportBuilder.Build (multi);
+                    var multi = BacktestModelStatsMultiSnapshotBuilder.Build(
+                        allRecords: records,
+                        sol1m: sol1m,
+                        nyTz: nyTz,
+                        dailyTpPct: backtestConfig.DailyTpPct,
+                        dailySlPct: backtestConfig.DailyStopPct,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        recentDays: 240,
+                        runKind: ModelRunKind.Analytics
+                    );
 
-					var storage = new ReportStorage ();
-					storage.Save (statsReport);
+                    var statsReport = BacktestModelStatsReportBuilder.Build(multi);
 
-					Console.WriteLine ("[backtest-model-stats] backtest_model_stats report saved.");
-					}
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[backtest-model-stats] error while building/saving report: {ex.Message}");
-				}
+                    var storage = new ReportStorage();
+                    storage.Save(statsReport);
 
-			// --- backtest_policy_ratios (baseline) ---
-			try
-				{
-				if (baselineResults == null || baselineResults.Count == 0)
-					{
-					Console.WriteLine ("[backtest-policy-ratios] no baseline results, report not built.");
-					}
-				else
-					{
-					// baseline → считаем, что backtestId = "baseline"
-					const string backtestId = "baseline";
+                    Console.WriteLine("[backtest-model-stats] backtest_model_stats report saved.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[backtest-model-stats] error while building/saving report: {ex.Message}");
+            }
 
-					var ratiosSnapshot = PolicyRatiosSnapshotBuilder.Build (
-						baselineResults,
-						backtestId: backtestId
-					);
+            // --- backtest_policy_ratios (baseline) ---
+            try
+            {
+                if (baselineResults == null || baselineResults.Count == 0)
+                {
+                    Console.WriteLine("[backtest-policy-ratios] no baseline results, report not built.");
+                }
+                else
+                {
+                    // baseline → считаем, что backtestId = "baseline"
+                    const string backtestId = "baseline";
 
-					DateTime? fromDateUtc = null;
-					DateTime? toDateUtc = null;
+                    var ratiosSnapshot = PolicyRatiosSnapshotBuilder.Build(
+                        baselineResults,
+                        backtestId: backtestId
+                    );
 
-					if (records.Count > 0)
-						{
-						fromDateUtc = records.Min (r => r.DateUtc);
-						toDateUtc = records.Max (r => r.DateUtc);
-						}
+                    DateTime? fromDateUtc = null;
+                    DateTime? toDateUtc = null;
 
-					var ratiosReport = PolicyRatiosReportBuilder.Build (
-						ratiosSnapshot,
-						fromDateUtc,
-						toDateUtc
-					);
+                    if (records.Count > 0)
+                    {
+                        var ordered = records.OrderBy(r => RecordDayKeyUtc(r)).ToList();
+                        fromDateUtc = RecordDayKeyUtc(ordered.First());
+                        toDateUtc = RecordDayKeyUtc(ordered.Last());
+                    }
 
-					var storage = new ReportStorage ();
-					storage.SaveTyped ("policy_ratios", backtestId, ratiosReport);
+                    var ratiosReport = PolicyRatiosReportBuilder.Build(
+                        ratiosSnapshot,
+                        fromDateUtc,
+                        toDateUtc
+                    );
 
-					Console.WriteLine ("[backtest-policy-ratios] policy_ratios report saved.");
-					}
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[backtest-policy-ratios] error while building/saving report: {ex.Message}");
-				}
-			}
+                    var storage = new ReportStorage();
+                    storage.SaveTyped("policy_ratios", backtestId, ratiosReport);
 
-		/// <summary>
-		/// Строит и сохраняет ОДИН отчёт "текущий прогноз" по последней записи.
-		/// Поведение старого API сохранено.
-		/// </summary>
-		public static void SaveCurrentPredictionReport (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
-			double walletBalanceUsd = 200.0 )
-			{
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (leveragePolicies == null) throw new ArgumentNullException (nameof (leveragePolicies));
+                    Console.WriteLine("[backtest-policy-ratios] policy_ratios report saved.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[backtest-policy-ratios] error while building/saving report: {ex.Message}");
+            }
+        }
 
-			try
-				{
-				var currentSnapshot = CurrentPredictionSnapshotBuilder.Build (
-					records: records,
-					policies: leveragePolicies,
-					walletBalanceUsd: walletBalanceUsd
-				);
+        /// <summary>
+        /// Строит и сохраняет ОДИН отчёт "текущий прогноз" по последней записи.
+        /// Поведение старого API сохранено.
+        /// </summary>
+        public static void SaveCurrentPredictionReport(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
+            double walletBalanceUsd = 200.0)
+        {
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (leveragePolicies == null) throw new ArgumentNullException(nameof(leveragePolicies));
 
-				// Берём глобальные PFI-снимки и добавляем топ-фичи по нужной модели.
-				CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots (
-					snapshot: currentSnapshot,
-					tagFilter: "train:dir-normal"
-				);
+            try
+            {
+                var currentSnapshot = CurrentPredictionSnapshotBuilder.Build(
+                    records: records,
+                    policies: leveragePolicies,
+                    walletBalanceUsd: walletBalanceUsd
+                );
 
-				var pfiSnapshots = FeatureImportanceSnapshots.GetSnapshots ();
-				var dirSnapshot = pfiSnapshots
-					.LastOrDefault (s => s.Tag.Contains ("dir", StringComparison.OrdinalIgnoreCase));
+                // Берём глобальные PFI-снимки и добавляем топ-фичи по нужной модели.
+                CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots(
+                    snapshot: currentSnapshot,
+                    tagFilter: "train:dir-normal"
+                );
 
-				if (dirSnapshot != null)
-					{
-					CurrentPredictionPfiExplanation.AppendTopFeaturesFromSnapshot (
-						snapshot: currentSnapshot,
-						pfiSnapshot: dirSnapshot
-					);
-					}
+                var pfiSnapshots = FeatureImportanceSnapshots.GetSnapshots();
+                var dirSnapshot = pfiSnapshots
+                    .LastOrDefault(s => s.Tag.Contains("dir", StringComparison.OrdinalIgnoreCase));
 
-				if (currentSnapshot == null)
-					{
-					Console.WriteLine ("[current-report] snapshot not built (no records or policies).");
-					return;
-					}
+                if (dirSnapshot != null)
+                {
+                    CurrentPredictionPfiExplanation.AppendTopFeaturesFromSnapshot(
+                        snapshot: currentSnapshot,
+                        pfiSnapshot: dirSnapshot
+                    );
+                }
 
-				// Полный вывод в консоль (включая ExplanationItems).
-				CurrentPredictionPrinter.Print (currentSnapshot);
+                if (currentSnapshot == null)
+                {
+                    Console.WriteLine("[current-report] snapshot not built (no records or policies).");
+                    return;
+                }
 
-				var report = CurrentPredictionReportBuilder.Build (currentSnapshot);
+                // Полный вывод в консоль (включая ExplanationItems).
+                CurrentPredictionPrinter.Print(currentSnapshot);
 
-				if (report == null)
-					{
-					Console.WriteLine ("[current-report] report not built from snapshot.");
-					return;
-					}
+                var report = CurrentPredictionReportBuilder.Build(currentSnapshot);
 
-				var storage = new ReportStorage ();
-				storage.Save (report);
-				Console.WriteLine ("[current-report] current_prediction report saved.");
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[current-report] error while building/saving snapshot/report: {ex.Message}");
-				}
-			}
+                if (report == null)
+                {
+                    Console.WriteLine("[current-report] report not built from snapshot.");
+                    return;
+                }
 
-		/// <summary>
-		/// Бэкфилл отчётов "текущий прогноз" за последние historyWindowDays дней.
-		/// Для каждого дня строится снапшот + ReportDocument (kind = "current_prediction").
-		/// Отчёты сохраняются через ReportStorage.
-		/// </summary>
-		public static void SaveCurrentPredictionHistoryReports (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
-			double walletBalanceUsd = 200.0,
-			int historyWindowDays = CurrentPredictionHistoryWindowDays )
-			{
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (leveragePolicies == null) throw new ArgumentNullException (nameof (leveragePolicies));
+                var storage = new ReportStorage();
+                storage.Save(report);
+                Console.WriteLine("[current-report] current_prediction report saved.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[current-report] error while building/saving snapshot/report: {ex.Message}");
+            }
+        }
 
-			if (records.Count == 0)
-				{
-				Console.WriteLine ("[current-report-history] no records, history not built.");
-				return;
-				}
+        /// <summary>
+        /// Бэкфилл отчётов "текущий прогноз" за последние historyWindowDays дней.
+        /// Для каждого дня строится снапшот + ReportDocument (kind = "current_prediction").
+        /// Отчёты сохраняются через ReportStorage.
+        /// </summary>
+        public static void SaveCurrentPredictionHistoryReports(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
+            double walletBalanceUsd = 200.0,
+            int historyWindowDays = CurrentPredictionHistoryWindowDays)
+        {
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (leveragePolicies == null) throw new ArgumentNullException(nameof(leveragePolicies));
 
-			if (leveragePolicies.Count == 0)
-				{
-				Console.WriteLine ("[current-report-history] no leverage policies, history not built.");
-				return;
-				}
+            if (records.Count == 0)
+            {
+                Console.WriteLine("[current-report-history] no records, history not built.");
+                return;
+            }
 
-			if (historyWindowDays <= 0)
-				{
-				historyWindowDays = CurrentPredictionHistoryWindowDays;
-				}
+            if (leveragePolicies.Count == 0)
+            {
+                Console.WriteLine("[current-report-history] no leverage policies, history not built.");
+                return;
+            }
 
-			try
-				{
-				var snapshots = CurrentPredictionSnapshotBuilder.BuildHistory (
-					records: records,
-					policies: leveragePolicies,
-					walletBalanceUsd: walletBalanceUsd,
-					historyWindowDays: historyWindowDays
-				);
+            if (historyWindowDays <= 0)
+            {
+                historyWindowDays = CurrentPredictionHistoryWindowDays;
+            }
 
-				if (snapshots.Count == 0)
-					{
-					Console.WriteLine ($"[current-report-history] no snapshots for last {historyWindowDays} days.");
-					return;
-					}
+            try
+            {
+                var snapshots = CurrentPredictionSnapshotBuilder.BuildHistory(
+                    records: records,
+                    policies: leveragePolicies,
+                    walletBalanceUsd: walletBalanceUsd,
+                    historyWindowDays: historyWindowDays
+                );
 
-				var storage = new ReportStorage ();
+                if (snapshots.Count == 0)
+                {
+                    Console.WriteLine($"[current-report-history] no snapshots for last {historyWindowDays} days.");
+                    return;
+                }
 
-				foreach (var snapshot in snapshots)
-					{
-					CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots (
-						snapshot,
-						tagFilter: "train:dir-normal"
-					);
+                var storage = new ReportStorage();
 
-					var report = CurrentPredictionReportBuilder.Build (snapshot);
-					storage.Save (report);
-					}
+                foreach (var snapshot in snapshots)
+                {
+                    CurrentPredictionPfiExplanation.AppendTopFeaturesFromGlobalSnapshots(
+                        snapshot,
+                        tagFilter: "train:dir-normal"
+                    );
 
-				var minDateUtc = snapshots.First ().PredictionDateUtc.ToCausalDateUtc();
-				var maxDateUtc = snapshots.Last ().PredictionDateUtc.ToCausalDateUtc();
+                    var report = CurrentPredictionReportBuilder.Build(snapshot);
+                    storage.Save(report);
+                }
 
-				Console.WriteLine (
-					$"[current-report-history] saved {snapshots.Count} current_prediction reports " +
-					$"for period {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd} (windowDays={historyWindowDays}).");
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[current-report-history] error while building/saving history: {ex.Message}");
-				}
-			}
+                var minDateUtc = snapshots.First().PredictionDateUtc.ToCausalDateUtc();
+                var maxDateUtc = snapshots.Last().PredictionDateUtc.ToCausalDateUtc();
 
-		/// <summary>
-		/// Строит и сохраняет отчёт "текущий прогноз" за конкретную дату (UTC).
-		/// Берётся последняя PredictionRecord с DateUtc.ToCausalDateUtc() == predictionDateUtc.ToCausalDateUtc().
-		/// Это заготовка под API/фронт для выбора даты из всей выборки.
-		/// </summary>
-		public static void SaveCurrentPredictionReportForDate (
-			IReadOnlyList<BacktestRecord> records,
-			IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
-			DateTime predictionDateUtc,
-			double walletBalanceUsd = 200.0 )
-			{
-			if (records == null) throw new ArgumentNullException (nameof (records));
-			if (leveragePolicies == null) throw new ArgumentNullException (nameof (leveragePolicies));
+                Console.WriteLine(
+                    $"[current-report-history] saved {snapshots.Count} current_prediction reports " +
+                    $"for period {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd} (windowDays={historyWindowDays}).");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[current-report-history] error while building/saving history: {ex.Message}");
+            }
+        }
 
-			if (records.Count == 0)
-				{
-				Console.WriteLine ("[current-report-by-date] no records, report not built.");
-				return;
-				}
+        /// <summary>
+        /// Строит и сохраняет отчёт "текущий прогноз" за конкретную дату (UTC).
+        /// Берётся последняя PredictionRecord с DateUtc.ToCausalDateUtc() == predictionDateUtc.ToCausalDateUtc().
+        /// Это заготовка под API/фронт для выбора даты из всей выборки.
+        /// </summary>
+        public static void SaveCurrentPredictionReportForDate(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> leveragePolicies,
+            DateTime predictionDateUtc,
+            double walletBalanceUsd = 200.0)
+        {
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (leveragePolicies == null) throw new ArgumentNullException(nameof(leveragePolicies));
 
-			if (leveragePolicies.Count == 0)
-				{
-				Console.WriteLine ("[current-report-by-date] no leverage policies, report not built.");
-				return;
-				}
+            if (records.Count == 0)
+            {
+                Console.WriteLine("[current-report-by-date] no records, report not built.");
+                return;
+            }
 
-			try
-				{
-				var snapshot = CurrentPredictionSnapshotBuilder.BuildForDate (
-					records: records,
-					policies: leveragePolicies,
-					walletBalanceUsd: walletBalanceUsd,
-					predictionDateUtc: predictionDateUtc
-				);
+            if (leveragePolicies.Count == 0)
+            {
+                Console.WriteLine("[current-report-by-date] no leverage policies, report not built.");
+                return;
+            }
 
-				// Выводим в консоль именно выбранный день.
-				CurrentPredictionPrinter.Print (snapshot);
+            try
+            {
+                var snapshot = CurrentPredictionSnapshotBuilder.BuildForDate(
+                    records: records,
+                    policies: leveragePolicies,
+                    walletBalanceUsd: walletBalanceUsd,
+                    predictionDateUtc: predictionDateUtc
+                );
 
-				var report = CurrentPredictionReportBuilder.Build (snapshot);
+                // Выводим в консоль именно выбранный день.
+                CurrentPredictionPrinter.Print(snapshot);
 
-				var storage = new ReportStorage ();
-				storage.Save (report);
+                var report = CurrentPredictionReportBuilder.Build(snapshot);
 
-				Console.WriteLine (
-					$"[current-report-by-date] current_prediction report saved for {snapshot.PredictionDateUtc:yyyy-MM-dd} (UTC).");
-				}
-			catch (Exception ex)
-				{
-				Console.WriteLine ($"[current-report-by-date] error while building/saving report: {ex.Message}");
-				}
-			}
-		}
-	}
+                var storage = new ReportStorage();
+                storage.Save(report);
+
+                Console.WriteLine(
+                    $"[current-report-by-date] current_prediction report saved for {snapshot.PredictionDateUtc:yyyy-MM-dd} (UTC).");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[current-report-by-date] error while building/saving report: {ex.Message}");
+            }
+        }
+    }
+}

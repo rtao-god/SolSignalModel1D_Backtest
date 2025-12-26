@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
             var train = OrderAndValidateDayKey(sets.Train, "train");
             var oos = OrderAndValidateDayKey(sets.Oos, "oos");
 
-            EnsureSplitInvariants(sets.Boundary.TrainUntilDayKeyUtc, eligible, train, oos);
+            EnsureSplitInvariants(sets.Boundary.TrainUntilExitDayKeyUtc, eligible, train, oos);
 
             int totalInput = eligible.Count + excluded.Count;
 
@@ -98,13 +98,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
         }
 
         private static void EnsureSplitInvariants(
-            DayKeyUtc trainUntilDayKeyUtc,
+            DayKeyUtc trainUntilExitDayKeyUtc,
             IReadOnlyList<BacktestAggRow> eligible,
             IReadOnlyList<BacktestAggRow> train,
             IReadOnlyList<BacktestAggRow> oos)
         {
-            if (trainUntilDayKeyUtc.Equals(default(DayKeyUtc)))
-                throw new InvalidOperationException("[agg-probs] trainUntilDayKeyUtc is default.");
+            if (trainUntilExitDayKeyUtc.Equals(default(DayKeyUtc)))
+                throw new InvalidOperationException("[agg-probs] trainUntilExitDayKeyUtc is default.");
 
             if (train.Count + oos.Count != eligible.Count)
             {
@@ -112,7 +112,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Agg
                     $"[agg-probs] Split invariant violated: train({train.Count}) + oos({oos.Count}) != eligible({eligible.Count}).");
             }
 
-            var cut = trainUntilDayKeyUtc.Value;
+            var cut = trainUntilExitDayKeyUtc.Value;
 
             for (int i = 0; i < train.Count; i++)
             {

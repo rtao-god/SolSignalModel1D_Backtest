@@ -9,9 +9,8 @@ using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
-using System;
-using System.Collections.Generic;
+using OmniscientModelStatsPrinter =
+    SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers.BacktestModelStatsPrinter;
 using System.Globalization;
 
 namespace SolSignalModel1D_Backtest.Core.Backtest
@@ -190,6 +189,15 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
 
             var microSnap = MicroStatsSnapshotBuilder.Build(sets.Eligible);
             MicroStatsPrinter.Print(microSnap);
+
+            OmniscientModelStatsPrinter.Print(
+                records: records,
+                sol1m: candles1m,
+                dailyTpPct: config.DailyTpPct,
+                dailySlPct: config.DailyStopPct,
+                nyTz: NyTz,
+                trainUntilExitDayKeyUtc: trainUntilDayKeyUtc
+            );
         }
 
         private static bool IsNyWeekendEntry(EntryUtc entry)

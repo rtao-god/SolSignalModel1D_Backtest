@@ -1,16 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Infra;
+using Infra = SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.ML.SL;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Time.NyWindowing;
 using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Utils;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
 
-namespace SolSignalModel1D_Backtest.Core.ML.SL
+
+namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing.ComputeBaselineExitUtc
 {
     public static class SlOfflineBuilder
     {
@@ -31,12 +30,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
             if (sol1h == null || sol1h.Count == 0)
                 throw new InvalidOperationException("[sl-offline] sol1h is null/empty: cannot build SL features.");
 
-            var sol1mLocal = sol1m;
-            var sol1hLocal = sol1h;
-
             SeriesGuards.EnsureStrictlyAscendingUtc(rows, r => r.Causal.EntryUtc.Value, "sl-offline.rows");
-            SeriesGuards.EnsureStrictlyAscendingUtc(sol1mLocal, c => c.OpenTimeUtc, "sl-offline.sol1m");
-            SeriesGuards.EnsureStrictlyAscendingUtc(sol1hLocal, c => c.OpenTimeUtc, "sl-offline.sol1h");
+            SeriesGuards.EnsureStrictlyAscendingUtc(sol1m, c => c.OpenTimeUtc, "sl-offline.sol1m");
+            SeriesGuards.EnsureStrictlyAscendingUtc(sol1h, c => c.OpenTimeUtc, "sl-offline.sol1h");
 
             if (tpPct < 0) throw new ArgumentOutOfRangeException(nameof(tpPct), tpPct, "tpPct must be >= 0.");
             if (slPct < 0) throw new ArgumentOutOfRangeException(nameof(slPct), slPct, "slPct must be >= 0.");
@@ -44,24 +40,18 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                 throw new ArgumentOutOfRangeException(
                     $"[sl-offline] Invalid config: tpPct<=0 and slPct<=0 (tp={tpPct}, sl={slPct}).");
 
-            var nyTz = NyWindowing.NyTz;
-
             var result = new List<SlHitSample>(rows.Count * 2);
             bool hasAnyMorning = false;
 
             foreach (var r in rows)
             {
                 var entry = r.Causal.EntryUtc;
+                DateTime entryUtc = entry.Value;
 
-                if (!NyWindowing.TryCreateNyTradingEntryUtc(entry, nyTz, out var nyEntryUtc))
-                    continue;
-
-                if (!NyWindowing.IsNyMorning(nyEntryUtc, nyTz))
+                if (!CoreNyWindowing.IsNyMorning(entry, nyTz: TimeZones.NewYork))
                     continue;
 
                 hasAnyMorning = true;
-
-                DateTime entryUtc = nyEntryUtc.Value;
 
                 if (!sol6hDict.TryGetValue(entryUtc, out var c6))
                 {
@@ -91,7 +81,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                 DateTime exitUtcExclusive;
                 try
                 {
-                    exitUtcExclusive = NyWindowing.ComputeBaselineExitUtc(nyEntryUtc, nyTz).Value;
+                    exitUtcExclusive = CoreNyWindowing.ComputeBaselineExitUtc(entry, nyTz: TimeZones.NewYork).Value;
                 }
                 catch (Exception ex)
                 {
@@ -106,8 +96,8 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                         $"[sl-offline] Invalid baseline window: exitUtcExclusive <= entryUtc for entry {entryUtc:O}, exit={exitUtcExclusive:O}.");
                 }
 
-                int startIdx = LowerBoundOpenTimeUtc(sol1mLocal, entryUtc);
-                int endIdxExclusive = LowerBoundOpenTimeUtc(sol1mLocal, exitUtcExclusive);
+                int startIdx = LowerBoundOpenTimeUtc(sol1m, entryUtc);
+                int endIdxExclusive = LowerBoundOpenTimeUtc(sol1m, exitUtcExclusive);
 
                 if (endIdxExclusive <= startIdx)
                 {
@@ -119,7 +109,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                 // LONG
                 {
                     var labelRes = EvalPath1m(
-                        all1m: sol1mLocal,
+                        all1m: sol1m,
                         startIdx: startIdx,
                         endIdxExclusive: endIdxExclusive,
                         goLong: true,
@@ -135,7 +125,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                             strongSignal: strongSignal,
                             dayMinMove: dayMinMove,
                             entryPrice: entryPrice,
-                            candles1h: sol1hLocal
+                            candles1h: sol1h
                         );
 
                         if (feats.Length != SlSchema.FeatureCount)
@@ -156,7 +146,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                 // SHORT
                 {
                     var labelRes = EvalPath1m(
-                        all1m: sol1mLocal,
+                        all1m: sol1m,
                         startIdx: startIdx,
                         endIdxExclusive: endIdxExclusive,
                         goLong: false,
@@ -172,7 +162,7 @@ namespace SolSignalModel1D_Backtest.Core.ML.SL
                             strongSignal: strongSignal,
                             dayMinMove: dayMinMove,
                             entryPrice: entryPrice,
-                            candles1h: sol1hLocal
+                            candles1h: sol1h
                         );
 
                         if (feats.Length != SlSchema.FeatureCount)

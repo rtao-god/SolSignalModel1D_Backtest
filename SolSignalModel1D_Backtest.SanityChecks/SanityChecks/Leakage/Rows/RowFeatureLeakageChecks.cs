@@ -1,16 +1,16 @@
-﻿using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Utils.Time;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 {
     /// <summary>
-    /// Self-check на жёсткую утечку: пытается найти фичи, которые численно совпадают
+    /// Self-check на утечку: пытается найти фичи, которые численно совпадают
     /// с будущими таргетами (MaxHigh24/MinLow24/Close24/первая 1m после exit и т.п.).
     ///
     /// Контракт:
@@ -39,9 +39,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
             var nyTz = ctx.NyTz;
 
             if (allRows == null || allRows.Count == 0)
-            {
                 return SelfCheckResult.Ok("[rows-leak] skip: AllRows is empty.");
-            }
 
             List<Candle1m>? sol1mSorted = null;
             if (sol1m != null && sol1m.Count > 0)
@@ -59,28 +57,29 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
                     throw new InvalidOperationException("[rows-leak] AllRows contains null item.");
 
                 var entryUtc = CausalTimeKey.EntryUtc(rec);
-                var dayKey = entryUtc.ToCausalDateUtc();
+                var dayKey = entryUtc.DayKeyUtc.Value;
 
                 var targets = new List<(string Name, double Value)>();
 
+                // double? → кодируем null как NaN, чтобы ниже это попало в invalidTargetValueCount.
                 targets.Add(("MaxHigh24", rec.MaxHigh24));
                 targets.Add(("MinLow24", rec.MinLow24));
                 targets.Add(("Close24", rec.Close24));
 
-                if (double.IsFinite(rec.Entry) && rec.Entry > 0.0 && double.IsFinite(rec.Close24))
+                double close24 = rec.Close24;
+
+                if (double.IsFinite(rec.Entry) && rec.Entry > 0.0 && double.IsFinite(close24))
                 {
-                    double solFwd1 = rec.Close24 / rec.Entry - 1.0;
+                    double solFwd1 = close24 / rec.Entry - 1.0;
                     targets.Add(("SolFwd1(calc:Close24/Entry-1)", solFwd1));
                 }
 
                 if (sol1mSorted != null && nyTz != null)
                 {
-                    var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz);
+                    var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz).Value;
                     var future1m = FindFirstMinuteAfter(sol1mSorted, exitUtc);
                     if (future1m != null)
-                    {
                         targets.Add(("Future1mAfterExit", future1m.Close));
-                    }
                 }
 
                 futureTargetsByDayKey[dayKey] = targets;
@@ -100,7 +99,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
             {
                 if (rec == null) continue;
 
-                var dayKey = CausalTimeKey.DayKeyUtc(rec);
+                var dayKey = CausalTimeKey.DayKeyUtc(rec).Value;
 
                 if (!futureTargetsByDayKey.TryGetValue(dayKey, out var targets) || targets.Count == 0)
                     continue;
@@ -258,9 +257,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
             }
 
             foreach (var g in noiseGroups)
-            {
                 LogGroup(result.Warnings, totalRows, g, "[rows-leak] noise group");
-            }
 
             if (realLeaks.Count == 0)
             {
@@ -270,9 +267,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
             result.Success = false;
             foreach (var g in realLeaks.OrderByDescending(x => x.NonZeroMatches.Count))
-            {
                 LogGroup(result.Errors, totalRows, g, "[rows-leak] possible feature leak");
-            }
 
             result.Summary += $" → FAILED: suspicious groups={realLeaks.Count}.";
             return result;
@@ -311,7 +306,6 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
 
         private static Candle1m? FindFirstMinuteAfter(List<Candle1m> minutes, DateTime t)
         {
-            // Контракт: minutes отсортирован по OpenTimeUtc по возрастанию.
             int lo = 0;
             int hi = minutes.Count - 1;
             int ans = -1;

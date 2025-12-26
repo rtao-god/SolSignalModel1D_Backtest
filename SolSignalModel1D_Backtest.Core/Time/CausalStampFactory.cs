@@ -19,22 +19,24 @@ namespace SolSignalModel1D_Backtest.Core.Time
 
         public bool TryCreate(EntryUtc entryUtc, out CausalStamp stamp)
         {
-            if (NyWindowing.IsWeekendInNy(entryUtc, _nyTz))
+            // 1) Отсекаем weekend на входе и создаём NyTradingEntryUtc (weekend невозможен по типу).
+            if (!NyWindowing.TryCreateNyTradingEntryUtc(entryUtc, _nyTz, out var tradingEntryUtc))
             {
                 stamp = default;
                 return false;
             }
 
-            if (!NyWindowing.IsNyMorning(entryUtc, _nyTz))
+            // 2) Non-morning — это ошибка контракта (не фильтр).
+            if (!NyWindowing.IsNyMorning(new EntryUtc(tradingEntryUtc.Value), _nyTz))
             {
                 throw new InvalidOperationException(
-                    $"[time] Non-morning entryUtc passed where NY-morning expected: {entryUtc.Value:O}.");
+                    $"[time] Non-morning entryUtc passed where NY-morning expected: {tradingEntryUtc.Value:O}.");
             }
 
-            var nyDay = NyWindowing.GetNyTradingDayOrThrow(entryUtc, _nyTz);
-            var exitUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, _nyTz);
+            var nyDay = NyWindowing.GetNyTradingDayOrThrow(tradingEntryUtc, _nyTz);
+            var exitUtc = NyWindowing.ComputeBaselineExitUtc(tradingEntryUtc, _nyTz);
 
-            stamp = new CausalStamp(entryUtc, nyDay, exitUtc);
+            stamp = new CausalStamp(new EntryUtc(tradingEntryUtc.Value), nyDay, exitUtc);
             return true;
         }
 

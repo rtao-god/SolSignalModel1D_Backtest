@@ -217,13 +217,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 					resultBySource[source] = cnt + 1;
 				}
 
-			foreach (var rec in records.OrderBy (r => r.DateUtc))
-				{
+            foreach (var rec in records.OrderBy(r => CausalTimeKey.DayKeyUtc(r).Value))
+            {
 				if (globalDead) break;
 				if (rec == null) throw new InvalidOperationException ("[pnl] records contains null BacktestRecord item.");
 
-				DateTime dayStart = RequireUtcDayStart (rec.DateUtc, nameof (rec.DateUtc));
-				DateTime dayEnd = GetBaselineWindowEndUtcOrFail (rec, dayStart, NyTz);
+                DateTime dayStart = RequireUtcDayStart(CausalTimeKey.DayKeyUtc(rec).Value, "DayKeyUtc");
+                DateTime dayEnd = GetBaselineWindowEndUtcOrFail (rec, dayStart, NyTz);
 
 				var dayMinutes = rec.Forward.DayMinutes;
 				if (dayMinutes == null || dayMinutes.Count == 0)

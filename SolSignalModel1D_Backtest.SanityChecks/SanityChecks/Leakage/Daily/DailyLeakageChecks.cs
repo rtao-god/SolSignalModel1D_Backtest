@@ -6,147 +6,138 @@ using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 {
-    /// <summary>
-    /// Sanity-проверки для дневной модели:
-    /// - разбиение Train/OOS строго по baseline-exit (через NyWindowing);
-    /// - сравнение accuracies Train vs OOS;
-    /// - сравнение с рандомной "shuffle"-моделью.
-    /// </summary>
     public static class DailyLeakageChecks
     {
         public static SelfCheckResult CheckDailyTrainVsOosAndShuffle(
             IReadOnlyList<BacktestRecord> records,
-            DateTime trainUntilUtc,
+            TrainUntilUtc trainUntilUtc,
             TimeZoneInfo nyTz)
         {
-            if (records == null || records.Count == 0)
-            {
-                return SelfCheckResult.Ok("[daily] нет BacktestRecord'ов — пропускаем дневные проверки.");
-            }
-
-            if (trainUntilUtc == default)
-                throw new ArgumentException("[daily] trainUntilUtc must be initialized (non-default).", nameof(trainUntilUtc));
-            if (trainUntilUtc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException("[daily] trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
+            if (records == null) throw new ArgumentNullException(nameof(records));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilUtc.Value == default) throw new ArgumentException("trainUntilUtc must be initialized.", nameof(trainUntilUtc));
+
+            if (records.Count == 0)
+                return SelfCheckResult.Ok("[daily] no records — skipped.");
 
             var ordered = records
-                .OrderBy(r => r.Causal.DayKeyUtc.Value)
+                .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
-            var split = NyTrainSplit.SplitByBaselineExit(ordered, r => r.Causal.EntryUtc, trainUntilUtc, nyTz);
-
-            var train = split.Train;
-            var oos = split.Oos;
-            var excluded = split.Excluded;
-
-            var eligible = new List<BacktestRecord>(train.Count + oos.Count);
-            eligible.AddRange(train);
-            eligible.AddRange(oos);
-
-            var trainUntilIso = NyTrainSplit.ToIsoDate(trainUntilUtc);
-
-            if (eligible.Count == 0)
-            {
-                return SelfCheckResult.Fail(
-                    $"[daily] eligible=0 (train+oos), excluded={excluded.Count}. " +
-                    $"Проверь контракт entryUtc и baseline-exit. trainUntil={trainUntilIso}");
-            }
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: static r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
+                nyTz: nyTz);
 
             var warnings = new List<string>();
             var errors = new List<string>();
 
-            if (excluded.Count > 0)
-            {
-                warnings.Add(
-                    $"[daily] excluded={excluded.Count} (no baseline-exit by contract). " +
-                    "Эти дни исключены из метрик; проверь weekend/дыры/несогласованность entryUtc.");
-            }
+            if (split.Excluded.Count > 0)
+                warnings.Add($"[daily] excluded={split.Excluded.Count} (baseline-exit undefined).");
 
-            if (oos.Count == 0)
-            {
-                warnings.Add(
-                    $"[daily] OOS-часть пуста (нет дней с exit > {trainUntilIso}). Метрики будут train-like.");
-            }
+            var trainPairs = FilterValidTriClassPairs(split.Train);
+            var oosPairs = FilterValidTriClassPairs(split.Oos);
+            var allPairs = FilterValidTriClassPairs(ordered);
 
-            double trainAcc = train.Count > 0 ? ComputeAccuracy(train) : double.NaN;
-            double oosAcc = oos.Count > 0 ? ComputeAccuracy(oos) : double.NaN;
-            double allAcc = ComputeAccuracy(eligible);
+            if (oosPairs.Count == 0)
+                warnings.Add("[daily] OOS-часть пуста (по trainUntil/baseline-exit).");
 
-            double shuffleAcc = ComputeShuffleAccuracy(eligible, classesCount: 3, seed: 42);
+            var trainAcc = ComputeAccuracyPct(trainPairs);
+            var oosAcc = ComputeAccuracyPct(oosPairs);
+            var allAcc = ComputeAccuracyPct(allPairs);
 
-            string summary =
-                $"[daily] eligible={eligible.Count}, excluded={excluded.Count}, " +
-                $"train={train.Count}, oos={oos.Count}, trainUntil(exit<=){trainUntilIso}, " +
-                $"acc_all={allAcc:P1}, acc_train={trainAcc:P1}, acc_oos={oosAcc:P1}, acc_shuffle≈{shuffleAcc:P1}";
+            if (trainPairs.Count >= 50 && trainAcc >= 85.0)
+                errors.Add($"[daily] train accuracy suspiciously high: {trainAcc:0.0}% (n={trainPairs.Count}).");
 
-            if (!double.IsNaN(trainAcc) && train.Count >= 200 && trainAcc > 0.95)
-            {
-                errors.Add($"[daily] train accuracy {trainAcc:P1} при {train.Count} дней — подозрение на утечку.");
-            }
+            if (oosPairs.Count >= 100 && oosAcc >= 75.0)
+                errors.Add($"[daily] OOS accuracy suspiciously high: {oosAcc:0.0}% (n={oosPairs.Count}).");
 
-            if (!double.IsNaN(oosAcc) && oos.Count >= 100 && oosAcc > 0.90)
-            {
-                errors.Add($"[daily] OOS accuracy {oosAcc:P1} при {oos.Count} дней — подозрение на утечку.");
-            }
+            var shuffledAcc = ComputeShuffleAccuracyPct(trainPairs.Count >= 50 ? trainPairs : (oosPairs.Count > 0 ? oosPairs : trainPairs));
+            if (shuffledAcc >= 55.0)
+                errors.Add($"[daily] shuffled-label accuracy too high: {shuffledAcc:0.0}%.");
 
-            if (!double.IsNaN(allAcc) && !double.IsNaN(shuffleAcc) && allAcc < shuffleAcc + 0.05)
-            {
-                warnings.Add($"[daily] accuracy по eligible {allAcc:P1} почти не лучше shuffle {shuffleAcc:P1}.");
-            }
+            var summary =
+                $"[daily] train={trainPairs.Count}, oos={oosPairs.Count}, excluded={split.Excluded.Count}, " +
+                $"acc_train={trainAcc:0.0}%, acc_oos={oosAcc:0.0}%, acc_all={allAcc:0.0}%, acc_shuffle={shuffledAcc:0.0}%";
 
-            var result = new SelfCheckResult
+            var res = new SelfCheckResult
             {
                 Success = errors.Count == 0,
                 Summary = summary
             };
 
-            result.Errors.AddRange(errors);
-            result.Warnings.AddRange(warnings);
+            res.Errors.AddRange(errors);
+            res.Warnings.AddRange(warnings);
 
-            result.Metrics["daily.eligible"] = eligible.Count;
-            result.Metrics["daily.excluded"] = excluded.Count;
+            res.Metrics["daily.acc_all"] = allAcc / 100.0;
+            res.Metrics["daily.acc_train"] = trainAcc / 100.0;
+            res.Metrics["daily.acc_oos"] = oosAcc / 100.0;
+            res.Metrics["daily.acc_shuffle"] = shuffledAcc / 100.0;
 
-            result.Metrics["daily.acc_all"] = allAcc;
-            result.Metrics["daily.acc_train"] = trainAcc;
-            result.Metrics["daily.acc_oos"] = oosAcc;
-            result.Metrics["daily.acc_shuffle"] = shuffleAcc;
+            res.Metrics["daily.n_all"] = allPairs.Count;
+            res.Metrics["daily.n_train"] = trainPairs.Count;
+            res.Metrics["daily.n_oos"] = oosPairs.Count;
+            res.Metrics["daily.n_excluded"] = split.Excluded.Count;
 
-            return result;
+            return res;
         }
 
-        private static double ComputeAccuracy(IReadOnlyList<BacktestRecord> records)
+        private static List<(int TrueLabel, int PredLabel)> FilterValidTriClassPairs(IReadOnlyList<BacktestRecord> rows)
         {
-            if (records.Count == 0) return double.NaN;
+            var res = new List<(int TrueLabel, int PredLabel)>(rows.Count);
 
-            int ok = 0;
-            foreach (var r in records)
+            for (int i = 0; i < rows.Count; i++)
             {
-                if (r.PredLabel_Total == r.TrueLabel)
-                    ok++;
+                var r = rows[i];
+                int t = r.TrueLabel;
+                int p = r.PredLabel;
+
+                if (t is >= 0 and <= 2 && p is >= 0 and <= 2)
+                    res.Add((t, p));
             }
 
-            return ok / (double)records.Count;
+            return res;
         }
 
-        private static double ComputeShuffleAccuracy(
-            IReadOnlyList<BacktestRecord> records,
-            int classesCount,
-            int seed)
+        private static double ComputeAccuracyPct(IReadOnlyList<(int TrueLabel, int PredLabel)> pairs)
         {
-            if (records.Count == 0 || classesCount <= 1) return double.NaN;
+            if (pairs == null || pairs.Count == 0) return 0.0;
 
-            var rnd = new Random(seed);
-            int ok = 0;
-
-            foreach (var r in records)
+            int correct = 0;
+            for (int i = 0; i < pairs.Count; i++)
             {
-                int randomLabel = rnd.Next(classesCount);
-                if (randomLabel == r.TrueLabel)
-                    ok++;
+                if (pairs[i].TrueLabel == pairs[i].PredLabel)
+                    correct++;
             }
 
-            return ok / (double)records.Count;
+            return (double)correct / pairs.Count * 100.0;
+        }
+
+        private static double ComputeShuffleAccuracyPct(IReadOnlyList<(int TrueLabel, int PredLabel)> pairs)
+        {
+            if (pairs == null || pairs.Count == 0) return 0.0;
+
+            var labels = new int[pairs.Count];
+            for (int i = 0; i < pairs.Count; i++)
+                labels[i] = pairs[i].TrueLabel;
+
+            var rng = new Random(123);
+
+            for (int i = labels.Length - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (labels[i], labels[j]) = (labels[j], labels[i]);
+            }
+
+            int correct = 0;
+            for (int i = 0; i < pairs.Count; i++)
+            {
+                if (labels[i] == pairs[i].PredLabel)
+                    correct++;
+            }
+
+            return (double)correct / pairs.Count * 100.0;
         }
     }
 }

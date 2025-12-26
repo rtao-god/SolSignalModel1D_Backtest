@@ -11,7 +11,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public EntryUtc EntryUtc { get; init; }
 
         // Stable day identity (UTC 00:00).
-        public global::SolSignalModel1D_Backtest.Core.Time.DayKeyUtc DayKeyUtc
+        public DayKeyUtc DayKeyUtc
         {
             get
             {

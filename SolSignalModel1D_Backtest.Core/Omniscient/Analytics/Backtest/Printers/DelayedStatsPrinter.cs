@@ -8,6 +8,7 @@ using SolSignalModel1D_Backtest.Core.Utils;
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 	{
 	public static class DelayedStatsPrinter
+
 		{
 		public static void Print ( IReadOnlyList<BacktestRecord> records )
 			{
@@ -246,60 +247,60 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			{
 			// Метод вызывается только для исполненных сделок; иначе статистика будет считать фантомные результаты.
 			if (r.DelayedEntryExecuted != true)
-				throw new InvalidOperationException ($"[delayed] DelayedEntryExecuted!=true, но вызван CalcUnlevPnlPctOrThrow для {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] DelayedEntryExecuted!=true, но вызван CalcUnlevPnlPctOrThrow для {EntryUtcValue(r):O}.");
 
 			// executed=true => результат должен быть проставлен. null здесь означает рассинхрон состояния симуляции.
 			var res = r.DelayedIntradayResult
-				?? throw new InvalidOperationException ($"[delayed] DelayedIntradayResult is null при executed=true для {r.DateUtc:O}.");
+				?? throw new InvalidOperationException ($"[delayed] DelayedIntradayResult is null при executed=true для {EntryUtcValue(r):O}.");
 
 			if (res == DelayedIntradayResult.TpFirst)
 				{
 				var tpPct = r.DelayedIntradayTpPct
-					?? throw new InvalidOperationException ($"[delayed] DelayedIntradayTpPct is null при TpFirst для {r.DateUtc:O}.");
+					?? throw new InvalidOperationException ($"[delayed] DelayedIntradayTpPct is null при TpFirst для {EntryUtcValue(r):O}.");
 				return tpPct;
 				}
 
 			if (res == DelayedIntradayResult.SlFirst)
 				{
-				var slPct = r.DelayedIntradaySlPct
-					?? throw new InvalidOperationException ($"[delayed] DelayedIntradaySlPct is null при SlFirst для {r.DateUtc:O}.");
+				var slPct = r.DelayedIntradaySlPct	
+					?? throw new InvalidOperationException ($"[delayed] DelayedIntradaySlPct is null при SlFirst для {EntryUtcValue(r):O}.");
 				return -slPct;
 				}
 
 			// Close@day / None / Ambiguous: нужен реальный delayed-entry.
 			var dEntry = r.DelayedEntryPrice
-				?? throw new InvalidOperationException ($"[delayed] DelayedEntryPrice is null при close@day для {r.DateUtc:O}.");
+				?? throw new InvalidOperationException ($"[delayed] DelayedEntryPrice is null при close@day для {EntryUtcValue(r):O}.");
 
 			if (dEntry <= 0.0)
-				throw new InvalidOperationException ($"[delayed] DelayedEntryPrice<=0 при close@day для {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] DelayedEntryPrice<=0 при close@day для {EntryUtcValue(r):O}.");
 
 			if (r.Close24 <= 0.0)
-				throw new InvalidOperationException ($"[delayed] Close24<=0 при close@day для {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Close24<=0 при close@day для {EntryUtcValue(r):O}.");
 
 			if (!hasDirection)
-				throw new InvalidOperationException ($"[delayed] Нет направления (PredLabel/Micro) для close@day расчёта на {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Нет направления (PredLabel/Micro) для close@day расчёта на {EntryUtcValue(r):O}.");
 
 			if (wantLong) return r.Close24 / dEntry - 1.0;
 			if (wantShort) return dEntry / r.Close24 - 1.0;
 
-			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для {r.DateUtc:O}.");
+			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для {EntryUtcValue(r):O}.");
 			}
 
 		private static double CalcBaselineUnlevPnlPctOrThrow ( BacktestRecord r, bool hasDirection, bool wantLong, bool wantShort )
 			{
 			if (!hasDirection)
-				throw new InvalidOperationException ($"[delayed] Нет направления для baseline PnL на {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Нет направления для baseline PnL на {EntryUtcValue(r):O}.");
 
 			if (r.Entry <= 0.0)
-				throw new InvalidOperationException ($"[delayed] Entry<=0 для baseline PnL на {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Entry<=0 для baseline PnL на {EntryUtcValue(r):O}.");
 
 			if (r.Close24 <= 0.0)
-				throw new InvalidOperationException ($"[delayed] Close24<=0 для baseline PnL на {r.DateUtc:O}.");
+				throw new InvalidOperationException ($"[delayed] Close24<=0 для baseline PnL на {EntryUtcValue(r):O}.");
 
 			if (wantLong) return r.Close24 / r.Entry - 1.0;
 			if (wantShort) return r.Entry / r.Close24 - 1.0;
 
-			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для baseline на {r.DateUtc:O}.");
+			throw new InvalidOperationException ($"[delayed] Неконсистентное направление для baseline на {EntryUtcValue(r):O}.");
 			}
 
 		private static (bool wantLong, bool wantShort, bool hasDirection) ResolveDirection ( BacktestRecord r )
@@ -314,11 +315,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 
 			// Инвариант: одновременно long/short — это баг upstream.
 			if (wantLong && wantShort)
-				throw new InvalidOperationException (
-					$"[delayed] ambiguous direction: wantLong && wantShort at {r.DateUtc:O}. " +
-					$"PredLabel={r.PredLabel}, PredMicroUp={r.PredMicroUp}, PredMicroDown={r.PredMicroDown}");
+                throw new InvalidOperationException($"[delayed] DelayedEntryExecuted" +
+					$"!=true, но вызван CalcUnlevPnlPctOrThrow для " +
+					$"{EntryUtcValue(r):O}.");
 
-			return (wantLong, wantShort, wantLong || wantShort);
+            return (wantLong, wantShort, wantLong || wantShort);
 			}
 
 		private static void WriteColoredLine ( ConsoleColor color, string text )
@@ -328,5 +329,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers
 			Console.WriteLine (text);
 			Console.ForegroundColor = prev;
 			}
-		}
+
+        private static DateTime EntryUtcValue(BacktestRecord r) => CausalTimeKey.EntryUtc(r).Value;
+    }
 	}

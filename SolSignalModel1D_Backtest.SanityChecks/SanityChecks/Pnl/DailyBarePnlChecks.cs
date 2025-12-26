@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Time;
 
@@ -38,17 +40,25 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
                 throw new ArgumentException("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
+            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            var trainUntilIso = trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
             var ordered = records
                 .OrderBy(r => r.Causal.DayKeyUtc.Value)
                 .ToList();
 
-            var split = NyTrainSplit.SplitByBaselineExit(ordered, r => r.Causal.EntryUtc, trainUntilUtc, nyTz);
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz);
 
             if (split.Excluded.Count > 0)
             {
                 var sample = split.Excluded
                     .Take(Math.Min(10, split.Excluded.Count))
                     .Select(r => r.Causal.DayKeyUtc.Value.ToString("O"));
+
                 throw new InvalidOperationException(
                     $"[pnl-bare] Found excluded days (baseline-exit undefined). " +
                     $"count={split.Excluded.Count}. sample=[{string.Join(", ", sample)}].");
@@ -58,7 +68,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
             var oos = split.Oos;
 
             Console.WriteLine(
-                $"[pnl-bare] trainUntil(baseline-exit)={NyTrainSplit.ToIsoDate(trainUntilUtc)}, " +
+                $"[pnl-bare] trainUntil(baseline-exit day-key)={trainUntilIso}, " +
                 $"totalRecords={records.Count}, train={train.Count}, oos={oos.Count}, excluded={split.Excluded.Count}");
 
             var trainModelStats = ComputeModelPnlStats(train);

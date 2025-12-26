@@ -14,10 +14,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public required CausalPredictionRecord Causal { get; init; }
         public required ForwardOutcomes Forward { get; init; }
 
-        // ===== Identity (legacy proxies) =====
-        public DateTime EntryUtc => Causal.EntryUtc.Value;
-        public DateTime DayKeyUtc => Causal.DayKeyUtc.Value;
-
         // ===== Truth =====
         public int TrueLabel => Forward.TrueLabel;
         public bool FactMicroUp => Forward.FactMicroUp;
@@ -77,6 +73,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public double? DelayedIntradayTpPct => Causal.DelayedIntradayTpPct;
         public double? DelayedIntradaySlPct => Causal.DelayedIntradaySlPct;
         public int? TargetLevelClass => Causal.TargetLevelClass;
+
+        // ===== Time keys (strong-typed) =====
+        public Time.EntryUtc EntryUtc => Forward.EntryUtc;
+        public Time.DayKeyUtc DayKeyUtc => Forward.EntryUtc.DayKeyUtc;
 
         // ===== Omniscient execution facts =====
         public DelayedExecutionFacts? DelayedExecution { get; set; }

@@ -127,68 +127,80 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			return doc;
 			}
 
-		// ====== META: multi-snapshot ======
+        // ====== META: multi-snapshot ======
+        private static KeyValueSection? BuildMultiMetaSection(BacktestModelStatsMultiSnapshot multi)
+        {
+            if (multi.Meta == null)
+                return null;
 
-		private static KeyValueSection? BuildMultiMetaSection ( BacktestModelStatsMultiSnapshot multi )
-			{
-			if (multi.Meta == null)
-				return null;
+            var meta = multi.Meta;
 
-			var meta = multi.Meta;
+            var section = new KeyValueSection
+            {
+                Title = "Параметры модельных статистик (multi-segment)"
+            };
 
-			var section = new KeyValueSection
-				{
-				Title = "Параметры модельных статистик (multi-segment)"
-				};
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "RunKind",
+                Value = meta.RunKind.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "RunKind",
-				Value = meta.RunKind.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "HasOos",
+                Value = meta.HasOos.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "HasOos",
-				Value = meta.HasOos.ToString ()
-				});
+            if (!meta.TrainUntilExitDayKeyUtc.IsDefault)
+            {
+                section.Items.Add(new KeyValueItem
+                {
+                    Key = "TrainUntilExitDayKeyUtc",
+                    Value = meta.TrainUntilExitDayKeyUtc.Value.ToString("O")
+                });
 
-			if (meta.TrainUntilUtc != default)
+                section.Items.Add(new KeyValueItem
+                {
+                    Key = "TrainUntilIsoDate",
+                    Value = meta.TrainUntilIsoDate
+                });
+            }
 
-				section.Items.Add (new KeyValueItem
-				{
-				Key = "TrainRecordsCount",
-				Value = meta.TrainRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "TrainRecordsCount",
+                Value = meta.TrainRecordsCount.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "OosRecordsCount",
-				Value = meta.OosRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "OosRecordsCount",
+                Value = meta.OosRecordsCount.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "TotalRecordsCount",
-				Value = meta.TotalRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "TotalRecordsCount",
+                Value = meta.TotalRecordsCount.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "RecentDays",
-				Value = meta.RecentDays.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "RecentDays",
+                Value = meta.RecentDays.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "RecentRecordsCount",
-				Value = meta.RecentRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "RecentRecordsCount",
+                Value = meta.RecentRecordsCount.ToString()
+            });
 
-			return section;
-			}
+            return section;
+        }
 
-		private static KeyValueSection BuildSegmentMetaSection (
+        private static KeyValueSection BuildSegmentMetaSection (
 			BacktestModelStatsSegmentSnapshot segment,
 			string segmentTitlePrefix )
 			{

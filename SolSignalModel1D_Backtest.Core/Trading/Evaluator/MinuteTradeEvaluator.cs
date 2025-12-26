@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Core.Trading;
 
 namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
@@ -63,14 +64,14 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			if (dayMinMove < MinDayTradeable)
 				return outcome;
 
-			var exitUtc = NyWindowing.ComputeBaselineExitUtc (entryUtc, nyTz);
+            var exitUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz).Value;
 
-			var window = day1m
-				.Where (m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
-				.OrderBy (m => m.OpenTimeUtc)
-				.ToList ();
+            var window = day1m
+				.Where(m => m.OpenTimeUtc >= entryUtc && m.OpenTimeUtc < exitUtc)
+				.OrderBy(m => m.OpenTimeUtc)
+				.ToList();
 
-			if (window.Count == 0)
+            if (window.Count == 0)
 				return outcome;
 
 			double tpPct;

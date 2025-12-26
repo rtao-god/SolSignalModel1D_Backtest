@@ -133,8 +133,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 			DateTime endUtc;
 			try
 			{
-				endUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz);
-			}
+                endUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz).Value;
+            }
 			catch (Exception ex)
 			{
 				throw new InvalidOperationException(
@@ -254,8 +254,8 @@ namespace SolSignalModel1D_Backtest.Core.Trading.Evaluator
 				DateTime end;
 				try
 				{
-					end = NyWindowing.ComputeBaselineExitUtc(rec.Causal.EntryUtc, nyTz);
-				}
+                    end = NyWindowing.ComputeBaselineExitUtc(rec.Causal.EntryUtc, nyTz).Value;
+                }
 				catch (Exception ex)
 				{
 					throw new InvalidOperationException(

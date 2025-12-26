@@ -95,12 +95,15 @@ namespace SolSignalModel1D_Backtest.Core.Backtest
             if (double.IsNegativeInfinity(worstMaxDd))
                 worstMaxDd = 0.0;
 
+            var fromDayKey = mornings.Min(r => CausalTimeKey.DayKeyUtc(r));
+            var toDayKey = mornings.Max(r => CausalTimeKey.DayKeyUtc(r));
+
             // Формируем итоговый summary.
             return new BacktestSummary
             {
                 Config = config,
-                FromDateUtc = fromDate,
-                ToDateUtc = toDate,
+                FromDateUtc = fromDayKey.Value,
+                ToDateUtc = toDayKey.Value,
                 SignalDays = mornings.Count,
 
                 WithSlBase = withSlBase,

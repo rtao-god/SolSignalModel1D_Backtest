@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
 {
@@ -36,14 +35,19 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
                 .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
-            var boundary = new TrainBoundary(trainUntilUtc, nyTz);
-            var split = boundary.Split(ordered, r => r.Causal.EntryUtc.Value);
+            var trainUntilExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz);
 
             var train = split.Train;
             var oos = split.Oos;
 
             Console.WriteLine(
-                $"[pnl-probe] trainUntil(baseline-exit) = {boundary.TrainUntilIsoDate}, " +
+                $"[pnl-probe] trainUntilExitDayKey = {NyTrainSplit.ToIsoDate(trainUntilExitDayKeyUtc)}, " +
                 $"totalRecords={ordered.Count}, train={train.Count}, oos={oos.Count}, excluded={split.Excluded.Count}");
 
             if (train.Count == 0 || oos.Count == 0)

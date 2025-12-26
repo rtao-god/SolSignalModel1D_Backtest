@@ -136,6 +136,10 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.ML
             permSchema[nameof(EvalSample.Label)].ColumnName = labelColumnName;
             permSchema[nameof(EvalSample.Features)].ColumnName = featuresColumnName;
 
+            // Критично: фиксируем размер вектора, чтобы совпал с моделью (Vector<Single, featCount>).
+            permSchema[nameof(EvalSample.Features)].ColumnType =
+                new VectorDataViewType(NumberDataViewType.Single, featCount);
+
             for (int j = 0; j < featCount; j++)
             {
                 // Собираем столбец j.

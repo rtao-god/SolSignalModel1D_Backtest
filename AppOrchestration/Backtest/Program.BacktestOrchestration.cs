@@ -62,16 +62,16 @@ namespace SolSignalModel1D_Backtest
 
 			var runner = new BacktestRunner ();
 
-			runner.Run (
+            runner.Run(
 				mornings: mornings,
 				records: records,
 				candles1m: dayMinutes,
 				policies: policies,
 				config: backtestConfig,
-				trainUntilUtc: _trainUntilUtc
+				trainUntilDayKeyUtc: _trainUntilExitDayKeyUtc
 			);
 
-			BacktestReportsOrchestrator.SaveBacktestReports (
+            BacktestReportsOrchestrator.SaveBacktestReports (
 				mornings: mornings,
 				records: records,
 				sol1m: dayMinutes,

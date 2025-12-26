@@ -16,23 +16,25 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
             TimeZoneInfo nyTz,
             double dailyTpPct,
             double dailySlPct,
-            DateTime trainUntilUtc,
+            DayKeyUtc trainUntilExitDayKeyUtc,
             int recentDays,
             ModelRunKind runKind)
         {
             if (allRecords == null) throw new ArgumentNullException(nameof(allRecords));
             if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault) throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
             if (recentDays <= 0) throw new ArgumentOutOfRangeException(nameof(recentDays), "recentDays must be > 0.");
 
             var multi = new BacktestModelStatsMultiSnapshot
             {
                 Meta =
-                    {
+                {
                     RunKind = runKind,
-                    TrainUntilUtc = trainUntilUtc,
+                    TrainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc,
+                    TrainUntilIsoDate = trainUntilExitDayKeyUtc.ToString(),
                     RecentDays = recentDays
-                    }
+                }
             };
 
             if (allRecords.Count == 0)
@@ -51,16 +53,16 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
                 .OrderBy(EntryUtcDt)
                 .ToList();
 
-            var split = NyTrainSplit.SplitByBaselineExit(ordered, r => r.Causal.EntryUtc, trainUntilUtc, nyTz);
+            var (trainRecords, oosRecords, excluded) = SplitByBaselineExitDayKey(
+                ordered: ordered,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz);
 
-            var trainRecords = split.Train;
-            var oosRecords = split.Oos;
-
-            if (split.Excluded.Count > 0)
+            if (excluded.Count > 0)
             {
                 throw new InvalidOperationException(
                     $"[model-stats] Found excluded records (baseline-exit undefined). " +
-                    $"ExcludedCount={split.Excluded.Count}. " +
+                    $"ExcludedCount={excluded.Count}. " +
                     $"This is a pipeline bug: filter out excluded days before analytics.");
             }
 
@@ -88,7 +90,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
             AddSegmentIfNotEmpty(
                 multi,
                 ModelStatsSegmentKind.OosOnly,
-                label: "OOS-only (baseline-exit > trainUntil)",
+                label: "OOS-only (baseline-exit > trainUntil-exit-day-key)",
                 oosRecords,
                 sol1m,
                 nyTz,
@@ -98,7 +100,7 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
             AddSegmentIfNotEmpty(
                 multi,
                 ModelStatsSegmentKind.TrainOnly,
-                label: "Train-only (baseline-exit <= trainUntil)",
+                label: "Train-only (baseline-exit <= trainUntil-exit-day-key)",
                 trainRecords,
                 sol1m,
                 nyTz,
@@ -160,6 +162,39 @@ namespace SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats
             };
 
             multi.Segments.Add(segment);
+        }
+
+        private static (List<BacktestRecord> Train, List<BacktestRecord> Oos, List<BacktestRecord> Excluded) SplitByBaselineExitDayKey(
+            IReadOnlyList<BacktestRecord> ordered,
+            DayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz)
+        {
+            if (ordered == null) throw new ArgumentNullException(nameof(ordered));
+            if (trainUntilExitDayKeyUtc.IsDefault) throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized.", nameof(trainUntilExitDayKeyUtc));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+
+            var train = new List<BacktestRecord>(ordered.Count);
+            var oos = new List<BacktestRecord>(Math.Min(ordered.Count, 512));
+            var excluded = new List<BacktestRecord>(0);
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var r = ordered[i];
+                var entryDt = r.Causal.EntryUtc.Value;
+
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(entryDt), nyTz, out var exitUtc))
+                {
+                    excluded.Add(r);
+                    continue;
+                }
+
+                var exitDayKey = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
+
+                if (exitDayKey <= trainUntilExitDayKeyUtc) train.Add(r);
+                else oos.Add(r);
+            }
+
+            return (train, oos, excluded);
         }
     }
 }

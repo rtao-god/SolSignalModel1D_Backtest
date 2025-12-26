@@ -1,5 +1,6 @@
 ﻿using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Time;
 using System;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
@@ -19,8 +20,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Pnl
 
 		private static DateTime GetBaselineWindowEndUtcOrFail ( BacktestRecord rec, DateTime dayStartUtc, TimeZoneInfo nyTz )
 			{
-			// Канон: baseline end в одном месте и одинаково по всему проекту.
-			DateTime expected = NyWindowing.ComputeBaselineExitUtc (dayStartUtc, nyTz);
+            // baseline end в одном месте и одинаково по всему проекту.
+            var entryUtcDt = rec.Causal.EntryUtc.Value;
+            DateTime expected = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtcDt), nyTz).Value;
 
             DateTime fromRec = rec.Forward.WindowEndUtc;
             if (fromRec == default)

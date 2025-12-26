@@ -2,8 +2,10 @@
 using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -11,11 +13,27 @@ namespace SolSignalModel1D_Backtest
     {
         private static void RunDailyPfi(List<LabeledCausalRow> allRows)
         {
-            var boundary = new TrainBoundary(_trainUntilUtc, NyTz);
-            var split = boundary.Split(allRows, r => r.EntryUtc.Value);
+            if (allRows == null) throw new ArgumentNullException(nameof(allRows));
+            if (allRows.Count == 0)
+            {
+                Console.WriteLine("[pfi:daily] allRows is empty, skip.");
+                return;
+            }
 
-            var dailyTrainRows = split.Train;
-            var dailyOosRows = split.Oos;
+            var ordered = allRows
+                .OrderBy(r => r.EntryUtc.Value)
+                .ToList();
+
+            var trainUntil = new TrainUntilUtc(_trainUntilUtc);
+
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: static r => new EntryUtc(r.EntryUtc.Value),
+                trainUntilExitDayKeyUtc: trainUntil.ExitDayKeyUtc,
+                nyTz: NyTz);
+
+            var dailyTrainRows = split.Train is List<LabeledCausalRow> tl ? tl : split.Train.ToList();
+            var dailyOosRows = split.Oos is List<LabeledCausalRow> ol ? ol : split.Oos.ToList();
 
             if (dailyTrainRows.Count < 50)
             {

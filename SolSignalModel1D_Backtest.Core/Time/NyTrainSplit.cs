@@ -1,23 +1,26 @@
 ﻿using System;
 using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Time
 {
-    /// <summary>
-    /// Единая сегментация Train/OOS по контракту baseline-exit:
-    /// - TRAIN: baseline-exit <= trainUntilUtc
-    /// - OOS  : baseline-exit >  trainUntilUtc
-    /// - EXCLUDED: baseline-exit не определён по контракту (weekend entry в NY)
-    /// </summary>
-    public static class NyTrainSplit
+    public static partial class NyTrainSplit
     {
-        public sealed class Result<T>
+        public enum EntryClass
         {
-            public List<T> Train { get; }
-            public List<T> Oos { get; }
-            public List<T> Excluded { get; }
+            Train = 0,
+            Oos = 1,
+            Excluded = 2
+        }
 
-            public Result(List<T> train, List<T> oos, List<T> excluded)
+        public sealed class Split<T>
+        {
+            public IReadOnlyList<T> Train { get; }
+            public IReadOnlyList<T> Oos { get; }
+            public IReadOnlyList<T> Excluded { get; }
+
+            public Split(IReadOnlyList<T> train, IReadOnlyList<T> oos, IReadOnlyList<T> excluded)
             {
                 Train = train ?? throw new ArgumentNullException(nameof(train));
                 Oos = oos ?? throw new ArgumentNullException(nameof(oos));
@@ -25,50 +28,92 @@ namespace SolSignalModel1D_Backtest.Core.Time
             }
         }
 
-        public static string ToIsoDate(DateTime tUtc)
+        public static string ToIsoDate(DayKeyUtc dayKeyUtc)
         {
-            if (tUtc == default)
-                return "0001-01-01";
-            if (tUtc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException($"[time] expected UTC, got Kind={tUtc.Kind}, t={tUtc:O}.", nameof(tUtc));
-            return tUtc.ToString("yyyy-MM-dd");
+            if (dayKeyUtc.IsDefault)
+                throw new ArgumentException("dayKeyUtc must be initialized (non-default).", nameof(dayKeyUtc));
+
+            return dayKeyUtc.Value.ToString("yyyy-MM-dd");
         }
 
-        public static Result<T> SplitByBaselineExit<T>(
+        public static EntryClass ClassifyByBaselineExit(
+            EntryUtc entryUtc,
+            DayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz,
+            out DayKeyUtc baselineExitDayKeyUtc)
+        {
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (entryUtc.IsDefault)
+                throw new ArgumentException("entryUtc must be initialized (non-default).", nameof(entryUtc));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+
+            if (!NyWindowing.TryComputeBaselineExitUtc(entryUtc, nyTz, out var exitUtc))
+            {
+                baselineExitDayKeyUtc = default;
+                return EntryClass.Excluded;
+            }
+
+            baselineExitDayKeyUtc = DayKeyUtc.FromUtcMomentOrThrow(exitUtc.Value);
+
+            return baselineExitDayKeyUtc.Value <= trainUntilExitDayKeyUtc.Value
+                ? EntryClass.Train
+                : EntryClass.Oos;
+        }
+
+        /// <summary>
+        /// Каноничный сплит: по baseline-exit day-key (а не по entryUtc).
+        /// ordered обязан быть строго возрастающим по entrySelector(...).Value (UTC).
+        /// </summary>
+        public static Split<T> SplitByBaselineExit<T>(
             IReadOnlyList<T> ordered,
             Func<T, EntryUtc> entrySelector,
-            DateTime trainUntilUtc,
+            DayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz)
         {
             if (ordered == null) throw new ArgumentNullException(nameof(ordered));
             if (entrySelector == null) throw new ArgumentNullException(nameof(entrySelector));
-            if (trainUntilUtc == default)
-                throw new ArgumentException("trainUntilUtc must be initialized (non-default).", nameof(trainUntilUtc));
-            if (trainUntilUtc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
             var train = new List<T>(ordered.Count);
-            var oos = new List<T>(Math.Min(ordered.Count, 256));
-            var excluded = new List<T>(Math.Min(ordered.Count, 64));
+            var oos = new List<T>(Math.Max(0, ordered.Count / 3));
+            var excluded = new List<T>();
+
+            bool hasPrev = false;
+            DateTime prev = default;
 
             for (int i = 0; i < ordered.Count; i++)
             {
-                var r = ordered[i];
-                var entryUtc = entrySelector(r);
+                var x = ordered[i];
 
-                if (!NyWindowing.TryComputeBaselineExitUtc(entryUtc, nyTz, out var exitUtc))
-                {
-                    excluded.Add(r);
-                    continue;
-                }
+                var e = entrySelector(x);
+                if (e.IsDefault)
+                    throw new InvalidOperationException("[ny-split] entrySelector returned default EntryUtc.");
 
-                // baseline-exit <= trainUntil -> TRAIN, иначе OOS.
-                if (exitUtc.Value <= trainUntilUtc) train.Add(r);
-                else oos.Add(r);
+                var cur = e.Value;
+                if (cur.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[ny-split] entrySelector must return UTC. got Kind={cur.Kind}, t={cur:O}.");
+
+                if (hasPrev && cur <= prev)
+                    throw new InvalidOperationException($"[ny-split] ordered must be strictly ascending by entryUtc. prev={prev:O}, cur={cur:O}.");
+
+                prev = cur;
+                hasPrev = true;
+
+                var cls = ClassifyByBaselineExit(
+                    entryUtc: e,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: nyTz,
+                    baselineExitDayKeyUtc: out _);
+
+                if (cls == EntryClass.Train) train.Add(x);
+                else if (cls == EntryClass.Oos) oos.Add(x);
+                else excluded.Add(x);
             }
 
-            return new Result<T>(train, oos, excluded);
+            return new Split<T>(train, oos, excluded);
         }
     }
 }
