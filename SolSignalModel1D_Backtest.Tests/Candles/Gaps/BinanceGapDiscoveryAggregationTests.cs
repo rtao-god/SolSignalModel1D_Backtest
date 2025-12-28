@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Gaps;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
 using Xunit;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Candles.Gaps
+namespace SolSignalModel1D_Backtest.Tests.Candles.Gaps
 	{
 	public sealed class BinanceGapDiscoveryAggregationTests
 		{

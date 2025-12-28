@@ -1,8 +1,10 @@
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using Xunit;
 using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
@@ -39,12 +41,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				nyTz: tz);
 
 			var rowsA = resA.LabeledRows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.Causal.EntryUtc.Value)
 				.ToList ();
 
 			Assert.True (rowsA.Count > 50, "rowsA слишком мало для теста");
 
-			var cutoffUtc = rowsA[rowsA.Count / 3].Causal.DateUtc;
+			var cutoffUtc = rowsA[rowsA.Count / 3].Causal.EntryUtc.Value;
 			var mutateFromDay = cutoffUtc.ToCausalDateUtc ().AddDays (10);
 
 			var fngB = new Dictionary<DateTime, double> (fngBase);
@@ -74,11 +76,11 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				nyTz: tz);
 
 			var rowsB = resB.LabeledRows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.Causal.EntryUtc.Value)
 				.ToList ();
 
-			var dictA = rowsA.ToDictionary (r => r.Causal.DateUtc, r => r);
-			var dictB = rowsB.ToDictionary (r => r.Causal.DateUtc, r => r);
+			var dictA = rowsA.ToDictionary (r => r.Causal.EntryUtc.Value, r => r);
+			var dictB = rowsB.ToDictionary (r => r.Causal.EntryUtc.Value, r => r);
 
 			foreach (var kv in dictA)
 				{
@@ -203,8 +205,16 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		private static List<Candle6h> BuildDailyWinTrainFromAll6h ( List<Candle6h> all6h )
 			{
 			return all6h
-				.Where (c => c.OpenTimeUtc.Hour == 12)
+				.Select (c => new Candle6h
+					{
+					OpenTimeUtc = c.OpenTimeUtc,
+					Open = c.Open,
+					High = c.High,
+					Low = c.Low,
+					Close = c.Close
+					})
 				.ToList ();
 			}
 		}
 	}
+

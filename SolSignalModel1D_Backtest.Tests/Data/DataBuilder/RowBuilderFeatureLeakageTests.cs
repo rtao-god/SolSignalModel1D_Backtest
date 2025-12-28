@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -24,8 +26,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			{
 			var tz = CoreNyWindowing.NyTz;
 
-			const int total6h = 300;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int total6h = 800;
+			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			var solAll6h_A = new List<Candle6h> (total6h);
 			var solAll6h_B = new List<Candle6h> (total6h);
@@ -125,15 +127,15 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				nyTz: tz);
 
 			var rowsA0 = buildA0.LabeledRows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.Causal.EntryUtc.Value)
 				.ToList ();
 
 			Assert.True (rowsA0.Count > 50, "rowsA слишком мало для теста.");
 
-			var entryUtc = rowsA0[rowsA0.Count / 3].Causal.DateUtc;
+			var entryUtc = rowsA0[rowsA0.Count / 3].Causal.EntryUtc;
 
 			// Находим baseline-exit и 6h-свечу, которая его покрывает в B-сценарии.
-			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, tz);
+			var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc (entryUtc, tz).Value;
 
 			int exitIdx = -1;
 			for (int i = 0; i < solAll6h_B.Count; i++)
@@ -181,8 +183,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			var rowsA = buildA.LabeledRows;
 			var rowsB = buildB.LabeledRows;
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.EntryUtc.Value == entryUtc.Value);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.EntryUtc.Value == entryUtc.Value);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
@@ -208,3 +210,4 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			}
 		}
 	}
+

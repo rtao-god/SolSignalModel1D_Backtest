@@ -2,7 +2,6 @@ using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,15 +25,15 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 
             var pivotEntry = new EntryUtc(datesUtc[^40]);
             var pivotExit = NyWindowing.ComputeBaselineExitUtc(pivotEntry, nyTz);
-            var trainUntil = new TrainUntilUtc(pivotExit.Value.AddMinutes(1));
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit.Value.AddMinutes(1));
 
             var rowsA = CloneRows(allRows);
             var rowsB = CloneRows(allRows);
 
-            MutateOosTail(rowsB, trainUntil, nyTz);
+            MutateOosTail(rowsB, trainUntilExitDayKeyUtc, nyTz);
 
-            var dsA = MicroDatasetBuilder.Build(rowsA, trainUntil);
-            var dsB = MicroDatasetBuilder.Build(rowsB, trainUntil);
+            var dsA = MicroDatasetBuilder.Build(rowsA, trainUntilExitDayKeyUtc);
+            var dsB = MicroDatasetBuilder.Build(rowsB, trainUntilExitDayKeyUtc);
 
             AssertRowsEqual(dsA.TrainRows, dsB.TrainRows);
             AssertRowsEqual(dsA.MicroRows, dsB.MicroRows);
@@ -113,7 +112,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
             return res;
         }
 
-        private static void MutateOosTail(List<LabeledCausalRow> rows, TrainUntilUtc trainUntilUtc, TimeZoneInfo nyTz)
+        private static void MutateOosTail(List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc, TimeZoneInfo nyTz)
         {
             for (int i = 0; i < rows.Count; i++)
             {
@@ -123,11 +122,22 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
                     continue;
 
                 var exitDayKey = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
-                if (exitDayKey.Value <= trainUntilUtc.ExitDayKeyUtc.Value)
+                if (exitDayKey.Value <= trainUntilExitDayKeyUtc.Value)
                     continue;
 
-                bool newUp = !r.FactMicroUp;
-                bool newDown = !r.FactMicroDown;
+                bool newUp;
+                bool newDown;
+
+                if (r.FactMicroUp == r.FactMicroDown)
+                {
+                    newUp = (i % 2 == 0);
+                    newDown = !newUp;
+                }
+                else
+                {
+                    newUp = !r.FactMicroUp;
+                    newDown = !r.FactMicroDown;
+                }
 
                 if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var nyEntry))
                     throw new InvalidOperationException($"[test] entry unexpectedly not NY-trading. t={r.EntryUtc.Value:O}");
@@ -166,9 +176,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
             }
         }
 
-        private static CausalDataRow CloneCausal(CausalDataRow c) =>
-            new CausalDataRow(
-                entryUtc: c.EntryUtc,
+        private static CausalDataRow CloneCausal(CausalDataRow c)
+        {
+            var nyEntry = NyWindowing.CreateNyTradingEntryUtcOrThrow(c.EntryUtc, NyWindowing.NyTz);
+
+            return new CausalDataRow(
+                entryUtc: nyEntry,
                 regimeDown: c.RegimeDown,
                 isMorning: c.IsMorning,
                 hardRegime: c.HardRegime,
@@ -201,6 +214,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
                 solAboveEma50: c.SolAboveEma50,
                 solEma50vs200: c.SolEma50vs200,
                 btcEma50vs200: c.BtcEma50vs200);
+        }
 
         private static LabeledCausalRow MakeRow(
             NyTradingEntryUtc entryUtc,

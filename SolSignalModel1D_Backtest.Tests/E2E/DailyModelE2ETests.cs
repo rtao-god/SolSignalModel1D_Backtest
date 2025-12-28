@@ -2,13 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
 	{
@@ -29,7 +32,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			int seed )
 			{
 			var list = new List<Candle6h> (count);
-			var t = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			var t = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 			double price = startPrice;
 			var rnd = new Random (seed);
 
@@ -95,7 +98,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 		[Fact]
 		public void DailyModel_UsesMoreThanOneClass_OnSyntheticZigZag ()
 			{
-			const int total6h = 800;     // ~200 дней
+			const int total6h = 1600;     // ~400 дней
 			const int holdoutDays = 60;  // OOS для проверки предиктов
 
 			var nyTz = TimeZones.NewYork;
@@ -136,7 +139,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			Assert.True (rows.Count > 200, $"Too few rows built for e2e test: {rows.Count}");
 
-			static DateTime EntryUtc ( LabeledCausalRow r ) => r.Causal.DateUtc;
+			static DateTime EntryUtc ( LabeledCausalRow r ) => r.EntryUtc.Value;
 
 			var ordered = rows
 				.OrderBy (EntryUtc)
@@ -155,11 +158,19 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				Assert.True (kv.Value >= 10, $"Label {kv.Key} has too few samples for training: {kv.Value}.");
 
 			DateTime maxEntryUtc = EntryUtc (ordered.Last ());
-			DateTime trainUntil = maxEntryUtc.AddDays (-holdoutDays);
+			DateTime trainUntilEntryUtc = maxEntryUtc.AddDays (-holdoutDays);
+			var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc (
+				NyWindowing.ComputeExitDayKeyUtc (
+					new EntryUtc (trainUntilEntryUtc),
+					nyTz));
 
-			var trainRows = ordered
-				.Where (r => EntryUtc (r) <= trainUntil)
-				.ToList ();
+			var split = NyTrainSplit.SplitByBaselineExit (
+				ordered: ordered,
+				entrySelector: r => new EntryUtc (r.EntryUtc.Value),
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+				nyTz: nyTz);
+
+			var trainRows = split.Train;
 
 			Assert.True (trainRows.Count >= 100, $"Too few train rows for daily model e2e: {trainRows.Count}.");
 
@@ -172,9 +183,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			var engine = new PredictionEngine (bundle);
 
-			var evalRows = ordered
-				.Where (r => EntryUtc (r) > trainUntil)
-				.ToList ();
+			var evalRows = split.Oos;
 
 			if (evalRows.Count < 100)
 				{

@@ -1,16 +1,16 @@
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
 	{
@@ -60,18 +60,22 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				nyTz: NyWindowing.NyTz);
 
 			var rowsAAll = buildA0.LabeledRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (rowsAAll);
 
-			var minDate = rowsAAll.First ().DateUtc;
-			var maxDate = rowsAAll.Last ().DateUtc;
+			var minDate = rowsAAll.First ().EntryUtc.Value;
+			var maxDate = rowsAAll.Last ().EntryUtc.Value;
 
-			var cutoffTicks = minDate.Ticks + (long) ((maxDate.Ticks - minDate.Ticks) * 0.60);
-			var trainUntilUtc = new DateTime (cutoffTicks, DateTimeKind.Utc);
+			var cutoffIdx = Math.Max (0, (int) Math.Floor (rowsAAll.Count * 0.60));
+			var trainUntilEntryUtc = rowsAAll[cutoffIdx].EntryUtc.Value;
+			var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc (
+				NyWindowing.ComputeExitDayKeyUtc (
+					new EntryUtc (trainUntilEntryUtc),
+					NyWindowing.NyTz));
 
-			var tailStartUtc = trainUntilUtc.AddDays (5);
+			var tailStartUtc = trainUntilEntryUtc.AddDays (5);
 
 			SyntheticCandleHistory.MutateFutureTail (
 				solWinTrain: solWinTrainB,
@@ -94,14 +98,14 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				nyTz: NyWindowing.NyTz);
 
 			var rowsBAll = buildB0.LabeledRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (rowsBAll);
 
 			var dsA = DailyDatasetBuilder.Build (
 				allRows: rowsAAll,
-				trainUntil: trainUntilUtc,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
@@ -109,7 +113,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 			var dsB = DailyDatasetBuilder.Build (
 				allRows: rowsBAll,
-				trainUntil: trainUntilUtc,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
@@ -207,7 +211,7 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.DateUtc, b.DateUtc);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
 				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
@@ -226,3 +230,4 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 			}
 		}
 	}
+

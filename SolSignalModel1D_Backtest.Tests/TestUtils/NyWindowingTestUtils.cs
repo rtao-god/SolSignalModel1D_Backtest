@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Domain;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.TestUtils
 {
@@ -106,3 +105,4 @@ namespace SolSignalModel1D_Backtest.Tests.TestUtils
         }
     }
 }
+

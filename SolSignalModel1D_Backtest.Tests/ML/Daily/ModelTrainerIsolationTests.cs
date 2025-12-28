@@ -1,8 +1,10 @@
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -68,11 +70,15 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 			var rng = new Random (seed);
 			var rows = new List<LabeledCausalRow> (count);
 
-			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+			var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
+				startNyLocalDate: NyTestDates.NyLocal (2020, 1, 1, 0),
+				count: count,
+				hour: 8);
 
 			for (int i = 0; i < count; i++)
 				{
-				var dateUtc = start.AddDays (i);
+				var dateUtc = entriesUtc[i];
+				var entryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow (new EntryUtc (dateUtc), NyWindowing.NyTz);
 
 				double x1 = rng.NextDouble () * 2.0 - 1.0;
 				double x2 = rng.NextDouble () * 2.0 - 1.0;
@@ -88,7 +94,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				bool factMicroDown = trueLabel == 1 && score < 0;
 
 				var causal = new CausalDataRow (
-					dateUtc: dateUtc,
+					entryUtc: entryUtc,
 					regimeDown: score < -0.2,
 					isMorning: true,
 					hardRegime: 1,

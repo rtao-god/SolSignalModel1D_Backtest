@@ -1,8 +1,8 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,12 +20,15 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
         [Fact]
         public void Build_UsesOnlyRowsUpToTrainUntil()
         {
-            var startEntryUtc = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2025, 1, 1, 0),
+                count: 50,
+                hour: 8);
 
             var rows = new List<LabeledCausalRow>(50);
             for (int i = 0; i < 50; i++)
             {
-                var entryUtc = startEntryUtc.AddDays(i);
+                var entryUtc = entriesUtc[i];
 
                 var causal = MakeCausalRow(
                     dateUtc: entryUtc,
@@ -45,27 +48,31 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
                     factMicroDown: factDown));
             }
 
-            var t = startEntryUtc.AddDays(30);
+            var t = entriesUtc[30];
             var trainUntil = new DateTime(t.Year, t.Month, t.Day, 0, 0, 0, DateTimeKind.Utc);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(trainUntil);
 
-            var ds = MicroDatasetBuilder.Build(rows, trainUntil);
+            var ds = MicroDatasetBuilder.Build(rows, trainUntilExitDayKeyUtc);
 
             Assert.NotEmpty(ds.TrainRows);
             Assert.NotEmpty(ds.MicroRows);
 
-            Assert.All(ds.TrainRows, r => Assert.True(CausalTimeKey.EntryDayKeyUtc(r).Value <= trainUntil));
-            Assert.All(ds.MicroRows, r => Assert.True(CausalTimeKey.EntryDayKeyUtc(r).Value <= trainUntil));
+            Assert.All(ds.TrainRows, r => Assert.True(CausalTimeKey.EntryDayKeyUtc(r).Value <= trainUntilExitDayKeyUtc.Value));
+            Assert.All(ds.MicroRows, r => Assert.True(CausalTimeKey.EntryDayKeyUtc(r).Value <= trainUntilExitDayKeyUtc.Value));
         }
 
         [Fact]
         public void Build_MicroRowsAreSubsetOfTrainRows()
         {
-            var startEntryUtc = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2025, 1, 1, 0),
+                count: 50,
+                hour: 8);
 
             var rows = new List<LabeledCausalRow>(50);
             for (int i = 0; i < 50; i++)
             {
-                var entryUtc = startEntryUtc.AddDays(i);
+                var entryUtc = entriesUtc[i];
 
                 var causal = MakeCausalRow(
                     dateUtc: entryUtc,
@@ -85,10 +92,11 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
                     factMicroDown: factDown));
             }
 
-            var t = startEntryUtc.AddDays(40);
+            var t = entriesUtc[40];
             var trainUntil = new DateTime(t.Year, t.Month, t.Day, 0, 0, 0, DateTimeKind.Utc);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(trainUntil);
 
-            var ds = MicroDatasetBuilder.Build(rows, trainUntil);
+            var ds = MicroDatasetBuilder.Build(rows, trainUntilExitDayKeyUtc);
 
             var trainKeys = ds.TrainRows
                 .Select(r => CausalTimeKey.EntryDayKeyUtc(r))
@@ -147,3 +155,4 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
         }
     }
 }
+

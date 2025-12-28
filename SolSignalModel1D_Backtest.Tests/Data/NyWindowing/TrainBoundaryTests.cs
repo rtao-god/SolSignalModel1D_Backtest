@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
-using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Time.NyWindowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 {
@@ -22,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 			};  
 
             var exitThu = CoreNyWindowing.ComputeBaselineExitUtc(entries[0], tz);
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitThu.Value);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitThu.Value);
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: entries,
@@ -39,3 +39,4 @@ namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
         }
     }
 }
+

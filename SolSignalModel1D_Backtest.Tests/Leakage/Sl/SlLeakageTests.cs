@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 
-namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
+namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
 	/// <summary>
 	/// Sanity-тесты для SL-фич:
@@ -83,18 +84,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 			// Arrange: нет 1h-истории, entryPrice > 0.
 			var entryUtc = new DateTime (2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 
-			// Act: должен вернуть вектор нужной длины без исключений.
-			var feats = SlFeatureBuilder.Build (
-				entryUtc: entryUtc,
-				goLong: true,
-				strongSignal: false,
-				dayMinMove: 0.03,
-				entryPrice: 100,
-				candles1h: new List<Candle1h> ());
+			// Act/Assert: пустая история запрещена контрактом.
+			var ex = Assert.Throws<InvalidOperationException> (() =>
+				SlFeatureBuilder.Build (
+					entryUtc: entryUtc,
+					goLong: true,
+					strongSignal: false,
+					dayMinMove: 0.03,
+					entryPrice: 100,
+					candles1h: new List<Candle1h> ()));
 
-			// Assert
-			Assert.NotNull (feats);
-			Assert.True (feats.Length > 0);
+			Assert.Contains ("candles1h is null/empty", ex.Message, StringComparison.Ordinal);
 			}
 		}
 	}

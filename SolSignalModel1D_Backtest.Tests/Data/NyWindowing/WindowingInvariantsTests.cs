@@ -1,10 +1,10 @@
 using System;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using Xunit;
-using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Time.NyWindowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
+namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 {
     public sealed class NyWindowingInvariantsTests
     {
@@ -56,3 +56,4 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
         }
     }
 }
+

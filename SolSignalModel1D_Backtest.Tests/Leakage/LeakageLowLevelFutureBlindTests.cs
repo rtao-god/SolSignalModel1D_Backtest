@@ -1,12 +1,14 @@
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
@@ -48,13 +50,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				nyTz: nyTz);
 
 			var rowsOriginal = buildOriginal.LabeledRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (rowsOriginal);
 
 			// EntryUtc берём явно из causal-части, без record-extension (устраняем ambiguous).
-			var lastRowEntryUtc = rowsOriginal.Last ().Causal.DateUtc;
+			var lastRowEntryUtc = rowsOriginal.Last ().Causal.EntryUtc.Value;
 
 			var mutateAfterUtc = lastRowEntryUtc.AddDays (-1);
 			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3);
@@ -83,19 +85,19 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				nyTz: nyTz);
 
 			var rowsMutated = buildMutated.LabeledRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (rowsMutated);
 
 			var safeOriginal = rowsOriginal
-				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
-				.OrderBy (r => r.DateUtc)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
-				.OrderBy (r => r.DateUtc)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (safeOriginal);
@@ -106,8 +108,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = safeOriginal[i];
 				var b = safeMutated[i];
 
-				Assert.Equal (a.DateUtc, b.DateUtc);
-				Assert.Equal (a.Causal.DateUtc, b.Causal.DateUtc);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
+				Assert.Equal (a.Causal.EntryUtc.Value, b.Causal.EntryUtc.Value);
 
 				var fa = a.Causal.FeaturesVector.Span;
 				var fb = b.Causal.FeaturesVector.Span;
@@ -117,7 +119,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				for (int j = 0; j < fa.Length; j++)
 					{
 					AssertAlmostEqual (fa[j], fb[j], 1e-9,
-						$"FeatureVector[{j}] differs for EntryUtc={a.Causal.DateUtc:O}");
+						$"FeatureVector[{j}] differs for EntryUtc={a.Causal.EntryUtc.Value:O}");
 					}
 
 				AssertAlmostEqual (a.Causal.SolRet30, b.Causal.SolRet30, 1e-9, "SolRet30 mismatch");
@@ -150,15 +152,15 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 					solAll1m,
 					fngHistory,
 					dxySeries,
-					extraDaily: null,
-					nyTz: nyTz)
+				extraDaily: null,
+				nyTz: nyTz)
 				.LabeledRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (rowsOriginal);
 
-			var lastRowEntryUtc = rowsOriginal.Last ().Causal.DateUtc;
+			var lastRowEntryUtc = rowsOriginal.Last ().Causal.EntryUtc.Value;
 			var mutateAfterUtc = lastRowEntryUtc.AddDays (-1);
 			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3);
 
@@ -185,19 +187,19 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 					extraDaily: null,
 					nyTz: nyTz)
 				.LabeledRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (rowsMutated);
 
 			var safeOriginal = rowsOriginal
-				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
-				.OrderBy (r => r.DateUtc)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.Causal.DateUtc <= protectedBoundaryUtc)
-				.OrderBy (r => r.DateUtc)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (safeOriginal);
@@ -208,7 +210,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = safeOriginal[i];
 				var b = safeMutated[i];
 
-				Assert.Equal (a.DateUtc, b.DateUtc);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
@@ -236,7 +238,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var paxgWinTrain = new List<Candle6h> (total6h);
 			var solAll6h = new List<Candle6h> (total6h);
 
-			var startLocal = new DateTime (2021, 1, 4, 8, 0, 0, DateTimeKind.Unspecified);
+			var startLocal = new DateTime (2021, 1, 4, 7, 0, 0, DateTimeKind.Unspecified);
 
 			for (int i = 0; i < total6h; i++)
 				{
@@ -289,7 +291,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var lastOpenLocal = startLocal.AddHours (6 * (total6h - 1));
 			var lastOpenUtc = TimeZoneInfo.ConvertTimeToUtc (lastOpenLocal, nyTz);
 
-			var lastExitUtc = NyWindowing.ComputeBaselineExitUtc (lastOpenUtc, nyTz);
+			var lastExitUtc = NyWindowing.ComputeBaselineExitUtc (new EntryUtc (lastOpenUtc), nyTz).Value;
 			var lastExitLocal = TimeZoneInfo.ConvertTimeFromUtc (lastExitUtc, nyTz);
 
 			var totalMinutes = (int) Math.Ceiling ((lastExitLocal - firstMinuteLocal).TotalMinutes) + 60;
@@ -435,3 +437,4 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			}
 		}
 	}
+

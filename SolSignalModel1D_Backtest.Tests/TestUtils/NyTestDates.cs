@@ -1,5 +1,4 @@
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.TestUtils
 	{
@@ -27,21 +26,27 @@ namespace SolSignalModel1D_Backtest.Tests.TestUtils
 			int minute = 0 )
 			{
 			// Генератор “торговых” entry: только будни в NY.
-			// Зачем: TrainBoundary по контракту исключает weekend; если синтетика содержит weekend,
-			// тесты начинают проверять “исключение weekend”, а не нужный инвариант.
+			// EntryUtc вычисляем канонично через NyWindowing, чтобы 07:00/08:00 соблюдалось по DST.
+			_ = hour;
+			_ = minute;
+
 			var res = new List<DateTime> (count);
 
 			var d = new DateTime (
 				startNyLocalDate.Year,
 				startNyLocalDate.Month,
 				startNyLocalDate.Day,
-				hour, minute, 0,
+				0, 0, 0,
 				DateTimeKind.Unspecified);
 
 			while (res.Count < count)
 				{
 				if (d.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday)
-					res.Add (ToUtc (d));
+					{
+					var nyDay = new NyTradingDay (DateOnly.FromDateTime (d));
+					var entryUtc = NyWindowing.ComputeEntryUtcFromNyDayOrThrow (nyDay, NyTz);
+					res.Add (entryUtc.Value);
+					}
 
 				d = d.AddDays (1);
 				}
@@ -50,3 +55,4 @@ namespace SolSignalModel1D_Backtest.Tests.TestUtils
 			}
 		}
 	}
+

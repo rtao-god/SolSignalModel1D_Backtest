@@ -1,10 +1,7 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
-using System;
-using System.Collections.Generic;
 using Xunit;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.Daily
@@ -16,7 +13,12 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
         {
             var nyTz = NyWindowing.NyTz;
 
-            var entryUtcRaw = NyTestDates.ToUtc(NyTestDates.NyLocal(2025, 1, 6, 8, 0));
+            var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2025, 1, 3, 0),
+                count: 2,
+                hour: 8);
+
+            var entryUtcRaw = entriesUtc[1];
             var entryUtc = new EntryUtc(entryUtcRaw);
 
             var exitUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz);
@@ -24,20 +26,23 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 
             var rows = new List<LabeledCausalRow>
             {
+                CreateRow(dateUtc: entriesUtc[0], label: 1, regimeDown: false, nyTz: nyTz),
                 CreateRow(dateUtc: entryUtc.Value, label: 2, regimeDown: false, nyTz: nyTz)
             };
 
             var exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
 
-            var trainUntilBeforeExit = ExitDayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1));
-            var dsBeforeExit = DailyDatasetBuilder.Build(rows, trainUntilBeforeExit, false, false, 0.5, null);
-            Assert.Empty(dsBeforeExit.TrainRows);
+            var trainUntilBeforeExit = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                ExitDayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1)));
 
-            var trainUntilAtExit = exitDayKeyUtc;
+            var dsBeforeExit = DailyDatasetBuilder.Build(rows, trainUntilBeforeExit, false, false, 0.5, null);
+            Assert.DoesNotContain(dsBeforeExit.TrainRows, r => r.Causal.EntryUtc.Value == entryUtc.Value);
+            Assert.Contains(dsBeforeExit.TrainRows, r => r.Causal.EntryUtc.Value == entriesUtc[0]);
+
+            var trainUntilAtExit = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(exitDayKeyUtc);
             var dsAtExit = DailyDatasetBuilder.Build(rows, trainUntilAtExit, false, false, 0.5, null);
 
-            Assert.Single(dsAtExit.TrainRows);
-            Assert.Equal(entryUtc.Value, dsAtExit.TrainRows[0].Causal.EntryUtc.Value);
+            Assert.Contains(dsAtExit.TrainRows, r => r.Causal.EntryUtc.Value == entryUtc.Value);
         }
 
         [Fact]
@@ -64,18 +69,18 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
             var pivotEntry = new EntryUtc(pivotEntryRaw);
             var pivotExit = NyWindowing.ComputeBaselineExitUtc(pivotEntry, nyTz);
 
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit.Value);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit.Value);
 
             var ds = DailyDatasetBuilder.Build(rows, trainUntilExitDayKeyUtc, false, false, 0.5, null);
 
             Assert.NotEmpty(ds.TrainRows);
 
-            static void AssertAllTrain(IEnumerable<LabeledCausalRow> xs, ExitDayKeyUtc boundary, TimeZoneInfo nyTz, string tag)
+            static void AssertAllTrain(IEnumerable<LabeledCausalRow> xs, TrainUntilExitDayKeyUtc boundary, TimeZoneInfo nyTz, string tag)
             {
                 foreach (var r in xs)
                 {
                     var cls = NyTrainSplit.ClassifyByBaselineExit(
-                        entryUtc: r.Causal.EntryUtc.AsEntryUtc(),
+                        entryUtc: r.Causal.EntryUtc,
                         trainUntilExitDayKeyUtc: boundary,
                         nyTz: nyTz,
                         baselineExitDayKeyUtc: out _);

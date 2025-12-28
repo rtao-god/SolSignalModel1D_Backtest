@@ -1,7 +1,7 @@
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -100,9 +100,10 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 		private static LabeledCausalRow MakeRow ( DateTime dateUtc, int idx, bool isMicro, bool microUp, bool microDown )
 			{
 			double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
+			var entryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow (new EntryUtc (dateUtc), NyWindowing.NyTz);
 
 			var causal = new CausalDataRow (
-				dateUtc: dateUtc,
+				entryUtc: entryUtc,
 				regimeDown: false,
 				isMorning: true,
 				hardRegime: 0,
@@ -144,3 +145,4 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			}
 		}
 	}
+

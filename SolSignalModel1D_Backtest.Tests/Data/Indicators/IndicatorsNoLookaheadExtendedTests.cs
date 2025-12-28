@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using Xunit;
-using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Causal.Data.Indicators.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
@@ -225,6 +225,28 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		// ======================
 		// FNG: строгие контракты
 		// ======================
+
+		[Fact]
+		public void PickNearestFng_DoesNotUseFutureValue ()
+			{
+			var tPast = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+			var tAsOf = tPast.AddDays (1);
+			var tFuture = tPast.AddDays (2);
+
+			var fng = new Dictionary<DateTime, double>
+				{
+					{ tPast, 10.0 },
+					{ tFuture, 99.0 }
+				};
+
+			double before = CoreIndicators.PickNearestFng (fng, tAsOf);
+			Assert.Equal (10.0, before, 10);
+
+			fng[tFuture] = -50.0;
+
+			double after = CoreIndicators.PickNearestFng (fng, tAsOf);
+			Assert.Equal (before, after, 10);
+			}
 
 		[Fact]
 		public void PickNearestFng_Throws_WhenNoHistory ()

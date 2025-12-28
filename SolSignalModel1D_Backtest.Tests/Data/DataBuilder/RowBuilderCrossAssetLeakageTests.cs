@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -25,8 +27,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 		[Fact]
 		public void Features_DoNotChange_WhenFutureBtcAndPaxgAreMutated ()
 			{
-			const int total6h = 400;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int total6h = 800;
+			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			var solAll6h = new List<Candle6h> (total6h);
 			var btcAll6h_A = new List<Candle6h> (total6h);
@@ -139,13 +141,13 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				nyTz: NyTz);
 
 			var rowsA = buildA.LabeledRows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.Causal.EntryUtc.Value)
 				.ToList ();
 
 			Assert.True (rowsA.Count > 50, "rowsA слишком мало для теста.");
 
 			// Берём дату из реально построенных строк, чтобы гарантировать, что RowBuilder её не пропустил.
-			var entryUtc = rowsA[rowsA.Count / 3].Causal.DateUtc;
+			var entryUtc = rowsA[rowsA.Count / 3].Causal.EntryUtc.Value;
 
 			// B: мутируем ТОЛЬКО BTC/PAXG после entryUtc (чистое будущее для дня entryUtc).
 			foreach (var c in btcAll6h_B.Where (x => x.OpenTimeUtc > entryUtc))
@@ -176,11 +178,11 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				nyTz: NyTz);
 
 			var rowsB = buildB.LabeledRows
-				.OrderBy (r => r.Causal.DateUtc)
+				.OrderBy (r => r.Causal.EntryUtc.Value)
 				.ToList ();
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.EntryUtc.Value == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.EntryUtc.Value == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

@@ -1,12 +1,14 @@
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
-using Infra = SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.SL;
-using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Time.NyWindowing;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using SolSignalModel1D_Backtest.Core.Utils;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using Infra = SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
+using SolSignalModel1D_Backtest.Core.Omniscient.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Utils;
 
 
 namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing.ComputeBaselineExitUtc
@@ -60,11 +62,17 @@ namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing.ComputeBaselineExitUt
                         "Проверь согласование OpenTimeUtc 6h и EntryUtc.");
                 }
 
-                double entryPrice = c6.Close;
+                if (c6.OpenTimeUtc != entryUtc)
+                {
+                    throw new InvalidOperationException(
+                        $"[sl-offline] 6h OpenTimeUtc mismatch for entryUtc. entryUtc={entryUtc:O}, c6.OpenTimeUtc={c6.OpenTimeUtc:O}.");
+                }
+
+                double entryPrice = c6.Open;
                 if (entryPrice <= 0)
                 {
                     throw new InvalidOperationException(
-                        $"[sl-offline] Non-positive entry price from 6h close for {entryUtc:O}: entry={entryPrice}.");
+                        $"[sl-offline] Non-positive entry price from 6h open for {entryUtc:O}: entry={entryPrice}.");
                 }
 
                 double dayMinMove = r.MinMove;
@@ -277,3 +285,4 @@ namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing.ComputeBaselineExitUt
         }
     }
 }
+

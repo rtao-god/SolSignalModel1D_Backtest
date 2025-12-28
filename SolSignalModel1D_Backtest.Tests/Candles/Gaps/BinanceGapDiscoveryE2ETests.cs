@@ -4,11 +4,11 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Gaps;
-using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using Xunit;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Candles.Gaps
+namespace SolSignalModel1D_Backtest.Tests.Candles.Gaps
 	{
 	/// <summary>
 	/// E2E-тест для "одним запуском найти все дыры Binance".

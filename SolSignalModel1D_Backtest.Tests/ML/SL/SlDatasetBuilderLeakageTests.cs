@@ -1,12 +1,14 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using CoreSlOfflineBuilder = SolSignalModel1D_Backtest.Tests.Data.NyWindowing.ComputeBaselineExitUtc.SlOfflineBuilder;
 using System.Collections.Generic;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.SL
 {
@@ -22,9 +24,9 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
         {
             var nyTz = TimeZones.NewYork;
 
-            // Будний день, NY-утро.
-            var entryLocalNy = new DateTime(2025, 1, 6, 8, 0, 0, DateTimeKind.Unspecified);
-            var entryUtcDt = TimeZoneInfo.ConvertTimeToUtc(entryLocalNy, nyTz);
+            // Будний день, NY-утро (канонично через NyWindowing).
+            var nyDay = new NyTradingDay(new DateOnly(2025, 1, 6));
+            var entryUtcDt = NyWindowing.ComputeEntryUtcFromNyDayOrThrow(nyDay, nyTz).Value;
             var entry = new EntryUtc(entryUtcDt);
             var nyEntry = NyWindowing.CreateNyTradingEntryUtcOrThrow(entry, nyTz);
 
@@ -74,7 +76,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
                 {
                     Causal = new CausalPredictionRecord
                     {
-                        EntryUtc = nyEntry,
+                        TradingEntryUtc = nyEntry,
                         MinMove = 0.02,
                         PredLabel = 2,
                         PredMicroUp = false,
@@ -127,7 +129,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 
             // Граница ставится на день ДО exit-day-key => этот день должен попасть в OOS, а train-сэмплы быть пустыми.
             var exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1));
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1));
 
             var ds = SlDatasetBuilder.Build(
                 rows: rows,
@@ -144,3 +146,4 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
         }
     }
 }
+

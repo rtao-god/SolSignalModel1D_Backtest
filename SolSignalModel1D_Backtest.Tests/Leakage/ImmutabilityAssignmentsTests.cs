@@ -37,7 +37,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			{ "Forward.DayMinutes",   "ForwardOutcomes.DayMinutes должен задаваться только при создании записи." },
 
             // CausalPredictionRecord — базовые факты и дневной слой:
-            { "Causal.DateUtc",          "Дата дня должна задаваться только при построении CausalPredictionRecord." },
+            { "Causal.TradingEntryUtc",  "EntryUtc должен задаваться только при построении CausalPredictionRecord." },
 			{ "Causal.TrueLabel",        "TrueLabel задаётся один раз при построении CausalPredictionRecord." },
 			{ "Causal.FactMicroUp",      "FactMicroUp — факт, не должен меняться в пайплайне." },
 			{ "Causal.FactMicroDown",    "FactMicroDown — факт, не должен меняться в пайплайне." },

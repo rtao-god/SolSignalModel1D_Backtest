@@ -2,7 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Utils;
 
 namespace SolSignalModel1D_Backtest.Tests.Init
 	{

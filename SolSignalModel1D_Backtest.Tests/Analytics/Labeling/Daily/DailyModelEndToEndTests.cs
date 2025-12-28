@@ -1,17 +1,17 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 {
@@ -77,21 +77,26 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             var minDayKey = DayKeyUtc(orderedRows.First());
             var maxDayKey = DayKeyUtc(orderedRows.Last());
 
-            var maxEntryUtc = EntryUtc(orderedRows.Last());
-            var trainUntilEntryUtc = maxEntryUtc.AddDays(-holdoutDays);
+            int pivotIdx = Math.Max(0, orderedRows.Count - holdoutDays);
+            var trainUntilEntryUtc = EntryUtc(orderedRows[pivotIdx]);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                NyWindowing.ComputeExitDayKeyUtc(
+                    new EntryUtc(trainUntilEntryUtc),
+                    NyTz));
 
-            var trainRows = orderedRows
-                .Where(r => EntryUtc(r) <= trainUntilEntryUtc)
-                .ToList();
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: orderedRows,
+                entrySelector: r => new EntryUtc(r.Causal.EntryUtc.Value),
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: NyTz);
 
-            var oosRows = orderedRows
-                .Where(r => EntryUtc(r) > trainUntilEntryUtc)
-                .ToList();
+            var trainRows = split.Train;
+            var oosRows = split.Oos;
 
             Assert.True(trainRows.Count > 50,
-                $"Слишком мало train-дней для обучения (train={trainRows.Count}, диапазон {minDayKey:yyyy-MM-dd}..{trainUntilEntryUtc:yyyy-MM-dd}).");
+                $"Слишком мало train-дней для обучения (train={trainRows.Count}, диапазон {minDayKey:yyyy-MM-dd}..{trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}).");
             Assert.True(oosRows.Count > 10,
-                $"Слишком мало OOS-дней для проверки (oos={oosRows.Count}, диапазон {trainUntilEntryUtc:yyyy-MM-dd}..{maxDayKey:yyyy-MM-dd}).");
+                $"Слишком мало OOS-дней для проверки (oos={oosRows.Count}, диапазон {trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}..{maxDayKey:yyyy-MM-dd}).");
 
             var trainer = new ModelTrainer();
             var bundle = trainer.TrainAll(trainRows);
@@ -100,22 +105,36 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             Assert.NotNull(bundle.MlCtx);
             Assert.NotNull(bundle.MoveModel);
 
+            var prevAllow = PredictionEngine.DebugAllowDisabledModels;
+            var prevMissingDir = PredictionEngine.DebugTreatMissingDirAsFlat;
+
+            PredictionEngine.DebugAllowDisabledModels = true;
+            PredictionEngine.DebugTreatMissingDirAsFlat = true;
+
             var engine = new PredictionEngine(bundle);
 
             int totalPredictions = 0;
             int clsOutOfRange = 0;
             var classes = new HashSet<int>();
 
-            foreach (var row in orderedRows)
+            try
             {
-                // Инвариант: предиктим только causal-часть.
-                var pred = engine.PredictCausal(row.Causal);
+                foreach (var row in orderedRows)
+                {
+                    // Инвариант: предиктим только causal-часть.
+                    var pred = engine.PredictCausal(row.Causal);
 
-                totalPredictions++;
-                classes.Add(pred.PredLabel);
+                    totalPredictions++;
+                    classes.Add(pred.PredLabel);
 
-                if (pred.PredLabel < 0 || pred.PredLabel > 2)
-                    clsOutOfRange++;
+                    if (pred.PredLabel < 0 || pred.PredLabel > 2)
+                        clsOutOfRange++;
+                }
+            }
+            finally
+            {
+                PredictionEngine.DebugAllowDisabledModels = prevAllow;
+                PredictionEngine.DebugTreatMissingDirAsFlat = prevMissingDir;
             }
 
             return new DailyE2eResult
@@ -174,7 +193,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             if (solPriceFunc == null) throw new ArgumentNullException(nameof(solPriceFunc));
 
             const int total6h = 1000;
-            var start = new DateTime(2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+            var start = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
             int totalMinutes = total6h * 6 * 60;
 
@@ -225,6 +244,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 solAll6h.Add(new Candle6h
                 {
                     OpenTimeUtc = t6,
+                    Open = close,
                     Close = close,
                     High = high,
                     Low = low
@@ -236,6 +256,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 btcAll6h.Add(new Candle6h
                 {
                     OpenTimeUtc = t6,
+                    Open = btcPrice,
                     Close = btcPrice,
                     High = btcPrice + 1.0,
                     Low = btcPrice - 1.0
@@ -244,6 +265,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 paxgAll6h.Add(new Candle6h
                 {
                     OpenTimeUtc = t6,
+                    Open = paxgPrice,
                     Close = paxgPrice,
                     High = paxgPrice + 1.0,
                     Low = paxgPrice - 1.0

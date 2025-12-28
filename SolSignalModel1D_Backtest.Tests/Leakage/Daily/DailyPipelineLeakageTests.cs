@@ -1,8 +1,7 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
@@ -19,7 +18,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
     {
         private sealed class DailyRunResult
         {
-            public required DateTime TrainUntilUtc { get; init; }
+            public required TrainUntilExitDayKeyUtc TrainUntilExitDayKeyUtc { get; init; }
             public required List<(DateTime DateUtc, int TrueLabel, int PredLabel)> OosPreds { get; init; }
             public required double BaselineOosAccuracy { get; init; }
         }
@@ -74,18 +73,33 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
         private static async Task<DailyRunResult> RunDailyPipelineAsync(
             List<LabeledCausalRow> allRows,
-            Func<List<LabeledCausalRow>, DateTime, List<LabeledCausalRow>>? mutateTrain)
+            Func<List<LabeledCausalRow>, TrainUntilExitDayKeyUtc, List<LabeledCausalRow>>? mutateTrain)
         {
             if (allRows == null) throw new ArgumentNullException(nameof(allRows));
             if (allRows.Count == 0) throw new InvalidOperationException("RunDailyPipelineAsync: empty allRows.");
 
             var ordered = allRows.OrderBy(DayKeyUtc).ToList();
-            var maxDate = DayKeyUtc(ordered[^1]);
+            var maxEntryUtc = ordered[^1].EntryUtc.Value;
 
             const int HoldoutDays = 120;
-            var trainUntil = maxDate.AddDays(-HoldoutDays);
+            var trainUntilEntryUtc = maxEntryUtc.AddDays(-HoldoutDays);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                NyWindowing.ComputeExitDayKeyUtc(
+                    new EntryUtc(trainUntilEntryUtc),
+                    NyWindowing.NyTz));
 
-            var trainRows = ordered.Where(r => DayKeyUtc(r) <= trainUntil).ToList();
+            static NyTrainSplit.EntryClass Classify(LabeledCausalRow r, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc)
+            {
+                return NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: r.Causal.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyWindowing.NyTz,
+                    baselineExitDayKeyUtc: out _);
+            }
+
+            var trainRows = ordered
+                .Where(r => Classify(r, trainUntilExitDayKeyUtc) == NyTrainSplit.EntryClass.Train)
+                .ToList();
 
             if (trainRows.Count < 100)
             {
@@ -96,8 +110,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
             if (mutateTrain != null)
             {
-                ordered = mutateTrain(ordered, trainUntil).OrderBy(DayKeyUtc).ToList();
-                trainRows = ordered.Where(r => DayKeyUtc(r) <= trainUntil).ToList();
+                ordered = mutateTrain(ordered, trainUntilExitDayKeyUtc).OrderBy(DayKeyUtc).ToList();
+                trainRows = ordered
+                    .Where(r => Classify(r, trainUntilExitDayKeyUtc) == NyTrainSplit.EntryClass.Train)
+                    .ToList();
             }
 
             var trainer = new ModelTrainer
@@ -115,7 +131,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
             foreach (var r in ordered)
             {
-                if (DayKeyUtc(r) <= trainUntil)
+                if (Classify(r, trainUntilExitDayKeyUtc) != NyTrainSplit.EntryClass.Oos)
                     continue;
 
                 var p = engine.PredictCausal(r.Causal);
@@ -126,7 +142,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
             return await Task.FromResult(new DailyRunResult
             {
-                TrainUntilUtc = trainUntil,
+                TrainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc,
                 OosPreds = oos,
                 BaselineOosAccuracy = acc
             });
@@ -146,13 +162,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             return ok / (double)total;
         }
 
-        private static List<LabeledCausalRow> ShuffleTrainLabels(List<LabeledCausalRow> rows, DateTime trainUntilUtc, int seed)
+        private static List<LabeledCausalRow> ShuffleTrainLabels(List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc, int seed)
         {
             var trainIdx = new List<int>();
 
             for (int i = 0; i < rows.Count; i++)
             {
-                if (DayKeyUtc(rows[i]) <= trainUntilUtc)
+                if (NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: rows[i].Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _) == NyTrainSplit.EntryClass.Train)
                     trainIdx.Add(i);
             }
 
@@ -174,7 +194,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             {
                 var r = rows[i];
 
-                if (DayKeyUtc(r) > trainUntilUtc)
+                if (NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: r.Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _) != NyTrainSplit.EntryClass.Train)
                 {
                     res.Add(r);
                     continue;
@@ -193,7 +217,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             return res;
         }
 
-        private static List<LabeledCausalRow> RandomizeTrainFeatures(List<LabeledCausalRow> rows, DateTime trainUntilUtc, int seed)
+        private static List<LabeledCausalRow> RandomizeTrainFeatures(List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc, int seed)
         {
             var rng = new Random(seed);
 
@@ -201,7 +225,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
             foreach (var r in rows)
             {
-                if (DayKeyUtc(r) > trainUntilUtc)
+                if (NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: r.Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _) != NyTrainSplit.EntryClass.Train)
                 {
                     res.Add(r);
                     continue;
@@ -212,7 +240,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 double NextRand() => rng.NextDouble() * 2.0 - 1.0;
 
                 var randomized = new CausalDataRow(
-                    entryUtc: c.EntryUtc,
+                    entryUtc: c.TradingEntryUtc,
                     regimeDown: c.RegimeDown,
                     isMorning: c.IsMorning,
                     hardRegime: c.HardRegime,

@@ -1,13 +1,15 @@
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
@@ -30,17 +32,21 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var allRows = BuildSyntheticRows (count: 420);
 
 			const int HoldoutDays = 120;
-			var maxDateUtc = allRows[^1].DateUtc;
-			var trainUntilUtc = maxDateUtc.AddDays (-HoldoutDays);
+			var maxEntryUtc = allRows[^1].EntryUtc.Value;
+			var trainUntilEntryUtc = maxEntryUtc.AddDays (-HoldoutDays);
+			var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc (
+				NyWindowing.ComputeExitDayKeyUtc (
+					new EntryUtc (trainUntilEntryUtc),
+					NyWindowing.NyTz));
 
-			Assert.Contains (allRows, r => r.DateUtc > trainUntilUtc);
+			Assert.Contains (allRows, r => r.EntryUtc.Value > trainUntilEntryUtc);
 
 			var rowsA = CloneRows (allRows);
-			var rowsB = MutateFutureTail (CloneRows (allRows), trainUntilUtc);
+			var rowsB = MutateFutureTail (CloneRows (allRows), trainUntilExitDayKeyUtc);
 
 			var dsA = DailyDatasetBuilder.Build (
 				allRows: rowsA,
-				trainUntil: trainUntilUtc,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
@@ -48,7 +54,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
 			var dsB = DailyDatasetBuilder.Build (
 				allRows: rowsB,
-				trainUntil: trainUntilUtc,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
@@ -78,16 +84,56 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			AssertBinaryOutputsEqual (dirDownPredsA, dirDownPredsB);
 			}
 
+		[Fact]
+		public void DeriveTrainUntilUtcFromHoldout_UsesBaselineExitDomain ()
+			{
+			var rows = BuildSyntheticRows (count: 5);
+
+			const int HoldoutDays = 2;
+
+			var method = typeof (Program).GetMethod (
+				"DeriveTrainUntilUtcFromHoldout",
+				BindingFlags.NonPublic | BindingFlags.Static);
+
+			Assert.NotNull (method);
+
+			var trainUntilUtcObj = method!.Invoke (
+				null,
+				new object[] { rows, HoldoutDays, NyWindowing.NyTz });
+
+			Assert.NotNull (trainUntilUtcObj);
+
+			var trainUntilUtc = (DateTime)trainUntilUtcObj;
+
+			var entryThu = rows[3].EntryUtc;
+			var exitThu = NyWindowing.ComputeBaselineExitUtc (entryThu, NyWindowing.NyTz).Value;
+			var expected = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow (exitThu);
+
+			var actual = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow (trainUntilUtc);
+
+			Assert.Equal (expected.Value, actual.Value);
+
+			var entryWed = rows[2].EntryUtc;
+			var exitWed = NyWindowing.ComputeBaselineExitUtc (entryWed, NyWindowing.NyTz).Value;
+			var wrong = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow (exitWed);
+
+			Assert.NotEqual (wrong.Value, actual.Value);
+			}
+
 		private static List<LabeledCausalRow> BuildSyntheticRows ( int count )
 			{
 			var rows = new List<LabeledCausalRow> (count);
-			var start = new DateTime (2024, 1, 1, 13, 0, 0, DateTimeKind.Utc);
+			var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
+				startNyLocalDate: NyTestDates.NyLocal (2024, 1, 1, 0),
+				count: count,
+				hour: 8);
 
 			var rng = new Random (123);
 
 			for (int i = 0; i < count; i++)
 				{
-				var dateUtc = start.AddDays (i);
+				var dateUtc = datesUtc[i];
+				var entryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow (new EntryUtc (dateUtc), NyWindowing.NyTz);
 
 				double solRet1 = (rng.NextDouble () - 0.5) * 0.10;
 
@@ -108,7 +154,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					}
 
 				var causal = CreateCausal (
-					dateUtc: dateUtc,
+					entryUtc: entryUtc,
 					regimeDown: regimeDown,
 					solRet1: solRet1);
 
@@ -119,13 +165,13 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					factMicroDown: factMicroDown));
 				}
 
-			return rows.OrderBy (r => r.DateUtc).ToList ();
+			return rows.OrderBy (r => r.EntryUtc.Value).ToList ();
 			}
 
-		private static CausalDataRow CreateCausal ( DateTime dateUtc, bool regimeDown, double solRet1 )
+		private static CausalDataRow CreateCausal ( NyTradingEntryUtc entryUtc, bool regimeDown, double solRet1 )
 			{
 			return new CausalDataRow (
-				dateUtc: dateUtc,
+				entryUtc: entryUtc,
 				regimeDown: regimeDown,
 				isMorning: true,
 				hardRegime: 1,
@@ -169,7 +215,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				var c = r.Causal;
 
 				var clonedCausal = new CausalDataRow (
-					dateUtc: c.DateUtc,
+					entryUtc: c.TradingEntryUtc,
 					regimeDown: c.RegimeDown,
 					isMorning: c.IsMorning,
 					hardRegime: c.HardRegime,
@@ -213,13 +259,19 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			return res;
 			}
 
-		private static List<LabeledCausalRow> MutateFutureTail ( List<LabeledCausalRow> rows, DateTime trainUntilUtc )
+		private static List<LabeledCausalRow> MutateFutureTail ( List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc )
 			{
 			var res = new List<LabeledCausalRow> (rows.Count);
 
 			foreach (var r in rows)
 				{
-				if (r.DateUtc <= trainUntilUtc)
+				var cls = NyTrainSplit.ClassifyByBaselineExit (
+					entryUtc: new EntryUtc (r.EntryUtc.Value),
+					trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+					nyTz: NyWindowing.NyTz,
+					baselineExitDayKeyUtc: out _);
+
+				if (cls == NyTrainSplit.EntryClass.Train)
 					{
 					res.Add (r);
 					continue;
@@ -228,7 +280,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				var c = r.Causal;
 
 				var mutatedCausal = new CausalDataRow (
-					dateUtc: c.DateUtc,
+					entryUtc: c.TradingEntryUtc,
 					regimeDown: !c.RegimeDown,
 					isMorning: c.IsMorning,
 					hardRegime: c.HardRegime,
@@ -281,7 +333,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.DateUtc, b.DateUtc);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);
 

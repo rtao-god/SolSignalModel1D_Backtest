@@ -1,16 +1,17 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
-namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
+namespace SolSignalModel1D_Backtest.Tests.Leakage
 {
     /// <summary>
     /// SlDatasetBuilder:
@@ -22,36 +23,56 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
         [Fact]
         public void SlDataset_UsesOnlyRows_UntilTrainUntil_AndIsFutureBlind()
         {
-            var allRows = BuildSyntheticRows(30, out var sol6hDict, out var sol1m);
+            var allRows = BuildSyntheticRows(30, out var sol6hDict, out var sol1h, out var sol1m);
 
-            var maxDayKeyUtc = allRows.Last().Causal.EntryDayKeyUtc.Value;
-            var trainUntil = maxDayKeyUtc.AddDays(-10);
+            var trainUntilEntryUtc = allRows[^10].Causal.EntryUtc.Value;
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                NyWindowing.ComputeExitDayKeyUtc(
+                    new EntryUtc(trainUntilEntryUtc),
+                    NyWindowing.NyTz));
 
             var rowsA = CloneRows(allRows);
             var rowsB = MutateFutureTail(CloneRows(allRows), trainUntil);
 
             var dsA = SlDatasetBuilder.Build(
                 rows: rowsA,
-                sol1h: null,
+                sol1h: sol1h,
                 sol1m: sol1m,
                 sol6hDict: sol6hDict,
-                trainUntil: trainUntil,
+                trainUntilExitDayKeyUtc: trainUntil,
                 tpPct: 0.03,
                 slPct: 0.05,
                 strongSelector: null);
 
             var dsB = SlDatasetBuilder.Build(
                 rows: rowsB,
-                sol1h: null,
+                sol1h: sol1h,
                 sol1m: sol1m,
                 sol6hDict: sol6hDict,
-                trainUntil: trainUntil,
+                trainUntilExitDayKeyUtc: trainUntil,
                 tpPct: 0.03,
                 slPct: 0.05,
                 strongSelector: null);
 
-            Assert.All(dsA.MorningRows, r => Assert.True(r.Causal.EntryDayKeyUtc.Value <= trainUntil));
-            Assert.All(dsB.MorningRows, r => Assert.True(r.Causal.EntryDayKeyUtc.Value <= trainUntil));
+            Assert.All(
+                dsA.MorningRows,
+                r => Assert.Equal(
+                    NyTrainSplit.EntryClass.Train,
+                    NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: r.Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntil,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _)));
+
+            Assert.All(
+                dsB.MorningRows,
+                r => Assert.Equal(
+                    NyTrainSplit.EntryClass.Train,
+                    NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: r.Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntil,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _)));
 
             Assert.Equal(dsA.Samples.Count, dsB.Samples.Count);
 
@@ -66,8 +87,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
                 Assert.NotNull(a.Features);
                 Assert.NotNull(b.Features);
 
-                Assert.Equal(MlSchema.FeatureCount, a.Features.Length);
-                Assert.Equal(MlSchema.FeatureCount, b.Features.Length);
+                Assert.Equal(SlSchema.FeatureCount, a.Features.Length);
+                Assert.Equal(SlSchema.FeatureCount, b.Features.Length);
 
                 for (int j = 0; j < a.Features.Length; j++)
                     Assert.Equal(a.Features[j], b.Features[j]);
@@ -77,17 +98,21 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
         private static List<BacktestRecord> BuildSyntheticRows(
             int count,
             out Dictionary<DateTime, Candle6h> sol6hDict,
+            out List<Candle1h> sol1h,
             out List<Candle1m> sol1m)
         {
             var rows = new List<BacktestRecord>(count);
             var dict6h = new Dictionary<DateTime, Candle6h>(count);
             var all1m = new List<Candle1m>(count * 30);
 
-            var start = new DateTime(2022, 4, 1, 8, 0, 0, DateTimeKind.Utc);
+            var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2022, 4, 1, 0),
+                count: count,
+                hour: 8);
 
             for (int i = 0; rows.Count < count; i++)
             {
-                var t = start.AddDays(i);
+                var t = entriesUtc[i];
                 if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(t), NyWindowing.NyTz, out var entryUtc))
                     continue;
 
@@ -102,6 +127,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
                 dict6h[openUtc] = new Candle6h
                 {
                     OpenTimeUtc = openUtc,
+                    Open = price,
                     Close = price,
                     High = price * 1.01,
                     Low = price * 0.99
@@ -121,6 +147,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
             }
 
             sol6hDict = dict6h;
+            sol1h = BuildHourlySeries(entriesUtc, basePrice: 100.0);
             sol1m = all1m;
 
             return rows.OrderBy(r => r.Causal.EntryDayKeyUtc.Value).ToList();
@@ -133,7 +160,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
 
             var causal = new CausalPredictionRecord
             {
-                EntryUtc = entryUtc,
+                TradingEntryUtc = entryUtc,
                 FeaturesVector = vec,
                 Features = new CausalFeatures { IsMorning = isMorning },
                 PredLabel = 1,
@@ -200,27 +227,57 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
             foreach (var r in src)
             {
                 res.Add(CreateBacktestRecord(
-                    entryUtc: r.Causal.EntryUtc,
+                    entryUtc: r.Causal.TradingEntryUtc,
                     isMorning: r.Causal.IsMorning == true,
                     minMove: r.Causal.MinMove));
             }
             return res;
         }
 
-        private static List<BacktestRecord> MutateFutureTail(List<BacktestRecord> rows, DateTime trainUntilUtc)
+        private static List<Candle1h> BuildHourlySeries(IReadOnlyList<DateTime> entriesUtc, double basePrice)
+        {
+            if (entriesUtc.Count == 0)
+                return new List<Candle1h>();
+
+            var first = entriesUtc[0].AddHours(-24);
+            var last = entriesUtc[^1].AddHours(1);
+
+            var list = new List<Candle1h>();
+            for (var t = first; t <= last; t = t.AddHours(1))
+            {
+                list.Add(new Candle1h
+                {
+                    OpenTimeUtc = t,
+                    Open = basePrice,
+                    Close = basePrice,
+                    High = basePrice * 1.01,
+                    Low = basePrice * 0.99
+                });
+            }
+
+            return list;
+        }
+
+        private static List<BacktestRecord> MutateFutureTail(List<BacktestRecord> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             var res = new List<BacktestRecord>(rows.Count);
 
             foreach (var r in rows)
             {
-                if (r.Causal.EntryDayKeyUtc.Value <= trainUntilUtc)
+                var cls = NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: r.Causal.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyWindowing.NyTz,
+                    baselineExitDayKeyUtc: out _);
+
+                if (cls == NyTrainSplit.EntryClass.Train)
                 {
                     res.Add(r);
                     continue;
                 }
 
                 res.Add(CreateBacktestRecord(
-                    entryUtc: r.Causal.EntryUtc,
+                    entryUtc: r.Causal.TradingEntryUtc,
                     isMorning: !(r.Causal.IsMorning == true),
                     minMove: r.Causal.MinMove * 2.0));
             }
@@ -229,3 +286,4 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Sl
         }
     }
 }
+

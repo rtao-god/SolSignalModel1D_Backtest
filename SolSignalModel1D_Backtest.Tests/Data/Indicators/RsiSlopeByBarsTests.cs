@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using Xunit;
-using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Causal.Data.Indicators.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{

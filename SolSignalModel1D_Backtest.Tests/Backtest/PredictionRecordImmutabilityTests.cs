@@ -1,14 +1,14 @@
-using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.Tests.Backtest
 {
@@ -40,14 +40,17 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
         [Fact]
         public void BacktestRunner_DoesNotMutate_CoreBacktestRecordFields()
         {
-            var utcStart = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2025, 1, 1, 0),
+                count: 20,
+                hour: 8);
 
             var records = new List<BacktestRecord>(20);
             var mornings = new List<LabeledCausalRow>(20);
 
             for (int i = 0; i < 20; i++)
             {
-                var entryUtcRaw = utcStart.AddDays(i);
+                var entryUtcRaw = entriesUtc[i];
                 int trueLabel = i % 3;
 
                 var nyEntryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow(new EntryUtc(entryUtcRaw), NyWindowing.NyTz);
@@ -64,7 +67,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
                 var causal = new CausalPredictionRecord
                 {
-                    EntryUtc = nyEntryUtc,
+                    TradingEntryUtc = nyEntryUtc,
                     FeaturesVector = causalRow.FeaturesVector,
                     Features = null,
 
@@ -96,10 +99,10 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
                     Reason = "test",
                     MinMove = causalRow.MinMove,
 
-                    SlProb = null,
-                    SlHighDecision = null,
-                    Conf_SlLong = null,
-                    Conf_SlShort = null,
+                    SlProb = 0.0,
+                    SlHighDecision = false,
+                    Conf_SlLong = 0.0,
+                    Conf_SlShort = 0.0,
 
                     DelayedSource = null,
                     DelayedEntryAsked = false,
@@ -152,7 +155,11 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
                 DailyTpPct = 0.03
             };
 
-            var trainUntilUtc = utcStart.AddDays(10);
+            var trainUntilEntryUtc = records[10].EntryUtc.Value;
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                NyWindowing.ComputeExitDayKeyUtc(
+                    new EntryUtc(trainUntilEntryUtc),
+                    NyWindowing.NyTz));
 
             var snapshots = records
                 .Select(r => new CoreSnapshot
@@ -182,7 +189,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
                 candles1m: candles1m,
                 policies: policies,
                 config: config,
-                trainUntilUtc: trainUntilUtc);
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc);
 
             Assert.Equal(snapshots.Count, records.Count);
 
@@ -256,3 +263,4 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
         }
     }
 }
+

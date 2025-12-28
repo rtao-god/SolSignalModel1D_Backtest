@@ -1,14 +1,13 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 {
@@ -30,16 +29,25 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
                 };
             }
 
+            if (entryUtc.Kind != DateTimeKind.Utc)
+                throw new ArgumentException("entryUtc must be UTC.", nameof(entryUtc));
+
             var (pUp, pFlat, pDown) = MakeTriProbs(predLabel);
 
             var rawEntryUtc = new EntryUtc(entryUtc);
             var nyEntryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow(rawEntryUtc, TimeZones.NewYork);
 
+            var vec = new double[MlSchema.FeatureCount];
+            for (int i = 0; i < vec.Length; i++)
+                vec[i] = 0.123;
+
             return new BacktestRecord
             {
                 Causal = new CausalPredictionRecord
                 {
-                    EntryUtc = nyEntryUtc,
+                    TradingEntryUtc = nyEntryUtc,
+
+                    FeaturesVector = vec,
 
                     PredLabel = predLabel,
                     PredLabel_Day = predLabel,
@@ -98,7 +106,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
             {
                 Records = records,
                 NyTz = TimeZones.NewYork,
-                TrainUntilUtc = new DateTime(2035, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                TrainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(new DateTime(2035, 1, 1, 0, 0, 0, DateTimeKind.Utc))
             };
 
             var result = await SelfCheckRunner.RunAsync(ctx);
@@ -120,7 +128,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
             for (int i = 0; i < datesUtc.Count; i++)
             {
                 int trueLabel = i % 3;
-                int predLabel = (i % 10 < 6) ? trueLabel : (trueLabel + 1) % 3;
+                int predLabel = (i % 2 == 0) ? trueLabel : (trueLabel + 1) % 3;
                 records.Add(MakeRecord(datesUtc[i], trueLabel, predLabel));
             }
 
@@ -128,7 +136,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
             {
                 Records = records,
                 NyTz = TimeZones.NewYork,
-                TrainUntilUtc = datesUtc[200]
+                TrainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcMomentOrThrow(datesUtc[200])
             };
 
             var result = await SelfCheckRunner.RunAsync(ctx);

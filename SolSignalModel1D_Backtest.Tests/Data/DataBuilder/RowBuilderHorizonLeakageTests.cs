@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -26,8 +28,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			{
 			var tz = NyTz;
 
-			const int total6h = 400;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int total6h = 800;
+			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			var solAll6h_A = new List<Candle6h> (total6h);
 			var solAll6h_B = new List<Candle6h> (total6h);
@@ -136,12 +138,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				nyTz: tz);
 
 			var rowsA = buildA.CausalRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.True (rowsA.Count > 50, "rowsA слишком мало для теста.");
 
-			var entryUtc = rowsA[rowsA.Count / 3].DateUtc;
+			var entryUtc = rowsA[rowsA.Count / 3].EntryUtc.Value;
 
 			// B: ломаем всё будущее после entryUtc (6h, 1m, макро).
 			foreach (var c in solAll6h_B.Where (x => x.OpenTimeUtc > entryUtc))
@@ -187,11 +189,11 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				nyTz: tz);
 
 			var rowsB = buildB.CausalRows
-				.OrderBy (r => r.DateUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
-			var rowA = rowsA.SingleOrDefault (r => r.DateUtc == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.DateUtc == entryUtc);
+			var rowA = rowsA.SingleOrDefault (r => r.EntryUtc.Value == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.EntryUtc.Value == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

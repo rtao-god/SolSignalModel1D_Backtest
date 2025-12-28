@@ -1,11 +1,12 @@
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using System;
 using System.Collections.Generic;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 {
@@ -38,7 +39,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
             var causal = new CausalPredictionRecord
             {
-                EntryUtc = nyEntryUtc,
+                TradingEntryUtc = nyEntryUtc,
                 FeaturesVector = ReadOnlyMemory<double>.Empty,
 
                 PredLabel = predLabel,
@@ -129,7 +130,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             }
 
             var pivotExit = NyWindowing.ComputeBaselineExitUtc(records[179].Causal.EntryUtc, NyWindowing.NyTz).Value;
-            var trainUntil = new TrainUntilUtc(pivotExit.AddMinutes(1));
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(ExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit));
 
             var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(records, trainUntil, NyWindowing.NyTz);
 
@@ -168,7 +169,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
             }
 
             var pivotExit = NyWindowing.ComputeBaselineExitUtc(records[cut - 1].Causal.EntryUtc, NyWindowing.NyTz).Value;
-            var trainUntil = new TrainUntilUtc(pivotExit.AddMinutes(1));
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(ExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit));
 
             var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(records, trainUntil, NyWindowing.NyTz);
 
@@ -194,10 +195,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                     continue;
 
                 int label = records.Count % 3;
-                records.Add(MakeRecord(entryUtc, label, label));
+                int predLabel = (records.Count % 10 < 6) ? label : (label + 1) % 3;
+                records.Add(MakeRecord(entryUtc, label, predLabel));
             }
 
-            var trainUntil = new TrainUntilUtc(start.AddDays(1000));
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                ExitDayKeyUtc.FromUtcMomentOrThrow(start.AddDays(1000)));
 
             var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(records, trainUntil, NyWindowing.NyTz);
 

@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Causal
 {
@@ -83,7 +83,7 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
         [Fact]
         public void Split_UsesBaselineExit_AndWeekendsGoToExcluded()
         {
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
             var items = new List<EntryUtc>
             {
@@ -107,3 +107,4 @@ namespace SolSignalModel1D_Backtest.Tests.Causal
         }
     }
 }
+

@@ -1,12 +1,13 @@
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.DataBuilder;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
@@ -26,8 +27,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 			{
 			var tz = NyTz;
 
-			const int total6h = 400;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int total6h = 800;
+			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			var solAll6h = new List<Candle6h> ();
 			var btcAll6h = new List<Candle6h> ();
@@ -43,6 +44,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				solAll6h.Add (new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = solPrice,
 					Close = solPrice,
 					High = solPrice + 1.0,
 					Low = solPrice - 1.0
@@ -51,6 +53,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				btcAll6h.Add (new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = btcPrice,
 					Close = btcPrice,
 					High = btcPrice + 1.0,
 					Low = btcPrice - 1.0
@@ -59,6 +62,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				paxgAll6h.Add (new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = goldPrice,
 					Close = goldPrice,
 					High = goldPrice + 1.0,
 					Low = goldPrice - 1.0
@@ -130,7 +134,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				{
 					var utc = solAll6h[i].OpenTimeUtc;
 					var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, tz);
-					return ny.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
+					return ny.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday
+						&& CoreNyWindowing.IsNyMorning (new EntryUtc (utc), tz);
 				});
 
 			var entryUtc = solAll6h[entryIdx].OpenTimeUtc;
@@ -167,8 +172,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDailyB,
 				nyTz: tz).LabeledRows;
 
-			var rowA = rowsA.SingleOrDefault (r => r.Causal.DateUtc.ToCausalDateUtc () == entryDate);
-			var rowB = rowsB.SingleOrDefault (r => r.Causal.DateUtc.ToCausalDateUtc () == entryDate);
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.EntryUtc.Value.ToCausalDateUtc () == entryDate);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.EntryUtc.Value.ToCausalDateUtc () == entryDate);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);

@@ -1,8 +1,7 @@
-using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -52,7 +51,8 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.Labeling
                 firstPassDir: out int dirA,
                 firstPassTimeUtc: out DateTime? timeA,
                 reachedUpPct: out double upA,
-                reachedDownPct: out double downA);
+                reachedDownPct: out double downA,
+                ambiguousHitSameMinute: out bool ambA);
 
             var minutesB = minutes
                 .Select(m => new Candle1m
@@ -83,13 +83,16 @@ namespace SolSignalModel1D_Backtest.Tests.Analytics.Labeling
                 firstPassDir: out int dirB,
                 firstPassTimeUtc: out DateTime? timeB,
                 reachedUpPct: out double upB,
-                reachedDownPct: out double downB);
+                reachedDownPct: out double downB,
+                ambiguousHitSameMinute: out bool ambB);
 
             Assert.Equal(labelA, labelB);
             Assert.Equal(dirA, dirB);
             Assert.Equal(timeA, timeB);
             Assert.Equal(upA, upB, 10);
             Assert.Equal(downA, downB, 10);
+            Assert.Equal(ambA, ambB);
         }
     }
 }
+

@@ -1,15 +1,18 @@
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
@@ -30,8 +33,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			{
 			public bool Label { get; set; }
 
-			[VectorType (MlSchema.FeatureCount)]
-			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
+			[VectorType (SlSchema.FeatureCount)]
+			public float[] Features { get; set; } = new float[SlSchema.FeatureCount];
 			}
 
 		[Fact]
@@ -40,30 +43,35 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			var allRows = BuildSyntheticRows (
 				count: 40,
 				out var sol6hDict,
+				out var sol1h,
 				out var sol1m);
 
-			var maxDateUtc = allRows.Last ().DateUtc;
+			var maxDateUtc = allRows.Last ().EntryUtc.Value;
 			var trainUntil = maxDateUtc.AddDays (-10);
+			var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc (
+				NyWindowing.ComputeExitDayKeyUtc (
+					new EntryUtc (trainUntil),
+					NyWindowing.NyTz));
 
 			var rowsA = CloneRows (allRows);
-			var rowsB = MutateFutureTail (CloneRows (allRows), trainUntil);
+			var rowsB = MutateFutureTail (CloneRows (allRows), trainUntilExitDayKeyUtc);
 
 			var dsA = SlDatasetBuilder.Build (
 				rows: rowsA,
-				sol1h: null,
+				sol1h: sol1h,
 				sol1m: sol1m,
 				sol6hDict: sol6hDict,
-				trainUntil: trainUntil,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				tpPct: 0.03,
 				slPct: 0.05,
 				strongSelector: null);
 
 			var dsB = SlDatasetBuilder.Build (
 				rows: rowsB,
-				sol1h: null,
+				sol1h: sol1h,
 				sol1m: sol1m,
 				sol6hDict: sol6hDict,
-				trainUntil: trainUntil,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				tpPct: 0.03,
 				slPct: 0.05,
 				strongSelector: null);
@@ -87,18 +95,23 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 		private static List<BacktestRecord> BuildSyntheticRows (
 			int count,
 			out Dictionary<DateTime, Candle6h> sol6hDict,
+			out List<Candle1h> sol1h,
 			out List<Candle1m> sol1m )
 			{
 			var rows = new List<BacktestRecord> (count);
 			var dict6h = new Dictionary<DateTime, Candle6h> (count);
 			var all1m = new List<Candle1m> (count * 20);
 
-			var start = new DateTime (2022, 4, 1, 8, 0, 0, DateTimeKind.Utc);
+			var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
+				startNyLocalDate: NyTestDates.NyLocal (2022, 4, 1, 0),
+				count: count,
+				hour: 8);
 
 			for (var i = 0; i < count; i++)
 				{
-				var dateUtc = start.AddDays (i);
+				var dateUtc = entriesUtc[i];
 				var price = 100 + i;
+				bool makeTp = (i % 2 == 0);
 
 				rows.Add (CreateBacktestRecord (
 					dateUtc: dateUtc,
@@ -108,6 +121,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				dict6h[dateUtc] = new Candle6h
 					{
 					OpenTimeUtc = dateUtc,
+					Open = price,
 					Close = price,
 					High = price * 1.02,
 					Low = price * 0.98
@@ -115,30 +129,35 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 				for (var k = 0; k < 20; k++)
 					{
+					double high = makeTp ? price * 1.04 : price * 1.02;
+					double low = makeTp ? price * 0.97 : price * 0.94;
+
 					all1m.Add (new Candle1m
 						{
 						OpenTimeUtc = dateUtc.AddMinutes (k),
 						Open = price,
 						Close = price,
-						High = price * 1.05,
-						Low = price * 0.95
+						High = high,
+						Low = low
 						});
 					}
 				}
 
 			sol6hDict = dict6h;
+			sol1h = BuildHourlySeries (entriesUtc, basePrice: 100.0);
 			sol1m = all1m;
 
-			return rows.OrderBy (r => r.DateUtc).ToList ();
+			return rows.OrderBy (r => r.EntryUtc.Value).ToList ();
 			}
 
 		private static BacktestRecord CreateBacktestRecord ( DateTime dateUtc, bool isMorning, double minMove )
 			{
 			var vec = BuildVector64Deterministic (dateUtc);
+			var nyEntryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow (new EntryUtc (dateUtc), NyWindowing.NyTz);
 
 			var causal = new CausalPredictionRecord
 				{
-				DateUtc = dateUtc,
+				TradingEntryUtc = nyEntryUtc,
 				FeaturesVector = vec,
 				Features = new CausalFeatures { IsMorning = isMorning },
 				PredLabel = 1,
@@ -166,8 +185,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 
 			var forward = new ForwardOutcomes
 				{
-				DateUtc = dateUtc,
-				WindowEndUtc = dateUtc.AddHours (24),
+				EntryUtc = new EntryUtc (dateUtc),
+				WindowEndUtc = NyWindowing.ComputeBaselineExitUtc (new EntryUtc (dateUtc), NyWindowing.NyTz).Value,
 				Entry = 100.0,
 				MaxHigh24 = 105.0,
 				MinLow24 = 95.0,
@@ -205,27 +224,33 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			foreach (var r in src)
 				{
 				res.Add (CreateBacktestRecord (
-					dateUtc: r.DateUtc,
+					dateUtc: r.EntryUtc.Value,
 					isMorning: r.Causal.IsMorning == true,
 					minMove: r.MinMove));
 				}
 			return res;
 			}
 
-		private static List<BacktestRecord> MutateFutureTail ( List<BacktestRecord> rows, DateTime trainUntilUtc )
+		private static List<BacktestRecord> MutateFutureTail ( List<BacktestRecord> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc )
 			{
 			var res = new List<BacktestRecord> (rows.Count);
 
 			foreach (var r in rows)
 				{
-				if (r.DateUtc <= trainUntilUtc)
+				var cls = NyTrainSplit.ClassifyByBaselineExit (
+					entryUtc: r.EntryUtc,
+					trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+					nyTz: NyWindowing.NyTz,
+					baselineExitDayKeyUtc: out _);
+
+				if (cls == NyTrainSplit.EntryClass.Train)
 					{
 					res.Add (r);
 					continue;
 					}
 
 				res.Add (CreateBacktestRecord (
-					dateUtc: r.DateUtc,
+					dateUtc: r.EntryUtc.Value,
 					isMorning: !(r.Causal.IsMorning == true),
 					minMove: r.MinMove * 2.0));
 				}
@@ -242,7 +267,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.DateUtc, b.DateUtc);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.MinMove, b.MinMove);
 				}
@@ -261,10 +286,10 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 					if (s.Features == null)
 						throw new InvalidOperationException ("[sl-test] SlHitSample.Features is null.");
 
-					if (s.Features.Length != MlSchema.FeatureCount)
+					if (s.Features.Length != SlSchema.FeatureCount)
 						{
 						throw new InvalidOperationException (
-							$"[sl-test] SlHitSample.Features length mismatch: got={s.Features.Length}, expected={MlSchema.FeatureCount}.");
+							$"[sl-test] SlHitSample.Features length mismatch: got={s.Features.Length}, expected={SlSchema.FeatureCount}.");
 						}
 
 					return new SlEvalRow
@@ -291,6 +316,30 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				Assert.InRange (Math.Abs (a[i].Score - b[i].Score), 0.0, tol);
 				Assert.InRange (Math.Abs (a[i].Probability - b[i].Probability), 0.0, tol);
 				}
+			}
+
+		private static List<Candle1h> BuildHourlySeries ( IReadOnlyList<DateTime> entriesUtc, double basePrice )
+			{
+			if (entriesUtc.Count == 0)
+				return new List<Candle1h> ();
+
+			var first = entriesUtc[0].AddHours (-24);
+			var last = entriesUtc[^1].AddHours (1);
+
+			var list = new List<Candle1h> ();
+			for (var t = first; t <= last; t = t.AddHours (1))
+				{
+				list.Add (new Candle1h
+					{
+					OpenTimeUtc = t,
+					Open = basePrice,
+					Close = basePrice,
+					High = basePrice * 1.01,
+					Low = basePrice * 0.99
+					});
+				}
+
+			return list;
 			}
 		}
 	}

@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Causal.Data.Indicators.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
@@ -19,6 +19,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			return new Candle6h
 				{
 				OpenTimeUtc = t,
+				Open = close,
 				Close = close,
 				High = close + 1.0,
 				Low = close - 1.0,
@@ -67,6 +68,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				arr.Add (new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = close,
 					Close = close,
 					High = close + 2.0,
 					Low = close - 2.0

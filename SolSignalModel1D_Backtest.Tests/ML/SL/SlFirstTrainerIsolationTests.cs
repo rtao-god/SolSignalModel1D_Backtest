@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.Data;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.SL
 	{
@@ -87,7 +88,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 				{
 				bool label = i % 2 == 0;
 
-				var feats = new float[MlSchema.FeatureCount];
+				var feats = new float[SlSchema.FeatureCount];
 				feats[0] = label ? 1f : -1f;
 
 				list.Add (new SlHitSample
@@ -159,9 +160,9 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
 			if (s.Features == null)
 				throw new InvalidOperationException ($"[test] SlHitSample.Features is null at idx={idx}.");
 
-			if (s.Features.Length != MlSchema.FeatureCount)
+			if (s.Features.Length != SlSchema.FeatureCount)
 				throw new InvalidOperationException (
-					$"[test] SlHitSample.Features length mismatch at idx={idx}: len={s.Features.Length}, expected={MlSchema.FeatureCount}.");
+					$"[test] SlHitSample.Features length mismatch at idx={idx}: len={s.Features.Length}, expected={SlSchema.FeatureCount}.");
 
 			for (int j = 0; j < s.Features.Length; j++)
 				{

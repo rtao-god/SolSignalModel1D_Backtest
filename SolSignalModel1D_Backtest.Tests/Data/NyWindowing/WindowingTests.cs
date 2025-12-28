@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
-using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Time.NyWindowing;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
-namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
+namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing
 {
     public sealed class NyWindowingTests
     {
@@ -156,6 +156,48 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
             Assert.Equal(new[] { 8, 9 }, blocks[2].Select(r => r.Label));
         }
 
+        [Fact]
+        public void ComputeBaselineExitUtc_UsesDstForExitDate_SpringForward()
+        {
+            var nyTz = CoreNyWindowing.NyTz;
+
+            // Entry: Fri 2024-03-08 (до перехода на DST).
+            var entryLocal = new DateTime(2024, 3, 8, 7, 0, 0, DateTimeKind.Unspecified);
+            Assert.False(nyTz.IsDaylightSavingTime(entryLocal));
+
+            var entryUtc = NyWindowingTestUtils.EntryUtcFromUtcOrThrow(TimeZoneInfo.ConvertTimeToUtc(entryLocal, nyTz));
+
+            var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz).Value;
+            var exitLocal = TimeZoneInfo.ConvertTimeFromUtc(exitUtc, nyTz);
+
+            // Exit: Mon 2024-03-11, DST уже действует => утро 08:00, baseline-exit = 07:58.
+            Assert.Equal(DayOfWeek.Monday, exitLocal.DayOfWeek);
+            Assert.True(nyTz.IsDaylightSavingTime(exitLocal));
+            Assert.Equal(7, exitLocal.Hour);
+            Assert.Equal(58, exitLocal.Minute);
+        }
+
+        [Fact]
+        public void ComputeBaselineExitUtc_UsesStandardTimeForExitDate_FallBack()
+        {
+            var nyTz = CoreNyWindowing.NyTz;
+
+            // Entry: Fri 2024-11-01 (DST ещё действует).
+            var entryLocal = new DateTime(2024, 11, 1, 8, 0, 0, DateTimeKind.Unspecified);
+            Assert.True(nyTz.IsDaylightSavingTime(entryLocal));
+
+            var entryUtc = NyWindowingTestUtils.EntryUtcFromUtcOrThrow(TimeZoneInfo.ConvertTimeToUtc(entryLocal, nyTz));
+
+            var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz).Value;
+            var exitLocal = TimeZoneInfo.ConvertTimeFromUtc(exitUtc, nyTz);
+
+            // Exit: Mon 2024-11-04, DST уже не действует => утро 07:00, baseline-exit = 06:58.
+            Assert.Equal(DayOfWeek.Monday, exitLocal.DayOfWeek);
+            Assert.False(nyTz.IsDaylightSavingTime(exitLocal));
+            Assert.Equal(6, exitLocal.Hour);
+            Assert.Equal(58, exitLocal.Minute);
+        }
+
         private sealed class DummyRow
         {
             public DateTime DateUtc { get; init; }
@@ -163,3 +205,4 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Windowing
         }
     }
 }
+
