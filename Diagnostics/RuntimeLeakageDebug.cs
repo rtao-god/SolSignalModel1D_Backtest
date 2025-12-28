@@ -1,9 +1,6 @@
-using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Diagnostics
 {

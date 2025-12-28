@@ -1,6 +1,3 @@
-using System;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Features
 {
     public sealed class SolFeatures : IFeatureBuilder<CausalDataRow>

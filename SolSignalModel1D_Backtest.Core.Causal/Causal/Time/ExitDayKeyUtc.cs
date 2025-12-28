@@ -1,6 +1,4 @@
-using System;
-
-namespace SolSignalModel1D_Backtest.Core.Causal.Time
+namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Time
 {
     /// <summary>
     /// Day-key (00:00 UTC) границы trainUntil в терминах baseline-exit.

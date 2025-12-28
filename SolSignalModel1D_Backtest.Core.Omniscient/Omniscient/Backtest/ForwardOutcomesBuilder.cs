@@ -1,16 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
-namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
+namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Backtest
 {
     /// <summary>
     /// Строит omniscient BacktestRecord из:

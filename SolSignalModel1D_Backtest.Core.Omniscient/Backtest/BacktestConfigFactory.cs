@@ -1,4 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest

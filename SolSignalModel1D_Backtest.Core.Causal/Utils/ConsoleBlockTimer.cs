@@ -1,7 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Utils
 	{
 	/// <summary>

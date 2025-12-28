@@ -1,9 +1,6 @@
-using System;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 
-namespace SolSignalModel1D_Backtest.Core.Causal.Time
+namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Time
 {
     /// <summary>
     /// Нормализация entry day-key (00:00Z) в канонический момент входа "NY morning"

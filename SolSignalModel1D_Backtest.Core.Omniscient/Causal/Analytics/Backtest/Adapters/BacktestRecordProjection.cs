@@ -1,4 +1,3 @@
-using System;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 

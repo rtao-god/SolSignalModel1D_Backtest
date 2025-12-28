@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats
 	{
 	/// <summary>

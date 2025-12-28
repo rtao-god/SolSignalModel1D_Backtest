@@ -1,4 +1,3 @@
-using System;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Evaluator;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data

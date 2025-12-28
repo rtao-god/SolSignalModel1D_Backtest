@@ -1,13 +1,8 @@
 using Microsoft.ML;
 using Microsoft.ML.Trainers.LightGbm;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily
 {

@@ -1,4 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 

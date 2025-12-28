@@ -2,11 +2,9 @@ using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Omniscient.Trading.Evaluator;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Causal.ML.Delayed
 {

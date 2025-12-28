@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Data.Candles
 	{
 	/// <summary>

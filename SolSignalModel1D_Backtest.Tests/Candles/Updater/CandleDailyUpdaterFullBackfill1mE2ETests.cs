@@ -1,4 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;

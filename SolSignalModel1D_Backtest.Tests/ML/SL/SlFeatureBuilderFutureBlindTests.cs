@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.SL

@@ -1,6 +1,5 @@
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Aggregation;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Aggregation
 {

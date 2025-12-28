@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.PolicyRatios;
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers

@@ -1,8 +1,5 @@
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Trading.Evaluator

@@ -1,4 +1,3 @@
-using System;
 using Microsoft.ML.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared

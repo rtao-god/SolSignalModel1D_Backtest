@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Causal.Domain;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Sampling

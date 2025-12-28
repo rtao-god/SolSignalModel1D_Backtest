@@ -1,6 +1,3 @@
-using System;
-using System.Net.Http;
-using System.Threading.Tasks;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Diagnostics;
 
 namespace SolSignalModel1D_Backtest

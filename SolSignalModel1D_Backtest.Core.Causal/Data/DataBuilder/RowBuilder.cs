@@ -1,5 +1,6 @@
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.MinMove;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Indicators;

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed.Trainers;

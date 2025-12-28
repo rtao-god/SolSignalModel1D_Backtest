@@ -1,8 +1,6 @@
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Reports.Model;
-using System;
-using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 	{

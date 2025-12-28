@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Reports.Model;
 

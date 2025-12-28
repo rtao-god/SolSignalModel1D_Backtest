@@ -4,12 +4,11 @@ using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 {

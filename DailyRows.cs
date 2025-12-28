@@ -1,12 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Indicators;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 

@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Causal.Domain;
 using SolSignalModel1D_Backtest.Reports.Model;

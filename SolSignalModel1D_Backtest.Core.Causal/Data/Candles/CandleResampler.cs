@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data.Candles

@@ -1,7 +1,5 @@
-using System;
-using System.Collections.Generic;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
 {
@@ -18,7 +16,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
                 if (EntryUtc.IsDefault)
                     throw new InvalidOperationException("[forward] EntryUtc is default (uninitialized).");
 
-                return SolSignalModel1D_Backtest.Core.Causal.Time.EntryDayKeyUtc.FromUtcMomentOrThrow(EntryUtc.Value);
+                return EntryDayKeyUtc.FromUtcMomentOrThrow(EntryUtc.Value);
             }
         }
 

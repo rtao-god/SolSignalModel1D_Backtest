@@ -1,5 +1,4 @@
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Format;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 

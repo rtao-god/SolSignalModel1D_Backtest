@@ -1,6 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
-using System;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Evaluation
 	{

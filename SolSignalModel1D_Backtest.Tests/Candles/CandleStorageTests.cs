@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;

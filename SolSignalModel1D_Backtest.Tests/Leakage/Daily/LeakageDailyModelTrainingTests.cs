@@ -3,13 +3,11 @@ using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using System.Reflection;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{

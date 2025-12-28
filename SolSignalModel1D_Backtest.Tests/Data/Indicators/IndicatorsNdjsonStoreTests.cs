@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using System.Text.Json;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Indicators;
 using Xunit;

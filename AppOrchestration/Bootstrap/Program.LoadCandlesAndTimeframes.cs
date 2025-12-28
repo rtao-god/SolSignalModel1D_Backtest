@@ -1,8 +1,5 @@
-using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Domain;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using System.Diagnostics;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;

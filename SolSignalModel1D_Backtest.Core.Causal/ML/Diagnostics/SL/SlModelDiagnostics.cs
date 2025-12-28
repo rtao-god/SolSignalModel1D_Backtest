@@ -3,9 +3,6 @@ using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Diagnostics.SL
 {

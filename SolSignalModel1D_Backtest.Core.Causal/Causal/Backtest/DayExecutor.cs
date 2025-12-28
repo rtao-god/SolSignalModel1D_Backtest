@@ -1,4 +1,4 @@
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using CausalDataRow = SolSignalModel1D_Backtest.Core.Causal.Data.CausalDataRow;
 

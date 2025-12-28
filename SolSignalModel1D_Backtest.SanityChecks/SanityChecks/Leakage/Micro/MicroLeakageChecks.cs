@@ -1,9 +1,6 @@
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 

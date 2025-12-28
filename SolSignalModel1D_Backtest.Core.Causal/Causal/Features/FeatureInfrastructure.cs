@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Features
 {
     // Invariant: TRow is part of FeatureContext public surface (Row getter),

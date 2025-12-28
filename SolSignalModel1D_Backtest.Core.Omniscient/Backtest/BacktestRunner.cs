@@ -2,19 +2,14 @@ using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Aggregation;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Micro;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Causal.Analytics.Backtest.Adapters;
 using OmniscientModelStatsPrinter =
     SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers.BacktestModelStatsPrinter;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 {

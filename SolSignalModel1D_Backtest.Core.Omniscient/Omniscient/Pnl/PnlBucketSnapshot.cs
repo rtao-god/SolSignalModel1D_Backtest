@@ -1,5 +1,3 @@
-using System;
-
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl
 	{
 	/// <summary>

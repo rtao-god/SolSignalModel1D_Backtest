@@ -1,11 +1,7 @@
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
 {

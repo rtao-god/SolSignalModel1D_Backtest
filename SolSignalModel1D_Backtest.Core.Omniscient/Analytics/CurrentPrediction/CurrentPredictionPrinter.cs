@@ -1,5 +1,3 @@
-using System;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 

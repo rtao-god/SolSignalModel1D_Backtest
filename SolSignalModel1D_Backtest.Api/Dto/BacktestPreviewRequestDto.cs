@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace SolSignalModel1D_Backtest.Api.Dto
 	{
 	/// <summary>

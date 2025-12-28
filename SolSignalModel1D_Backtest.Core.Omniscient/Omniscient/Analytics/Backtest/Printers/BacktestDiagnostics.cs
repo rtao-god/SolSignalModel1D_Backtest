@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers
 	{
 	/// <summary>

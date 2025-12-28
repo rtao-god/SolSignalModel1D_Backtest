@@ -1,12 +1,6 @@
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Profiles;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Services
 	{

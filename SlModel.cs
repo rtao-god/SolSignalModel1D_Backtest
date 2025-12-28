@@ -5,9 +5,6 @@ using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest

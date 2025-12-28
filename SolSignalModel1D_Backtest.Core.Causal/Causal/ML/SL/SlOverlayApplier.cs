@@ -1,5 +1,4 @@
-using System;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Aggregation;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL

@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.TestUtils

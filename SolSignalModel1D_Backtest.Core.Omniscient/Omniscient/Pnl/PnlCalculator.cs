@@ -1,10 +1,6 @@
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Evaluator;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 

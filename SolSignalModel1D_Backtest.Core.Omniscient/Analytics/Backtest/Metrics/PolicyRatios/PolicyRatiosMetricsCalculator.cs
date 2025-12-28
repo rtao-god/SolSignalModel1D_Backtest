@@ -1,9 +1,5 @@
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Metrics.PolicyRatios
 	{

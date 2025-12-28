@@ -1,13 +1,10 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
 using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{

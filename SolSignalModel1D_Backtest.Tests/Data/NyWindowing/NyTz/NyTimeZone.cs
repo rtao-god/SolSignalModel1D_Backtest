@@ -1,6 +1,3 @@
-using System;
-using SolSignalModel1D_Backtest.Core.Causal.Time;
-
 namespace SolSignalModel1D_Backtest.Tests.Data.NyWindowing.NyTz
 	{
 	/// <summary>

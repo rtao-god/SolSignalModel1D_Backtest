@@ -1,4 +1,3 @@
-using System;
 using System.Globalization;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Utils.Format

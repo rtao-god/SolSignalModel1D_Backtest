@@ -1,6 +1,4 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using Xunit;
 using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;

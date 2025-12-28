@@ -1,4 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -8,6 +7,8 @@ using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.SelfCheck
 {

@@ -1,14 +1,7 @@
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 using SolSignalModel1D_Backtest.Diagnostics;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data.Indicators
 	{

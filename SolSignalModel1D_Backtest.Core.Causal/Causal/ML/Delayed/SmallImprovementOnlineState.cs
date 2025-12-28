@@ -1,9 +1,6 @@
 using Microsoft.ML;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed.Trainers;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
-using System;
-using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed
 	{

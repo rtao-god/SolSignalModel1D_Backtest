@@ -1,9 +1,4 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
 using System.Text;
-using System.Threading.Tasks;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using Xunit;

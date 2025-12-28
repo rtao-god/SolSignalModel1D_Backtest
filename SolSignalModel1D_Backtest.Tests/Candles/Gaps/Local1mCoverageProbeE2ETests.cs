@@ -1,11 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
-using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;
 using SolSignalModel1D_Backtest.Core.Causal.Data;

@@ -1,6 +1,5 @@
 using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
-using System;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Data
 	{

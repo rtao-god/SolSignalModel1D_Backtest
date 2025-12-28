@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Text.Json;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 

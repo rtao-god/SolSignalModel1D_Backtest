@@ -1,7 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
-using System;
-using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.ML.SL
 	{

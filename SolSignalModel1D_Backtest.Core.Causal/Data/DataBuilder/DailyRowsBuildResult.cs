@@ -1,6 +1,3 @@
-using System.Collections.Generic;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
 	{
 	/// <summary>

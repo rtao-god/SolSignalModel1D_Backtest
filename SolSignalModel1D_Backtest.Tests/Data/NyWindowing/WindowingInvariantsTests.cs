@@ -1,4 +1,3 @@
-using System;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using Xunit;

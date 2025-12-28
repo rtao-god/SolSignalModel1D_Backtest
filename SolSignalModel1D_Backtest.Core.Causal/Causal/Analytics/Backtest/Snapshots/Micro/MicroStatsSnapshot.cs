@@ -1,5 +1,3 @@
-using System;
-
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Micro
 {
 	public sealed class MicroStatsSnapshot

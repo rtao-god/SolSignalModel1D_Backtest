@@ -7,6 +7,7 @@ using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest
 {

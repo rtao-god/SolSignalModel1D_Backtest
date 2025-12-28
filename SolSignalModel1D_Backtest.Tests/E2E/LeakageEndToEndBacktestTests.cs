@@ -1,16 +1,13 @@
 using Microsoft.ML;
-using Microsoft.ML.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.E2E
 	{

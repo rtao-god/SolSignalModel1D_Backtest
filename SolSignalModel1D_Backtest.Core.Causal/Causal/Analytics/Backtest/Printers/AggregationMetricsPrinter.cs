@@ -1,4 +1,3 @@
-using System;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Aggregation;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 

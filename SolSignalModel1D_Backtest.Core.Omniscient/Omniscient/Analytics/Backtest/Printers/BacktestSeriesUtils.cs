@@ -1,5 +1,4 @@
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers

@@ -1,10 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Utils.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Trading;
-using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers

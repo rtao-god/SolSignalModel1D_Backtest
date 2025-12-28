@@ -1,6 +1,4 @@
-using System;
-
-namespace SolSignalModel1D_Backtest.Core.Causal.Time
+namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Time
 {
     /// <summary>
     /// UTC entry timestamp: реальный момент входа/решения (не day-key).

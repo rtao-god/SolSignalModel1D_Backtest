@@ -1,8 +1,5 @@
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage.Policies;
-using System;
-using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 	{

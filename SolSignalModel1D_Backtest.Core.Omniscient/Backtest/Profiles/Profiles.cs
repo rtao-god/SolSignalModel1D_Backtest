@@ -1,9 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Profiles
 	{
 	/// <summary>
