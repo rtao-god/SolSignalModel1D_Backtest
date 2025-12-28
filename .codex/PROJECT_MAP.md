@@ -1,37 +1,65 @@
 # Карта репозитория (высокий сигнал, низкий шум)
 
-## Факты (по наблюдаемым путям/неймспейсам из кода)
-- `SolSignalModel1D_Backtest` — консольная оркестрация (Program.cs).
-- `SolSignalModel1D_Backtest.Core` — доменная логика, время, ML, бэктест, аналитика.
-- `SolSignalModel1D_Backtest.SanityChecks` — self-check/leakage проверки.
+## Факты (по наблюдаемым неймспейсам/типам)
+- `SolSignalModel1D_Backtest` — консольная оркестрация (partial `Program`), CLI флаги, пайплайн, отчёты.
+- `SolSignalModel1D_Backtest.Core` — доменная логика: время/окна, каузальные данные, ML, backtest/PnL, аналитика.
+- `SolSignalModel1D_Backtest.SanityChecks` — self-check/leakage проверки (`SelfCheckRunner`).
 - `SolSignalModel1D_Backtest.Tests` — xUnit тесты.
 
-## Стартовые точки поиска (подтверждать наличием файлов в репо)
+## Стартовые точки поиска
+
+### Оркестрация (Program partial)
+Искать по символам:
+- `Main(...)` (CLI флаги: `--scan-gaps-1m|1h|6h`)
+- `BootstrapRowsAndCandlesAsync`
+- `LoadAllCandlesAndWindow`
+- `BuildIndicatorsAsync`
+- `RunBacktestAndReports`
+- `SplitByTrainUntilUtc`
+- `DumpDailyAccuracyWithDatasetSplit`
+
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "BootstrapRowsAndCandlesAsync|LoadAllCandlesAndWindow|BuildIndicatorsAsync|RunBacktestAndReports|SplitByTrainUntilUtc|DumpDailyAccuracyWithDatasetSplit" .`
+
 ### Время / NY-окна
-- `SolSignalModel1D_Backtest.Core/Time/NyWindowing*.cs`
-  - NY morning validation
-  - baseline-exit computation
-  - derivations day-key (entry/exit)
+- Канон: `NyWindowing` (namespace `SolSignalModel1D_Backtest.Core.Time`).
+- Связанные типы (по именам): `EntryUtc`, `NyTradingEntryUtc`, `EntryDayKeyUtc`, `ExitDayKeyUtc`, `BaselineExitUtc`.
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "NyWindowing|NyTradingEntryUtc|BaselineExit|EntryDayKeyUtc|ExitDayKeyUtc" .`
 
-### Сплиты / датасеты
-- `SolSignalModel1D_Backtest.Core/Causal/ML/Daily/*DatasetBuilder*.cs`
-- `SolSignalModel1D_Backtest.Core/Causal/ML/SL/*DatasetBuilder*.cs`
-- split-helpers обычно рядом с time-моделью (`Core/Time` или `Core/Causal/Time`) — искать по символам `NyTrainSplit`, `SplitByBaselineExit*`, `ClassifyByBaselineExit`.
+### Сплиты train/oos
+- Канон split-helper: `NyTrainSplit` / `SplitByBaselineExitStrict(...)`.
+- Файл: `NyTrainSplit.Strict.cs``
 
-### Бэктест и аналитика
-- `SolSignalModel1D_Backtest.Core/Backtest/BacktestRunner.cs`
-- `SolSignalModel1D_Backtest.Core/*/Analytics/*/Snapshots/*.cs`
-- `SolSignalModel1D_Backtest.Core/*/Analytics/*/Printers/*.cs`
+### Датасеты (Daily / SL)
+- Daily: `SolSignalModel1D_Backtest.Core.Causal.ML.Daily` (`DailyDatasetBuilder.Build(...)`).
+- SL: искать `Core.Causal.ML.SL` + `DatasetBuilder`/`OfflineBuilder`.
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "Causal\\.ML\\.(Daily|SL)|DatasetBuilder|OfflineBuilder" .`
 
-### SL offline builder
-- `SolSignalModel1D_Backtest.Core/ML/SL/SlOfflineBuilder.cs`
+### Свечи / загрузка / хранение
+- Candle IO: `CandleNdjsonStore`, `CandlePaths`, `CandleResampler`.
+- Инварианты порядка: `SeriesGuards`.
+- Weekend 1m: `CandlePaths.WeekendFile(symbol, "1m")`.
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "CandleNdjsonStore|CandlePaths|CandleResampler|SeriesGuards|WeekendFile" .`
 
-### Sanity/leakage
-- `SolSignalModel1D_Backtest.SanityChecks/**`
+### Gap scan (Binance)
+- `BinanceKlinesGapScanner.ScanGapsAsync(...)` + CLI флаги `--scan-gaps-*`.
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "BinanceKlinesGapScanner|ScanGapsAsync|scan-gaps-" .`
 
-### Тесты
-- `SolSignalModel1D_Backtest.Tests/**`
-  - при миграциях времени: обновлять тесты на каноничные фабрики (например, NyWindowing factory methods), без обхода obsolete API.
+### Индикаторы (FNG/DXY) и coverage
+- `IndicatorsDailyUpdater.UpdateAllAsync(...)`, `EnsureCoverageOrFail(...)`, `FillMode`.
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "IndicatorsDailyUpdater|EnsureCoverageOrFail|FillMode" .`
+
+### Backtest / отчёты
+- Runner: `BacktestRunner.Run(...)`.
+- Orchestrator: `BacktestReportsOrchestrator.*`.
+- Policies: `BacktestPolicyFactory`, `RollingLoop.PolicySpec`, `ICausalLeveragePolicy`.
+Поиск:
+- `rg -n --glob "!**/bin/**" --glob "!**/obj/**" "BacktestRunner|BacktestReportsOrchestrator|BacktestPolicyFactory|RollingLoop\\.PolicySpec|ICausalLeveragePolicy" .`
 
 ## Правило навигации при ошибке компиляции
 1) взять символ из ошибки (`CS0103/CS1739/...`)

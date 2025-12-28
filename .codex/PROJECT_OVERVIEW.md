@@ -1,15 +1,21 @@
 # Обзор проекта (для ориентации Codex)
 
 ## Факты
-- Репозиторий — C#/.NET решение с консольной оркестрацией (Program.cs) и несколькими проектами (Core / Tests / SanityChecks).
-- В коде встречаются неймспейсы вида `SolSignalModel1D_Backtest.Core.*`, включая `Core.Causal.*` и `Core.Omniscient.*`.
-- ML часть использует ML.NET и LightGBM (по using/типам тренеров).
+- Репозиторий — C#/.NET решение с консольной оркестрацией (partial `Program`) и несколькими проектами (Core / Tests / SanityChecks / Api для фронта).
+- В коде встречаются неймспейсы `SolSignalModel1D_Backtest.Core.*`, включая `Core.Causal.*` и `Core.Omniscient.*`.
+- ML часть использует ML.NET и LightGBM.
+- В runtime-пайплайне есть:
+  - загрузка свечей 6h/1h/1m (1m включает weekday + отдельный weekend-файл),
+  - gap scan по Binance klines (`--scan-gaps-*`),
+  - обновление дневных индикаторов (FNG/DXY) и проверка coverage (fail-fast),
+  - train/oos split по baseline-exit day-key.
 
-## Предположения (требуют подтверждения поиском по репо)
-- Основной пайплайн: построение каузальных рядов → обучение моделей → построение omniscient backtest records → аналитика/снапшоты/принтеры → sanity checks.
-- Целевая платформа сборки близка к net9.0 (встречалось в путях/артефактах сборки), но нужно подтверждать в csproj.
+## Предположения 
+- Основной пайплайн: данные (candles/indicators) → построение каузальных дневных строк → обучение/инференс → построение omniscient `BacktestRecord` → backtest/PnL/отчёты → sanity checks.
+- Целевая платформа сборки близка к `net9.0`.
 
 ## Граница домена: causal vs omniscient
+
 ### Causal слой (не должен «подглядывать»)
 - Обычно: `Core.Causal.*`
 - Работает с каузальными входами (например: `CausalDataRow` / `LabeledCausalRow`).
@@ -21,7 +27,7 @@
 - Используется для оценки качества, отчётов, симуляции PnL, диагностик.
 
 ## Модель времени (семантические типы)
-Ключевые типы (по именам, подтверждать переходом к определению):
+Ключевые типы:
 - `EntryUtc`: UTC instant момента входа.
 - `NyTradingEntryUtc`: валидированный вход «NY morning торгового дня».
 - `EntryDayKeyUtc` / `ExitDayKeyUtc`: day-key (00:00Z) с явной семантикой.
@@ -31,20 +37,21 @@
 - `NyWindowing` — единственный источник истины по NY morning / baseline-exit / day-key derivations.
 
 ## Семантика train/oos split
-- Сплит должен быть основан на day-key baseline-exit, а не на «наивных датах».
+- Сплит должен быть основан на **day-key baseline-exit**, а не на «наивных датах» entry.
 - Excluded должны существовать и быть осмысленно обработаны:
   - мягкий сплит: учитывать excluded,
   - строгий сплит: excluded запрещён (fail-fast).
 
-## ML компоненты (высокоуровнево)
-- `ModelTrainer` обучает набор бинарных классификаторов:
-  - move (move vs flat),
-  - dir (normal vs down-regime),
-  - micro-flat (в flat-дни micro up vs down).
-- SL подсистема (по именам классов):
-  - offline builder строит сэмплы по 1m path labels + 1h features,
-  - dataset builder фильтрует/готовит датасет по train boundary,
-  - overlay применяет риск-слой к итоговым вероятностям.
+## Данные свечей (высокоуровнево)
+- 6h: SOL/BTC/PAXG.
+- 1h: SOL.
+- 1m: SOL из двух источников (weekdays + weekend-файл).
+- Инвариант: серии после init строго возрастающие и строго уникальные по времени; weekday/weekend 1m не пересекаются.
+
+## Индикаторы (FNG/DXY)
+- Обновление идёт на интервале `[fromUtc..toUtc]`.
+- Coverage должен валидироваться до продолжения пайплайна (fail-fast).
+- FillMode: FNG = Strict, DXY = NeutralFill.
 
 ## Что оптимизировать в правках
 - Строгая типобезопасность времени (без смешивания смыслов).
