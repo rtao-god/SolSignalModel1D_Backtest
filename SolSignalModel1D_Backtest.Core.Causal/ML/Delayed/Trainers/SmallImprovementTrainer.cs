@@ -1,0 +1,101 @@
+using Microsoft.ML;
+using Microsoft.ML.Data;
+using Microsoft.ML.Trainers.LightGbm;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using System;
+using System.Collections.Generic;
+
+namespace SolSignalModel1D_Backtest.Core.Causal.ML.Delayed.Trainers
+	{
+	public sealed class SmallImprovementTrainer
+		{
+		private readonly MLContext _ml = new MLContext (seed: 42);
+
+		private sealed class TrainRow
+			{
+			public bool Label { get; set; }
+
+			[VectorType (MlSchema.FeatureCount)]
+			public float[] Features { get; set; } = new float[MlSchema.FeatureCount];
+
+			public float Weight { get; set; }
+			}
+
+		public ITransformer Train ( List<SmallImprovementSample> samples, DateTime asOfUtc )
+			{
+			if (samples == null) throw new ArgumentNullException (nameof (samples));
+
+			var rows = new List<TrainRow> (samples.Count);
+
+			foreach (var s in samples)
+				{
+				if (s == null)
+					throw new InvalidOperationException ("[B-trainer] samples contains null item.");
+
+				if (s.EntryUtc >= asOfUtc)
+					continue;
+
+				if (s.Features == null || s.Features.Length == 0)
+					throw new InvalidOperationException ($"[B-trainer] empty Features for sample entry={s.EntryUtc:O}.");
+
+				// ML.NET требует фиксированную длину вектора.
+				// Любая “подгонка” длины скрывает баги в источнике фичей.
+				if (s.Features.Length != MlSchema.FeatureCount)
+					{
+					throw new InvalidOperationException (
+						$"[B-trainer] Features length mismatch for sample entry={s.EntryUtc:O}: " +
+						$"len={s.Features.Length}, expected={MlSchema.FeatureCount}. " +
+						"Почини источник фичей: длина должна быть строго фиксированной для данного датасета/модели.");
+					}
+
+				double ageDays = (asOfUtc - s.EntryUtc).TotalDays;
+				float timeW =
+					ageDays <= 90 ? 1.0f :
+					ageDays <= 180 ? 0.7f :
+					0.4f;
+
+				float clsW = s.Label ? 2.0f : 1.0f;
+
+				// Клонируем фичи, чтобы исключить внешние мутации sample.Features.
+				var feats = new float[MlSchema.FeatureCount];
+				Array.Copy (s.Features, feats, MlSchema.FeatureCount);
+
+				rows.Add (new TrainRow
+					{
+					Label = s.Label,
+					Features = feats,
+					Weight = timeW * clsW
+					});
+				}
+
+			if (rows.Count == 0)
+				throw new InvalidOperationException ("[B-trainer] no samples to train");
+
+			var data = _ml.Data.LoadFromEnumerable (rows);
+
+			var opts = new LightGbmBinaryTrainer.Options
+				{
+				LabelColumnName = nameof (TrainRow.Label),
+				FeatureColumnName = nameof (TrainRow.Features),
+				ExampleWeightColumnName = nameof (TrainRow.Weight),
+				NumberOfLeaves = 16,
+				NumberOfIterations = 90,
+				LearningRate = 0.07,
+				MinimumExampleCountPerLeaf = 15,
+				Seed = 42,
+				NumberOfThreads = 1
+				};
+
+			var model = _ml.BinaryClassification.Trainers.LightGbm (opts).Fit (data);
+			Console.WriteLine ($"[B-trainer] trained on {rows.Count} rows (asOf={asOfUtc:yyyy-MM-dd})");
+			return model;
+			}
+
+		public PredictionEngine<SmallImprovementSample, SlHitPrediction> CreateEngine ( ITransformer model )
+			{
+			if (model == null) throw new ArgumentNullException (nameof (model));
+			return _ml.Model.CreatePredictionEngine<SmallImprovementSample, SlHitPrediction> (model);
+			}
+		}
+	}
