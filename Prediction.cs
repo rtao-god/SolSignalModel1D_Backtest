@@ -1,17 +1,17 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest
 {
     public partial class Program
     {
-        private static DateTime _trainUntilUtc;
-        private static ExitDayKeyUtc _trainUntilExitDayKeyUtc;
+        private static BaselineExitUtc _trainUntilBaselineExitUtc;
+        private static TrainUntilExitDayKeyUtc _trainUntilExitDayKeyUtc;
 
         private static EntryUtc ToEntryUtc(EntryUtc entry) => entry;
         private static EntryUtc ToEntryUtc(NyTradingEntryUtc entry) => entry.AsEntryUtc();
@@ -36,11 +36,11 @@ namespace SolSignalModel1D_Backtest
             const int HoldoutDays = 120;
 
             var trainUntilUtc = DeriveTrainUntilUtcFromHoldout(
-                maxEntryUtc: maxEntryUtc,
+                rows: ordered,
                 holdoutDays: HoldoutDays,
                 nyTz: NyTz);
 
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow(trainUntilUtc);
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
@@ -67,29 +67,26 @@ namespace SolSignalModel1D_Backtest
             if (labelHist.Length <= 1)
                 Console.WriteLine("[engine] WARNING: train labels are degenerate (<=1 class).");
 
-            IReadOnlyList<LabeledCausalRow> finalTrainRows;
+            const int MinTrainRows = 100;
 
-            if (trainRows.Count < 100)
+            if (trainRows.Count < MinTrainRows)
             {
-                Console.WriteLine(
-                    $"[engine] trainRows too small ({trainRows.Count}), используем всю историю без hold-out.");
-
-                finalTrainRows = ordered;
-
-                _trainUntilUtc = DeriveMaxBaselineExitUtc(rows: ordered, nyTz: NyTz);
-                _trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(_trainUntilUtc);
+                throw new InvalidOperationException(
+                    "[engine] Not enough train rows for causal training. " +
+                    $"train={trainRows.Count}, min={MinTrainRows}, " +
+                    $"trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}, " +
+                    $"entryRange=[{minEntryUtc:yyyy-MM-dd}; {maxEntryUtc:yyyy-MM-dd}]. " +
+                    "Refusing to train on full history to avoid future leakage.");
             }
-            else
-            {
-                finalTrainRows = trainRows;
 
-                _trainUntilUtc = trainUntilUtc;
-                _trainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc;
+            var finalTrainRows = trainRows;
 
-                Console.WriteLine(
-                    $"[engine] training on rows with baseline-exit day <= {_trainUntilExitDayKeyUtc.Value:yyyy-MM-dd} " +
-                    $"(train={split.Train.Count}, oos={split.Oos.Count}, total={ordered.Count}, entryRange=[{minEntryUtc:yyyy-MM-dd}; {maxEntryUtc:yyyy-MM-dd}])");
-            }
+            _trainUntilBaselineExitUtc = new BaselineExitUtc(new UtcInstant(trainUntilUtc));
+            _trainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc;
+
+            Console.WriteLine(
+                $"[engine] training on rows with baseline-exit day <= {_trainUntilExitDayKeyUtc.Value:yyyy-MM-dd} " +
+                $"(train={split.Train.Count}, oos={split.Oos.Count}, total={ordered.Count}, entryRange=[{minEntryUtc:yyyy-MM-dd}; {maxEntryUtc:yyyy-MM-dd}])");
 
             var trainer = new ModelTrainer
             {
@@ -113,26 +110,18 @@ namespace SolSignalModel1D_Backtest
 
         private static async Task<List<BacktestRecord>> LoadPredictionRecordsAsync(
             IReadOnlyList<LabeledCausalRow> mornings,
-            IReadOnlyList<Candle6h> solAll6h,
+            IReadOnlyList<Candle1m> sol1m,
             PredictionEngine engine)
         {
             if (mornings == null) throw new ArgumentNullException(nameof(mornings));
-            if (solAll6h == null) throw new ArgumentNullException(nameof(solAll6h));
+            if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
             if (engine == null) throw new ArgumentNullException(nameof(engine));
 
-            if (_trainUntilUtc == default)
-                throw new InvalidOperationException("[forward] _trainUntilUtc не установлен.");
+            if (_trainUntilBaselineExitUtc.IsDefault)
+                throw new InvalidOperationException("[forward] _trainUntilBaselineExitUtc не установлен.");
 
             if (_trainUntilExitDayKeyUtc.IsDefault)
                 throw new InvalidOperationException("[forward] _trainUntilExitDayKeyUtc не установлен.");
-
-            var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList();
-            if (sorted6h.Count == 0)
-                throw new InvalidOperationException("[forward] Пустая серия 6h для SOL");
-
-            var indexByOpenTime = new Dictionary<DateTime, int>(sorted6h.Count);
-            for (int i = sorted6h.Count - 1; i >= 0; i--)
-                indexByOpenTime[sorted6h[i].OpenTimeUtc] = i;
 
             var orderedMornings = mornings as List<LabeledCausalRow> ?? mornings.ToList();
 
@@ -146,108 +135,72 @@ namespace SolSignalModel1D_Backtest
                 $"[forward] mornings total={orderedMornings.Count}, train={split.Train.Count}, oos={split.Oos.Count}, excluded={split.Excluded.Count}, " +
                 $"trainUntilExitDayKeyUtc={_trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
 
-            var list = new List<BacktestRecord>(orderedMornings.Count);
+            var causalRecords = new List<CausalPredictionRecord>(orderedMornings.Count);
 
             for (int k = 0; k < orderedMornings.Count; k++)
             {
                 var r = orderedMornings[k];
-
                 var entryUtc = r.Causal.EntryUtc.Value;
-                var entry = ToEntryUtc(r.Causal.EntryUtc);
 
-                if (!NyWindowing.TryComputeBaselineExitUtc(entry, NyTz, out var exitUtc))
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(entryUtc), NyTz, out _))
                 {
-                    Console.WriteLine(
-                        $"[forward] skip entry {entryUtc:O}: baseline-exit undefined by contract.");
-                    continue;
+                    throw new InvalidOperationException(
+                        $"[forward] baseline-exit undefined for morning entry {entryUtc:O}.");
                 }
 
-                var exitUtcDt = exitUtc.Value;
-
-                var causal = engine.PredictCausal(r.Causal);
-
-                if (!indexByOpenTime.TryGetValue(entryUtc, out var entryIdx))
-                    throw new InvalidOperationException($"[forward] entry candle {entryUtc:O} not found in 6h series");
-
-                var exitIdx = -1;
-                for (int i = entryIdx; i < sorted6h.Count; i++)
-                {
-                    var start = sorted6h[i].OpenTimeUtc;
-                    var end = (i + 1 < sorted6h.Count) ? sorted6h[i + 1].OpenTimeUtc : start.AddHours(6);
-
-                    if (exitUtcDt >= start && exitUtcDt < end)
-                    {
-                        exitIdx = i;
-                        break;
-                    }
-                }
-
-                if (exitIdx < 0)
-                    throw new InvalidOperationException($"[forward] no 6h candle covering baseline exit {exitUtcDt:O} (entry {entryUtc:O})");
-
-                if (exitIdx <= entryIdx)
-                    throw new InvalidOperationException($"[forward] exitIdx {exitIdx} <= entryIdx {entryIdx} for entry {entryUtc:O}");
-
-                var entryPrice = sorted6h[entryIdx].Close;
-
-                double maxHigh = double.MinValue;
-                double minLow = double.MaxValue;
-
-                for (int j = entryIdx + 1; j <= exitIdx; j++)
-                {
-                    var c = sorted6h[j];
-                    if (c.High > maxHigh) maxHigh = c.High;
-                    if (c.Low < minLow) minLow = c.Low;
-                }
-
-                if (maxHigh == double.MinValue || minLow == double.MaxValue)
-                    throw new InvalidOperationException($"[forward] no candles between entry {entryUtc:O} and exit {exitUtcDt:O}");
-
-                var fwdClose = sorted6h[exitIdx].Close;
-
-                var forward = new ForwardOutcomes
-                {
-                    EntryUtc = entry,
-
-                    TrueLabel = r.TrueLabel,
-                    FactMicroUp = r.FactMicroUp,
-                    FactMicroDown = r.FactMicroDown,
-
-                    Entry = entryPrice,
-                    MaxHigh24 = maxHigh,
-                    MinLow24 = minLow,
-                    Close24 = fwdClose,
-
-                    MinMove = r.Causal.MinMove,
-
-                    WindowEndUtc = exitUtcDt,
-                    DayMinutes = Array.Empty<Candle1m>()
-                };
-
-                list.Add(new BacktestRecord { Causal = causal, Forward = forward });
+                causalRecords.Add(engine.PredictCausal(r.Causal));
             }
 
-            return await Task.FromResult(list);
+            var built = ForwardOutcomesBuilder.Build(
+                causalRecords: causalRecords,
+                truthRows: orderedMornings,
+                allMinutes: sol1m);
+
+            return await Task.FromResult(built as List<BacktestRecord> ?? built.ToList());
         }
 
-        private static DateTime DeriveTrainUntilUtcFromHoldout(DateTime maxEntryUtc, int holdoutDays, TimeZoneInfo nyTz)
+        private static DateTime DeriveTrainUntilUtcFromHoldout(
+            IReadOnlyList<LabeledCausalRow> rows,
+            int holdoutDays,
+            TimeZoneInfo nyTz)
         {
+            if (rows == null) throw new ArgumentNullException(nameof(rows));
+            if (rows.Count == 0) throw new ArgumentException("rows must be non-empty.", nameof(rows));
             if (holdoutDays < 0) throw new ArgumentOutOfRangeException(nameof(holdoutDays));
-            if (maxEntryUtc == default) throw new ArgumentException("maxEntryUtc must be initialized.", nameof(maxEntryUtc));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-            var candidateEntry = maxEntryUtc.AddDays(-holdoutDays);
+            var maxExitUtc = DeriveMaxBaselineExitUtc(rows, nyTz);
+            var maxExitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(maxExitUtc).Value;
+            var candidateExitDayKeyUtc = maxExitDayKeyUtc.AddDays(-holdoutDays);
 
             for (int i = 0; i < 14; i++)
             {
-                var ny = TimeZoneInfo.ConvertTimeFromUtc(candidateEntry, nyTz);
-                if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
-                    return NyWindowing.ComputeBaselineExitUtc(new EntryUtc(candidateEntry), nyTz).Value;
+                var nyNoon = TimeZoneInfo.ConvertTimeFromUtc(candidateExitDayKeyUtc.AddHours(12), nyTz);
+                if (nyNoon.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+                {
+                    var date = nyNoon.Date;
+                    var noonLocal = new DateTime(date.Year, date.Month, date.Day, 12, 0, 0, DateTimeKind.Unspecified);
+                    bool dst = nyTz.IsDaylightSavingTime(noonLocal);
+                    int morningHourLocal = dst ? 8 : 7;
 
-                candidateEntry = candidateEntry.AddDays(-1);
+                    var morningLocal = new DateTime(date.Year, date.Month, date.Day, morningHourLocal, 0, 0, DateTimeKind.Unspecified);
+                    var exitLocal = morningLocal.AddMinutes(-2);
+                    var exitUtc = TimeZoneInfo.ConvertTimeToUtc(exitLocal, nyTz);
+
+                    if (exitUtc > maxExitUtc)
+                    {
+                        throw new InvalidOperationException(
+                            $"[engine] derived trainUntilUtc exceeds max baseline-exit. trainUntilUtc={exitUtc:O}, maxExitUtc={maxExitUtc:O}, holdoutDays={holdoutDays}.");
+                    }
+
+                    return exitUtc;
+                }
+
+                candidateExitDayKeyUtc = candidateExitDayKeyUtc.AddDays(-1);
             }
 
-            throw new InvalidOperationException("[engine] failed to derive trainUntilUtc from holdout.");
+            throw new InvalidOperationException(
+                $"[engine] failed to derive trainUntilUtc from holdout in baseline-exit domain. holdoutDays={holdoutDays}, maxExitDayKeyUtc={maxExitDayKeyUtc:yyyy-MM-dd}.");
         }
 
         private static DateTime DeriveMaxBaselineExitUtc(IReadOnlyList<LabeledCausalRow> rows, TimeZoneInfo nyTz)
@@ -283,3 +236,4 @@ namespace SolSignalModel1D_Backtest
         }
     }
 }
+

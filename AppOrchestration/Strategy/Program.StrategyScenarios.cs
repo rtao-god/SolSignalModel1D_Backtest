@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.StrategySimulators;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.StrategySimulators;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.StrategySimulators;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{

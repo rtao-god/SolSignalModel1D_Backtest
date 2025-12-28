@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 	{
@@ -24,7 +25,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
 		public IReadOnlyList<Candle1h> SolAll1h { get; init; } = Array.Empty<Candle1h> ();
 		public IReadOnlyList<Candle1m> Sol1m { get; init; } = Array.Empty<Candle1m> ();
 
-		public DateTime TrainUntilUtc { get; init; }
+		public TrainUntilExitDayKeyUtc TrainUntilExitDayKeyUtc { get; init; }
 		public TimeZoneInfo NyTz { get; init; } = TimeZoneInfo.Utc;
 		}
 	}

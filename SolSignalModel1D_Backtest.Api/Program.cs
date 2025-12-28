@@ -1,7 +1,7 @@
 using SolSignalModel1D_Backtest.Api.Endpoints;
 using SolSignalModel1D_Backtest.Api.Services;
-using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
-using SolSignalModel1D_Backtest.Core.Backtest.Services;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Profiles;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Services;
 using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 using System.Text.Json.Serialization;

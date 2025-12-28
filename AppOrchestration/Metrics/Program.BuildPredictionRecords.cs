@@ -1,14 +1,13 @@
-using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -21,7 +20,7 @@ namespace SolSignalModel1D_Backtest
         private static async Task<List<BacktestRecord>> BuildPredictionRecordsAsync(
             List<LabeledCausalRow> allRows,
             List<LabeledCausalRow> mornings,
-            List<Candle6h> solAll6h
+            List<Candle1m> sol1m
         )
         {
             // Локальный хелпер: печатает диапазон дат и распределение по day-of-week.
@@ -61,8 +60,8 @@ namespace SolSignalModel1D_Backtest
 
             // Строим BacktestRecord по утренним точкам:
             // - causal прогнозы,
-            // - forward-метрики (на основе solAll6h и внутренней логики загрузчика).
-            var records = await LoadPredictionRecordsAsync(mornings, solAll6h, engine);
+            // - forward-метрики и baseline 1m-окно.
+            var records = await LoadPredictionRecordsAsync(mornings, sol1m, engine);
 
             // Логируем результат по day-key (стабильное сопоставление "дней").
             DumpRange("mornings", mornings, r => CausalTimeKey.EntryDayKeyUtc(r));

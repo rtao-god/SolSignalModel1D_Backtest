@@ -1,8 +1,7 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using System.Collections.Generic;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -22,6 +21,7 @@ namespace SolSignalModel1D_Backtest
 			PopulateDelayedA (
 				records: records,
 				allRows: allRows,
+				trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
 				sol1h: sol1h,
 				solAll6h: solAll6h,
 				sol1m: sol1m,

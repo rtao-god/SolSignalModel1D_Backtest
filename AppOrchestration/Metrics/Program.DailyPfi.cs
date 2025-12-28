@@ -1,8 +1,8 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -24,12 +24,10 @@ namespace SolSignalModel1D_Backtest
                 .OrderBy(r => r.EntryUtc.Value)
                 .ToList();
 
-            var trainUntil = new TrainUntilUtc(_trainUntilUtc);
-
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
                 entrySelector: static r => new EntryUtc(r.EntryUtc.Value),
-                trainUntilExitDayKeyUtc: trainUntil.ExitDayKeyUtc,
+                trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
                 nyTz: NyTz);
 
             var dailyTrainRows = split.Train is List<LabeledCausalRow> tl ? tl : split.Train.ToList();

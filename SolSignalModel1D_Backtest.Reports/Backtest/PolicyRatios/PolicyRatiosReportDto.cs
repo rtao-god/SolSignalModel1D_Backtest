@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.PolicyRatios;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios
 	{

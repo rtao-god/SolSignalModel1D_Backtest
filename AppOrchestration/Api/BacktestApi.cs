@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -53,7 +53,7 @@ namespace SolSignalModel1D_Backtest
 
                 records = await LoadPredictionRecordsAsync(
                     mornings,
-                    bootstrap.SolAll6h,
+                    bootstrap.Sol1m,
                     engine
                 );
 
@@ -62,23 +62,25 @@ namespace SolSignalModel1D_Backtest
 
             // 3. SL-модель: обучаемся строго на TrainOnly<BacktestRecord> по baseline-exit контракту.
             {
-                var trainUntilUtc = new TrainUntilUtc(_trainUntilUtc);
-                var trainUntilExitDayKeyUtc = trainUntilUtc.ExitDayKeyUtc;
+                var trainUntilExitDayKeyUtc = _trainUntilExitDayKeyUtc;
 
                 var orderedRecords = records
                     .OrderBy(r => r.Causal.EntryUtc.Value)
                     .ToList();
 
+                Console.WriteLine(
+                    $"[sl] запуск SplitByBaselineExitStrict: тег='sl', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
+
                 var recSplit = NyTrainSplit.SplitByBaselineExitStrict(
                     ordered: orderedRecords,
-                    entrySelector: static r => r.Causal.RawEntryUtc,
+                    entrySelector: static r => r.Causal.EntryUtc,
                     trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                     nyTz: NyTz,
                     tag: "sl");
 
                 Console.WriteLine(
                     $"[sl] records split: train={recSplit.Train.Count}, oos={recSplit.Oos.Count}, " +
-                    $"trainUntilExitDayKey={NyTrainSplit.ToIsoDate(trainUntilExitDayKeyUtc)}, trainUntilUtc={trainUntilUtc.Value:O}");
+                    $"trainUntilExitDayKey={NyTrainSplit.ToIsoDate(trainUntilExitDayKeyUtc)}");
 
                 if (recSplit.Train.Count < 50)
                 {
@@ -104,6 +106,7 @@ namespace SolSignalModel1D_Backtest
                 PopulateDelayedA(
                     records: records,
                     allRows: allRows,
+                    trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
                     sol1h: bootstrap.SolAll1h,
                     solAll6h: bootstrap.SolAll6h,
                     sol1m: bootstrap.Sol1m,
@@ -123,3 +126,4 @@ namespace SolSignalModel1D_Backtest
         }
     }
 }
+

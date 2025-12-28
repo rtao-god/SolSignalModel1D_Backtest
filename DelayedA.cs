@@ -1,16 +1,12 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed;
+using SolSignalModel1D_Backtest.Core.Omniscient.Causal.ML.Delayed;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Delayed.Trainers;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Delayed.Trainers;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -27,6 +23,7 @@ namespace SolSignalModel1D_Backtest
         private static void PopulateDelayedA(
             IList<BacktestRecord> records,
             List<LabeledCausalRow> allRows,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
             IReadOnlyList<Candle1h> sol1h,
             IReadOnlyList<Candle6h> solAll6h,
             IReadOnlyList<Candle1m> sol1m,
@@ -43,6 +40,9 @@ namespace SolSignalModel1D_Backtest
             if (allRows == null || allRows.Count == 0)
                 throw new InvalidOperationException("[PopulateDelayedA] allRows is null or empty – cannot build pullback dataset.");
 
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+
             if (sol1m == null || sol1m.Count == 0)
                 throw new InvalidOperationException("[PopulateDelayedA] sol1m is null or empty – 1m candles are required for delayed A.");
 
@@ -56,8 +56,25 @@ namespace SolSignalModel1D_Backtest
 
             var recordsRo = records as IReadOnlyList<BacktestRecord> ?? records.ToList();
 
+            var ordered = recordsRo
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
+
+            Console.WriteLine(
+                $"[delayed-A] запуск SplitByBaselineExitStrict: тег='delayed-a.records', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
+
+            var split = NyTrainSplit.SplitByBaselineExitStrict(
+                ordered: ordered,
+                entrySelector: static r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: NyWindowing.NyTz,
+                tag: "delayed-a.records");
+
+            if (split.Train.Count == 0)
+                throw new InvalidOperationException("[PopulateDelayedA] No train records for delayed-A model (split.Train is empty).");
+
             List<PullbackContinuationSample> pullbackSamples = PullbackContinuationOfflineBuilder.Build(
-                rows: recordsRo,
+                rows: split.Train,
                 sol1h: sol1h,
                 sol6hDict: sol6hDict
             );
@@ -68,7 +85,7 @@ namespace SolSignalModel1D_Backtest
                 throw new InvalidOperationException("[PopulateDelayedA] No samples for model A – check input rows and candles consistency.");
 
             var pullbackTrainer = new PullbackContinuationTrainer();
-            DateTime asOfDate = allRows.Max(r => r.EntryDayKeyUtc.Value).AddDays(1);
+            DateTime asOfDate = trainUntilExitDayKeyUtc.Value.AddDays(1);
             var pullbackModel = pullbackTrainer.Train(pullbackSamples, asOfDate);
             var pullbackEngine = pullbackTrainer.CreateEngine(pullbackModel);
 
@@ -267,3 +284,4 @@ namespace SolSignalModel1D_Backtest
         }
     }
 }
+

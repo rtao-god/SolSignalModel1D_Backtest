@@ -1,19 +1,11 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
 using SolSignalModel1D_Backtest.Api.Dto;
-using SolSignalModel1D_Backtest.Api.Services;
-using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Backtest.Profiles;
-using SolSignalModel1D_Backtest.Core.Backtest.Services;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Profiles;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Services;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
 using SolSignalModel1D_Backtest.Reports.Model;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
 
 namespace SolSignalModel1D_Backtest.Api.Endpoints
 	{

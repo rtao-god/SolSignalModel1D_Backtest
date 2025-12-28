@@ -1,4 +1,4 @@
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 	{

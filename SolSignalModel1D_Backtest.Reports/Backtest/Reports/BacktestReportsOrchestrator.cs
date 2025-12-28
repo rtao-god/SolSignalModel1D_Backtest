@@ -1,27 +1,22 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.PolicyRatios;
-using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
-using SolSignalModel1D_Backtest.Core.Analytics.ML;
-using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.PolicyRatios;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Trading.Leverage;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers;
+using SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 using SolSignalModel1D_Backtest.Reports.Backtest.PolicyRatios;
 using SolSignalModel1D_Backtest.Reports.CurrentPrediction;
 using SolSignalModel1D_Backtest.Reports.Reporting;
 using SolSignalModel1D_Backtest.Reports.Reporting.Backtest;
 using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 {
@@ -94,7 +89,7 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
             IReadOnlyList<RollingLoop.PolicySpec> policies,
             BacktestConfig backtestConfig,
             TimeZoneInfo nyTz,
-            DateTime? trainUntilUtc)
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
             if (mornings == null) throw new ArgumentNullException(nameof(mornings));
             if (records == null) throw new ArgumentNullException(nameof(records));
@@ -102,6 +97,8 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
             if (policies == null) throw new ArgumentNullException(nameof(policies));
             if (backtestConfig == null) throw new ArgumentNullException(nameof(backtestConfig));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
             // --- backtest_summary ---
             try
@@ -191,9 +188,6 @@ namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
                     Console.WriteLine(
                         $"[backtest-model-stats] full period = {minDayKeyUtc:yyyy-MM-dd}..{maxDayKeyUtc:yyyy-MM-dd}, " +
                         $"totalRecords = {orderedRecords.Count}");
-
-                    var effectiveTrainUntilUtc00 = (trainUntilUtc ?? maxDayKeyUtc).ToCausalDateUtc();
-                    var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcOrThrow(effectiveTrainUntilUtc00);
 
                     var multi = BacktestModelStatsMultiSnapshotBuilder.Build(
                         allRecords: records,

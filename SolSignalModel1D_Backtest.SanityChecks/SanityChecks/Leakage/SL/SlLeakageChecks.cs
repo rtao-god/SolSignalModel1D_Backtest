@@ -1,11 +1,11 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Trading.Evaluator;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
 {
@@ -32,10 +32,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
                 return missing;
             }
 
-            if (ctx.TrainUntilUtc == default)
-                throw new InvalidOperationException("[sl] ctx.TrainUntilUtc is default (uninitialized).");
+            if (ctx.TrainUntilExitDayKeyUtc.IsDefault)
+                throw new InvalidOperationException("[sl] ctx.TrainUntilExitDayKeyUtc is default (uninitialized).");
 
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
+            var trainUntilExitDayKeyUtc = ctx.TrainUntilExitDayKeyUtc;
 
             var samples = new List<SlSample>();
 
@@ -73,7 +73,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
                     var bad = new SelfCheckResult
                     {
                         Success = false,
-                        Summary = $"[sl] invalid Causal.MinMove={dayMinMove:0.######} for day={c.EntryDayKeyUtc}."
+                        Summary = $"[sl] invalid Causal.MinMove: {dayMinMove:0.######} for day={c.EntryDayKeyUtc}."
                     };
                     bad.Errors.Add("[sl] Causal.MinMove must be finite and > 0. Fix upstream MinMove computation/NyWindowing.");
                     return bad;
@@ -254,3 +254,4 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
         }
     }
 }
+

@@ -1,9 +1,13 @@
-using SolSignalModel1D_Backtest.Core.Data.Candles;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Domain;
-using SolSignalModel1D_Backtest.Core.Utils;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Domain;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using System.Diagnostics;
+using SolSignalModel1D_Backtest.Core.Causal.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;
+using SolSignalModel1D_Backtest.Diagnostics;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -103,6 +107,20 @@ namespace SolSignalModel1D_Backtest
 
 			var store = new CandleNdjsonStore (path);
 			var lines = store.ReadRange (DateTime.MinValue, DateTime.MaxValue);
+			if (LeakageSwitches.IsEnabled (LeakageMode.CandlesShiftPricesForward1m) && lines.Count > 1)
+				{
+				for (int i = 0; i < lines.Count - 1; i++)
+					{
+					var cur = lines[i];
+					var next = lines[i + 1];
+					lines[i] = new CandleNdjsonStore.CandleLine (
+						cur.OpenTimeUtc,
+						next.Open,
+						next.High,
+						next.Low,
+						next.Close);
+					}
+				}
 
 			var res = new List<Candle1m> (lines.Count);
 

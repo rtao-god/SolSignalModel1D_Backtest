@@ -1,16 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
-namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
+namespace SolSignalModel1D_Backtest.Diagnostics.PnL
 {
     public static class DailyPnlProbe
     {
         public static void RunSimpleProbe(
             IReadOnlyList<BacktestRecord> records,
-            DateTime trainUntilUtc,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz)
         {
             if (records == null || records.Count == 0)
@@ -19,9 +19,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
                 return;
             }
 
-            if (trainUntilUtc == default)
+            if (trainUntilExitDayKeyUtc.IsDefault)
             {
-                Console.WriteLine("[pnl-probe] trainUntilUtc is default(DateTime) – nothing to compute.");
+                Console.WriteLine("[pnl-probe] trainUntilExitDayKeyUtc is default – nothing to compute.");
                 return;
             }
 
@@ -35,11 +35,9 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
                 .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
-
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: r => r.Causal.RawEntryUtc,
+                entrySelector: r => r.Causal.EntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: nyTz);
 
@@ -208,3 +206,4 @@ namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
         }
     }
 }
+

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
-using LeveragePolicies = SolSignalModel1D_Backtest.Core.Trading.Leverage.Policies;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
+using LeveragePolicies = SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage.Policies;
 
 namespace SolSignalModel1D_Backtest
 	{

@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Data.Candles;
-using SolSignalModel1D_Backtest.Core.Domain;
-using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
+using SolSignalModel1D_Backtest.Core.Causal.Domain;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
 
 namespace SolSignalModel1D_Backtest
 	{

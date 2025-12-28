@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 {
@@ -10,12 +11,14 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
     {
         public static SelfCheckResult CheckDailyTrainVsOosAndShuffle(
             IReadOnlyList<BacktestRecord> records,
-            TrainUntilUtc trainUntilUtc,
-            TimeZoneInfo nyTz)
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz,
+            IReadOnlyList<LabeledCausalRow>? allRows = null)
         {
             if (records == null) throw new ArgumentNullException(nameof(records));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
-            if (trainUntilUtc.Value == default) throw new ArgumentException("trainUntilUtc must be initialized.", nameof(trainUntilUtc));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized.", nameof(trainUntilExitDayKeyUtc));
 
             if (records.Count == 0)
                 return SelfCheckResult.Ok("[daily] no records — skipped.");
@@ -26,8 +29,8 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: static r => r.Causal.RawEntryUtc,
-                trainUntilExitDayKeyUtc: trainUntilUtc.ExitDayKeyUtc,
+                entrySelector: static r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: nyTz);
 
             var warnings = new List<string>();
@@ -46,6 +49,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
             var trainAcc = ComputeAccuracyPct(trainPairs);
             var oosAcc = ComputeAccuracyPct(oosPairs);
             var allAcc = ComputeAccuracyPct(allPairs);
+
+            var trainAccCausal = TryComputeCausalTrainHoldoutAcc(allRows, trainUntilExitDayKeyUtc, nyTz);
+            if (trainAccCausal.HasValue)
+                trainAcc = trainAccCausal.Value;
 
             if (trainPairs.Count >= 50 && trainAcc >= 85.0)
                 errors.Add($"[daily] train accuracy suspiciously high: {trainAcc:0.0}% (n={trainPairs.Count}).");
@@ -74,6 +81,8 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
             res.Metrics["daily.acc_train"] = trainAcc / 100.0;
             res.Metrics["daily.acc_oos"] = oosAcc / 100.0;
             res.Metrics["daily.acc_shuffle"] = shuffledAcc / 100.0;
+            if (trainAccCausal.HasValue)
+                res.Metrics["daily.acc_train_causal"] = trainAccCausal.Value / 100.0;
 
             res.Metrics["daily.n_all"] = allPairs.Count;
             res.Metrics["daily.n_train"] = trainPairs.Count;
@@ -81,6 +90,62 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
             res.Metrics["daily.n_excluded"] = split.Excluded.Count;
 
             return res;
+        }
+
+        private static double? TryComputeCausalTrainHoldoutAcc(
+            IReadOnlyList<LabeledCausalRow>? allRows,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz)
+        {
+            if (allRows == null || allRows.Count == 0) return null;
+
+            var ordered = allRows
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
+
+            var trainRows = new List<LabeledCausalRow>(ordered.Count);
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var r = ordered[i];
+                var cls = NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: r.Causal.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: nyTz,
+                    baselineExitDayKeyUtc: out _);
+
+                if (cls == NyTrainSplit.EntryClass.Train)
+                    trainRows.Add(r);
+            }
+
+            const int MinTrain = 200;
+            if (trainRows.Count < MinTrain)
+                return null;
+
+            int holdoutCount = Math.Max(30, Math.Min(120, trainRows.Count / 5));
+            if (holdoutCount <= 0 || holdoutCount >= trainRows.Count)
+                return null;
+
+            var trainPart = trainRows.Take(trainRows.Count - holdoutCount).ToList();
+            var holdoutPart = trainRows.Skip(trainRows.Count - holdoutCount).ToList();
+
+            if (trainPart.Count < 100 || holdoutPart.Count == 0)
+                return null;
+
+            var trainer = new SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily.ModelTrainer();
+            var bundle = trainer.TrainAll(trainPart);
+            var engine = new SolSignalModel1D_Backtest.Core.Causal.ML.Shared.PredictionEngine(bundle);
+
+            int correct = 0;
+            for (int i = 0; i < holdoutPart.Count; i++)
+            {
+                var r = holdoutPart[i];
+                var pred = engine.PredictCausal(r.Causal);
+                if (pred.PredLabel == r.TrueLabel)
+                    correct++;
+            }
+
+            return (double)correct / holdoutPart.Count * 100.0;
         }
 
         private static List<(int TrueLabel, int PredLabel)> FilterValidTriClassPairs(IReadOnlyList<BacktestRecord> rows)
@@ -141,3 +206,4 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily
         }
     }
 }
+

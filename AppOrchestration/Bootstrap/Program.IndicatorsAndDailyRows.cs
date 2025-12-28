@@ -1,4 +1,4 @@
-using SolSignalModel1D_Backtest.Core.Data.Indicators;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Indicators;
 
 namespace SolSignalModel1D_Backtest
 	{

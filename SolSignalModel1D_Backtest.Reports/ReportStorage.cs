@@ -4,8 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using SolSignalModel1D_Backtest.Reports.Model;
+using CoreInfra = SolSignalModel1D_Backtest.Core.Causal.Infra;
 
 namespace SolSignalModel1D_Backtest.Reports
 	{
@@ -25,7 +27,7 @@ namespace SolSignalModel1D_Backtest.Reports
 		public ReportStorage ()
 			{
 			_rootDir = Path.Combine (
-				Core.Infra.PathConfig.CacheRoot,
+				CoreInfra.PathConfig.CacheRoot,
 				"reports");
 
 			Directory.CreateDirectory (_rootDir);

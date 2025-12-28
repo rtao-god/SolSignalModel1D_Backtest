@@ -1,12 +1,10 @@
-using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Backtest.Services;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
-using SolSignalModel1D_Backtest.Core.Omniscient.Pnl;
-using SolSignalModel1D_Backtest.Core.Trading.Leverage;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Services;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -78,7 +76,7 @@ namespace SolSignalModel1D_Backtest
 				policies: policies,
 				backtestConfig: backtestConfig,
 				nyTz: NyTz,
-				trainUntilUtc: _trainUntilUtc
+				trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc
 			);
 
 			RunStrategyScenarios (

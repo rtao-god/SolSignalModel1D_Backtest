@@ -1,11 +1,10 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -26,11 +25,14 @@ namespace SolSignalModel1D_Backtest
                 .OrderBy(r => r.Causal.EntryUtc.Value)
                 .ToList();
 
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(_trainUntilUtc);
+            var trainUntilExitDayKeyUtc = _trainUntilExitDayKeyUtc;
+
+            Console.WriteLine(
+                $"[sl] запуск SplitByBaselineExitStrict: тег='sl.records', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
 
             var split = NyTrainSplit.SplitByBaselineExitStrict(
                 ordered: orderedRecords,
-                entrySelector: static r => r.Causal.RawEntryUtc,
+                entrySelector: static r => r.Causal.EntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: NyTz,
                 tag: "sl.records");
@@ -39,7 +41,7 @@ namespace SolSignalModel1D_Backtest
             {
                 throw new InvalidOperationException(
                     $"[sl-offline] SL train subset too small (count={split.Train.Count}). " +
-                    $"trainUntilUtc={_trainUntilUtc:O}.");
+                    $"trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}.");
             }
 
             TrainAndApplySlModelOffline(
@@ -52,3 +54,4 @@ namespace SolSignalModel1D_Backtest
         }
     }
 }
+

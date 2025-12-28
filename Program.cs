@@ -1,17 +1,12 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Causal.ML.Daily;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Infra.Perf;
-using SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Infra.Perf;
+using SolSignalModel1D_Backtest.Diagnostics.PnL;
 using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -21,9 +16,9 @@ namespace SolSignalModel1D_Backtest
     public partial class Program
     {
         /// <summary>
-        /// Флажок: гонять ли self-check'и при старте приложения, которые могут заблокировать основной пайплайн.
+        /// Флажок: гонять ли self-check'и при старте приложения, которые могут заблокировать основной пайплайн при падении.
         /// </summary>
-        private static readonly bool RunSelfChecksOnStartup = false;
+        private static readonly bool RunSelfChecksOnStartup = true;
 
         /// <summary>
         /// Глобальная таймзона Нью-Йорка для всех расчётов.
@@ -68,20 +63,20 @@ namespace SolSignalModel1D_Backtest
                     "BuildPredictionRecordsAsync",
                     () => PerfBlockLogger.MeasureAsync(
                         "BuildPredictionRecordsAsync",
-                        () => BuildPredictionRecordsAsync(allRows, mornings, solAll6h)
+                        () => BuildPredictionRecordsAsync(allRows, mornings, sol1m)
                     )
                 );
 
-                DumpDailyAccuracyWithDatasetSplit(allRows, records, _trainUntilUtc);
+                DumpDailyAccuracyWithDatasetSplit(allRows, records, _trainUntilExitDayKeyUtc);
 
                 RuntimeLeakageDebug.PrintDailyModelTrainOosProbe(
                     records,
-                    new TrainUntilUtc(_trainUntilUtc),
+                    _trainUntilExitDayKeyUtc,
                     NyTz,
                     boundarySampleCount: 2
                 );
 
-                DailyPnlProbe.RunSimpleProbe(records, _trainUntilUtc, NyTz);
+                DailyPnlProbe.RunSimpleProbe(records, _trainUntilExitDayKeyUtc, NyTz);
 
                 RunDailyPfi(allRows);
 
@@ -105,7 +100,7 @@ namespace SolSignalModel1D_Backtest
                         SolAll6h = solAll6h,
                         SolAll1h = solAll1h,
                         Sol1m = sol1m,
-                        TrainUntilUtc = _trainUntilUtc,
+                        TrainUntilExitDayKeyUtc = _trainUntilExitDayKeyUtc,
                         NyTz = NyTz
                     };
 
@@ -165,40 +160,11 @@ namespace SolSignalModel1D_Backtest
             }
         }
 
-        private static void DumpDailyPredHistograms(List<BacktestRecord> records, DateTime trainUntilUtc)
-        {
-            if (records == null || records.Count == 0)
-                return;
-
-            SplitByTrainUntilUtc(records, trainUntilUtc, out var train, out var oos);
-
-            static string Hist(IEnumerable<int> xs)
-            {
-                return string.Join(", ",
-                    xs.GroupBy(v => v)
-                      .OrderBy(g => g.Key)
-                      .Select(g => $"{g.Key}={g.Count()}"));
-            }
-
-            Console.WriteLine($"[daily] train size = {train.Count}, oos size = {oos.Count}");
-
-            Console.WriteLine("[daily] train TrueLabel hist: " + Hist(train.Select(r => r.TrueLabel)));
-            Console.WriteLine("[daily] train PredLabel hist: " + Hist(train.Select(r => r.PredLabel)));
-
-            if (oos.Count > 0)
-            {
-                Console.WriteLine("[daily] oos TrueLabel hist: " + Hist(oos.Select(r => r.TrueLabel)));
-                Console.WriteLine("[daily] oos PredLabel hist: " + Hist(oos.Select(r => r.PredLabel)));
-            }
-        }
-
         private static void DumpDailyAccuracyWithDatasetSplit(
             List<LabeledCausalRow> allRows,
             List<BacktestRecord> records,
-            DateTime trainUntilUtc)
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc)
         {
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
-
             var dataset = DailyDatasetBuilder.Build(
                 allRows,
                 trainUntilExitDayKeyUtc,
@@ -221,7 +187,7 @@ namespace SolSignalModel1D_Backtest
                     trainRecords.Add(r);
             }
 
-            SplitByTrainUntilUtc(records, trainUntilUtc, out _, out var oosRecords);
+            SplitByTrainUntilUtc(records, trainUntilExitDayKeyUtc, out _, out var oosRecords);
 
             static double Acc(IReadOnlyList<BacktestRecord> xs)
             {
@@ -248,21 +214,20 @@ namespace SolSignalModel1D_Backtest
 
         private static void SplitByTrainUntilUtc(
             IReadOnlyList<BacktestRecord> records,
-            DateTime trainUntilUtc,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
             out List<BacktestRecord> train,
             out List<BacktestRecord> oos)
         {
             if (records == null) throw new ArgumentNullException(nameof(records));
-            if (trainUntilUtc == default)
-                throw new ArgumentException("trainUntilUtc must be initialized (non-default).", nameof(trainUntilUtc));
-            if (trainUntilUtc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
-
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
             var ordered = records
                 .OrderBy(static r => r.EntryUtc.Value) // ВАЖНО: НЕ r.Causal.EntryUtc
                 .ToList();
+
+            Console.WriteLine(
+                $"[split] запуск SplitByBaselineExitStrict: тег='train-split.records', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
 
             var split = NyTrainSplit.SplitByBaselineExitStrict<BacktestRecord>(
                 ordered: ordered,

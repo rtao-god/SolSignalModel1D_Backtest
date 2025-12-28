@@ -3,8 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 {
@@ -22,7 +21,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 
         public static void LogDailyBarePnlWithBaselinesAndShuffle(
             IReadOnlyList<BacktestRecord> records,
-            DateTime trainUntilUtc,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz,
             int shuffleRuns = 20)
         {
@@ -34,13 +33,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
                 return;
             }
 
-            if (trainUntilUtc == default)
-                throw new ArgumentException("trainUntilUtc must be initialized (non-default).", nameof(trainUntilUtc));
-            if (trainUntilUtc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException("trainUntilUtc must be UTC (DateTimeKind.Utc).", nameof(trainUntilUtc));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(trainUntilUtc);
             var trainUntilIso = trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
             var ordered = records
@@ -49,7 +45,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
 
             var split = NyTrainSplit.SplitByBaselineExit(
                 ordered: ordered,
-                entrySelector: r => r.Causal.RawEntryUtc,
+                entrySelector: r => r.Causal.EntryUtc,
                 trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
                 nyTz: nyTz);
 
@@ -369,3 +365,4 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Pnl
         #endregion
     }
 }
+

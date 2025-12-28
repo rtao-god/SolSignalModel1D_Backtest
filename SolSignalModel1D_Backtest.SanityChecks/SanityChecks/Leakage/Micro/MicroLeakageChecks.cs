@@ -1,11 +1,11 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
-using SolSignalModel1D_Backtest.Core.Time;
-using SolSignalModel1D_Backtest.Core.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 {
@@ -55,12 +55,32 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
                 if (!rec.PredMicroUp && !rec.PredMicroDown)
                     continue;
 
-                var exitDayKeyUtc = NyWindowing.ComputeExitDayKeyUtc(rec.EntryUtc, NyWindowing.NyTz);
+                var exitDayKeyUtc = CoreNyWindowing.ComputeExitDayKeyUtc(rec.EntryUtc, CoreNyWindowing.NyTz);
 
                 pairs.Add((
                     ExitDayKeyUtc: exitDayKeyUtc,
                     PredUp: rec.PredMicroUp,
                     FactUp: row.FactMicroUp));
+            }
+
+            // Граница сравнения для micro-check: day-key границы trainUntil (exit-day-key по контракту пайплайна).
+            var trainUntilExitDayKey = ctx.TrainUntilExitDayKeyUtc;
+
+            int labeledExcluded = 0;
+            int labeledOosCount = 0;
+
+            for (int i = 0; i < labeled.Count; i++)
+            {
+                var entryUtc = new EntryUtc(labeled[i].Causal.EntryUtc.Value);
+
+                if (!CoreNyWindowing.TryComputeExitDayKeyUtc(entryUtc, CoreNyWindowing.NyTz, out var exitDayKeyUtc))
+                {
+                    labeledExcluded++;
+                    continue;
+                }
+
+                if (exitDayKeyUtc.Value > trainUntilExitDayKey.Value)
+                    labeledOosCount++;
             }
 
             if (pairs.Count < 20)
@@ -69,11 +89,8 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
                     $"[micro] слишком мало дней, где есть и микро-прогноз, и path-based разметка ({pairs.Count}).");
             }
 
-            // Граница сравнения для micro-check: day-key границы trainUntil (exit-day-key по контракту пайплайна).
-            var trainUntilExitDayKey = ExitDayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
-
-            var train = pairs.Where(p => p.ExitDayKeyUtc <= trainUntilExitDayKey).ToList();
-            var oos = pairs.Where(p => p.ExitDayKeyUtc > trainUntilExitDayKey).ToList();
+            var train = pairs.Where(p => p.ExitDayKeyUtc.Value <= trainUntilExitDayKey.Value).ToList();
+            var oos = pairs.Where(p => p.ExitDayKeyUtc.Value > trainUntilExitDayKey.Value).ToList();
 
             double accAll = ComputeAccuracy(pairs);
             double accTrain = ComputeAccuracy(train);
@@ -91,7 +108,18 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
 
             if (oos.Count == 0)
             {
-                warnings.Add("[micro] OOS-часть для микро-слоя пуста (нет дней с day-key > trainUntil).");
+                if (labeledOosCount > 0)
+                {
+                    warnings.Add(
+                        "[micro] OOS-часть по микро-прогнозам пуста " +
+                        $"(есть микро-факты после границы, labeledOos={labeledOosCount}, predOos=0).");
+                }
+                else
+                {
+                    warnings.Add(
+                        "[micro] OOS-часть по микро-фактам пуста " +
+                        $"(нет микро-дней после границы по baseline-exit, excluded={labeledExcluded}).");
+                }
             }
 
             if (!double.IsNaN(accOos) && oos.Count >= 50 && accOos > 0.90)
@@ -142,3 +170,4 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
         }
     }
 }
+

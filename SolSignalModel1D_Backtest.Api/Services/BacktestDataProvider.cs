@@ -1,5 +1,5 @@
-using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Backtest.Services;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Services;
 
 namespace SolSignalModel1D_Backtest.Api.Services
 	{

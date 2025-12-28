@@ -1,4 +1,4 @@
-using SolSignalModel1D_Backtest.Core.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows;
@@ -26,12 +26,10 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
         {
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
             if (ctx.NyTz == null) throw new ArgumentNullException(nameof(ctx.NyTz));
-            if (ctx.TrainUntilUtc == default)
-                throw new ArgumentException("ctx.TrainUntilUtc must be initialized (non-default).", nameof(ctx));
-            if (ctx.TrainUntilUtc.Kind != DateTimeKind.Utc)
-                throw new ArgumentException($"ctx.TrainUntilUtc must be UTC. Got Kind={ctx.TrainUntilUtc.Kind}, t={ctx.TrainUntilUtc:O}.", nameof(ctx));
-
-            var trainUntilExitDayKeyUtc = ExitDayKeyUtc.FromUtcMomentOrThrow(ctx.TrainUntilUtc);
+            if (ctx.TrainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("ctx.TrainUntilExitDayKeyUtc must be initialized (non-default).", nameof(ctx));
+            if (ctx.Records != null && ctx.Records.Count > 0 && ctx.NyTz.Id == TimeZoneInfo.Utc.Id)
+                throw new InvalidOperationException("[self-check] NyTz is UTC for non-empty records. Set NY timezone explicitly.");
 
             var results = new List<SelfCheckResult>();
 
@@ -40,17 +38,17 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks
             // =====================================================================
             if (ctx.Records != null && ctx.Records.Count > 0)
             {
-                var trainUntil = new TrainUntilUtc(ctx.TrainUntilUtc);
                 results.Add(
                     DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(
                         ctx.Records,
-                        trainUntil,
-                        ctx.NyTz));
+                        ctx.TrainUntilExitDayKeyUtc,
+                        ctx.NyTz,
+                        ctx.AllRows));
 
                 // Доп. диагностика (лог в консоль): bare-PnL + shuffle.
                 DailyBarePnlChecks.LogDailyBarePnlWithBaselinesAndShuffle(
                     ctx.Records,
-                    ctx.TrainUntilUtc,
+                    ctx.TrainUntilExitDayKeyUtc,
                     ctx.NyTz,
                     shuffleRuns: 20);
             }

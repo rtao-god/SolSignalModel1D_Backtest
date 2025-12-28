@@ -1,15 +1,14 @@
 using Microsoft.ML;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Diagnostics.SL;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.SL;
-using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Diagnostics.SL;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Data.BacktestRecord;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 {
@@ -44,7 +43,8 @@ namespace SolSignalModel1D_Backtest
             const double MainStrongMinMoveThreshold = 0.030;
 
             Console.WriteLine(
-                $"[sl-offline] trainRecords={trainRecords.Count}, tag='{trainRecords.Tag}', trainUntilUtc={trainRecords.TrainUntilUtc:O}");
+                $"[sl-offline] trainRecords={trainRecords.Count}, tag='{trainRecords.Tag}', " +
+                $"trainUntilExitDayKey={trainRecords.TrainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
 
             if (records.Count > 0)
             {
