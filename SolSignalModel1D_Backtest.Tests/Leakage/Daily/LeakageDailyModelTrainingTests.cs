@@ -1,4 +1,5 @@
 using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
@@ -156,11 +157,16 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 					regimeDown: regimeDown,
 					solRet1: solRet1);
 
+				var microTruth = label == 1
+					? (factMicroUp
+						? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+						: OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down))
+					: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
 				rows.Add (new LabeledCausalRow (
 					causal: causal,
 					trueLabel: label,
-					factMicroUp: factMicroUp,
-					factMicroDown: factMicroDown));
+					microTruth: microTruth));
 				}
 
 			return rows.OrderBy (r => r.EntryUtc.Value).ToList ();
@@ -250,8 +256,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				res.Add (new LabeledCausalRow (
 					causal: clonedCausal,
 					trueLabel: r.TrueLabel,
-					factMicroUp: r.FactMicroUp,
-					factMicroDown: r.FactMicroDown));
+					microTruth: r.MicroTruth));
 				}
 
 			return res;
@@ -315,8 +320,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				res.Add (new LabeledCausalRow (
 					causal: mutatedCausal,
 					trueLabel: 2,
-					factMicroUp: false,
-					factMicroDown: false));
+					microTruth: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth)));
 				}
 
 			return res;
@@ -334,6 +338,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
 				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);
+				Assert.Equal (a.MicroTruth, b.MicroTruth);
 
 				var va = a.Causal.FeaturesVector;
 				var vb = b.Causal.FeaturesVector;

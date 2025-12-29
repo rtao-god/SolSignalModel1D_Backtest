@@ -27,7 +27,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
             }
 
             var labeled = mornings
-                .Where(r => r.FactMicroUp || r.FactMicroDown)
+                .Where(r => r.MicroTruth.HasValue)
                 .OrderBy(r => CausalTimeKey.EntryDayKeyUtc(r))
                 .ToList();
 
@@ -57,7 +57,7 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
                 pairs.Add((
                     ExitDayKeyUtc: exitDayKeyUtc,
                     PredUp: rec.PredMicroUp,
-                    FactUp: row.FactMicroUp));
+                    FactUp: row.MicroTruth.Value == MicroTruthDirection.Up));
             }
 
             // Граница сравнения для micro-check: day-key границы trainUntil (exit-day-key по контракту пайплайна).

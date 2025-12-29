@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
@@ -30,10 +31,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
 			head.AddHeader ("field", "value");
 			head.AddRow ("pred", ClassToStr (rec.PredLabel));
 			head.AddRow ("micro", rec.PredMicroUp ? "UP" : rec.PredMicroDown ? "DOWN" : "—");
-			head.AddRow (
-				"fact",
-				ClassToStr (rec.TrueLabel) +
-				(rec.FactMicroUp ? " (micro↑)" : rec.FactMicroDown ? " (micro↓)" : string.Empty));
+			string microFact = rec.MicroTruth.HasValue
+				? rec.MicroTruth.Value == MicroTruthDirection.Up ? " (micro↑)" : " (micro↓)"
+				: string.Empty;
+
+			head.AddRow ("fact", ClassToStr (rec.TrueLabel) + microFact);
 			head.AddRow ("reason", rec.Reason);
 			head.AddRow ("entry", rec.Entry.ToString ("0.0000"));
 			head.AddRow ("maxH/minL", $"{rec.MaxHigh24:0.0000} / {rec.MinLow24:0.0000}");

@@ -1,4 +1,4 @@
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
@@ -38,12 +38,20 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 
                 bool factUp = (i % 3 == 0);
                 bool factDown = (i % 3 == 1);
+                int trueLabel = i % 3;
+
+                var microTruth = trueLabel == 1
+                    ? (factUp
+                        ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+                        : factDown
+                            ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down)
+                            : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral))
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
 
                 rows.Add(new LabeledCausalRow(
                     causal: causal,
-                    trueLabel: i % 3,
-                    factMicroUp: factUp,
-                    factMicroDown: factDown));
+                    trueLabel: trueLabel,
+                    microTruth: microTruth));
             }
 
             var t = entriesUtc[30];
@@ -82,12 +90,20 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 
                 bool factUp = (i % 4 == 0);
                 bool factDown = (i % 4 == 1);
+                int trueLabel = i % 3;
+
+                var microTruth = trueLabel == 1
+                    ? (factUp
+                        ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+                        : factDown
+                            ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down)
+                            : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral))
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
 
                 rows.Add(new LabeledCausalRow(
                     causal: causal,
-                    trueLabel: i % 3,
-                    factMicroUp: factUp,
-                    factMicroDown: factDown));
+                    trueLabel: trueLabel,
+                    microTruth: microTruth));
             }
 
             var t = entriesUtc[40];

@@ -1,3 +1,5 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Micro
 {
 	public sealed class MicroStatsSnapshot
@@ -8,6 +10,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 
 	public sealed class FlatOnlyMicroBlock
 		{
+		public required int TotalFactDays { get; init; }
+
 		public required int MicroUpPred { get; init; }
 		public required int MicroUpHit { get; init; }
 		public required int MicroUpMiss { get; init; }
@@ -21,9 +25,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 		public required int TotalDirPred { get; init; }
 		public required int TotalDirHit { get; init; }
 
-		public required double AccUpPct { get; init; }
-		public required double AccDownPct { get; init; }
-		public required double AccAllPct { get; init; }
+		public required OptionalValue<double> CoveragePct { get; init; }
+
+		public required OptionalValue<double> AccUpPct { get; init; }
+		public required OptionalValue<double> AccDownPct { get; init; }
+		public required OptionalValue<double> AccAllPct { get; init; }
+		public required OptionalValue<double> AccAllWithNonePct { get; init; }
 		}
 
 	public sealed class NonFlatDirectionBlock
@@ -36,6 +43,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 		public required int PredDown_FactDown { get; init; }
 		public required int PredDown_FactUp { get; init; }
 
-		public required double AccuracyPct { get; init; }
+		public required OptionalValue<double> AccuracyPct { get; init; }
 		}
 	}

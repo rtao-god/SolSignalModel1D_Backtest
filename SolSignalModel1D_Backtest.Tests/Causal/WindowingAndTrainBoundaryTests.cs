@@ -1,4 +1,3 @@
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;

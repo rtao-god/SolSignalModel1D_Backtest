@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
@@ -32,8 +33,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Utils
 			{
 			if (r.TrueLabel == 1)
 				{
-				if (r.FactMicroUp) return "БоковикРост";
-				if (r.FactMicroDown) return "БоковикОбвал";
+				if (r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up) return "БоковикРост";
+				if (r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Down) return "БоковикОбвал";
 				return "Боковик";
 				}
 			if (r.TrueLabel == 0) return "Обвал";

@@ -210,8 +210,11 @@ namespace SolSignalModel1D_Backtest.Tests.E2E
 
 				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
-				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
-				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
+				Assert.Equal (a.MicroTruth.HasValue, b.MicroTruth.HasValue);
+				if (a.MicroTruth.HasValue)
+					Assert.Equal (a.MicroTruth.Value, b.MicroTruth.Value);
+				else
+					Assert.Equal (a.MicroTruth.MissingReason, b.MicroTruth.MissingReason);
 
 				var va = a.Causal.FeaturesVector.Span;
 				var vb = b.Causal.FeaturesVector.Span;

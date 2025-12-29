@@ -1,6 +1,9 @@
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Diagnostics
 {
@@ -10,7 +13,9 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             IReadOnlyList<BacktestRecord> records,
             TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
             TimeZoneInfo nyTz,
-            int boundarySampleCount = 2)
+            int boundarySampleCount = 2,
+            IReadOnlyList<LabeledCausalRow>? allRows = null,
+            int oofFolds = 5)
         {
             if (records == null || records.Count == 0)
             {
@@ -81,6 +86,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
 
             var trainAcc = Acc(train);
             var oosAcc = Acc(oos);
+            bool suspiciousGap = false;
 
             DateTime? trainMaxExitDay = null;
             DateTime? oosMinExitDay = null;
@@ -146,7 +152,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             }
 
             Console.WriteLine(
-                $"[leak-probe] TRAIN: count={trainAcc.total}, correct={trainAcc.correct}, acc={trainAcc.acc:P2}");
+                $"[leak-probe] TRAIN(in-sample): count={trainAcc.total}, correct={trainAcc.correct}, acc={trainAcc.acc:P2}");
 
             if (oos.Count == 0)
             {
@@ -155,7 +161,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             else
             {
                 Console.WriteLine(
-                    $"[leak-probe] OOS:   count={oosAcc.total}, correct={oosAcc.correct}, acc={oosAcc.acc:P2}");
+                    $"[leak-probe] OOS(out-of-sample): count={oosAcc.total}, correct={oosAcc.correct}, acc={oosAcc.acc:P2}");
             }
 
             if (!double.IsNaN(trainAcc.acc) && !double.IsNaN(oosAcc.acc))
@@ -166,6 +172,7 @@ namespace SolSignalModel1D_Backtest.Diagnostics
                     Console.WriteLine(
                         $"[leak-probe] ПОДОЗРЕНИЕ: большой разрыв точности train/oos " +
                         $"(train={trainAcc.acc:P2}, oos={oosAcc.acc:P2}, gap={gap:P2}).");
+                    suspiciousGap = true;
                 }
             }
 
@@ -216,6 +223,112 @@ namespace SolSignalModel1D_Backtest.Diagnostics
             {
                 foreach (var r in oosSample)
                     PrintRow("OOS", r);
+            }
+
+            if (suspiciousGap)
+                PrintDailyTrainOofProbe(allRows, trainUntilExitDayKeyUtc, nyTz, oofFolds);
+        }
+
+        private static void PrintDailyTrainOofProbe(
+            IReadOnlyList<LabeledCausalRow>? allRows,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz,
+            int oofFolds)
+        {
+            if (nyTz == null)
+                throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+
+            if (allRows == null || allRows.Count == 0)
+            {
+                Console.WriteLine("[leak-probe:oof] пропуск: allRows пустой, OOF не посчитан.");
+                return;
+            }
+
+            if (oofFolds < 2)
+            {
+                Console.WriteLine($"[leak-probe:oof] пропуск: фолды={oofFolds} (<2).");
+                return;
+            }
+
+            var ordered = allRows
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
+
+            var split = NyTrainSplit.SplitByBaselineExitStrict(
+                ordered: ordered,
+                entrySelector: r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz,
+                tag: "leak-probe.oof");
+
+            var trainList = split.Train.ToList();
+
+            if (trainList.Count < 120)
+            {
+                Console.WriteLine($"[leak-probe:oof] пропуск: слишком мало train-строк ({trainList.Count}).");
+                return;
+            }
+
+            int foldSize = trainList.Count / (oofFolds + 1);
+            if (foldSize < 20)
+            {
+                Console.WriteLine($"[leak-probe:oof] пропуск: размер_фолда слишком мал ({foldSize}).");
+                return;
+            }
+
+            Console.WriteLine(
+                $"[leak-probe:oof] скользящая валидация: фолды={oofFolds}, строк_обучения={trainList.Count}, размер_фолда={foldSize}");
+
+            int totalVal = 0;
+            int totalCorrect = 0;
+
+            for (int i = 0; i < oofFolds; i++)
+            {
+                int trainEnd = (i + 1) * foldSize;
+                if (trainEnd <= 0 || trainEnd >= trainList.Count)
+                    break;
+
+                int valStart = trainEnd;
+                int valEnd = Math.Min(valStart + foldSize, trainList.Count);
+                int valCount = valEnd - valStart;
+
+                if (valCount <= 0)
+                    break;
+
+                var trainFold = trainList.GetRange(0, trainEnd);
+                var valFold = trainList.GetRange(valStart, valCount);
+
+                var trainer = new ModelTrainer();
+                var bundle = trainer.TrainAll(trainFold);
+                var engine = new PredictionEngine(bundle);
+
+                int correct = 0;
+                for (int j = 0; j < valFold.Count; j++)
+                {
+                    var row = valFold[j];
+                    var pred = engine.Predict(row.Causal);
+                    if (pred.Class == row.TrueLabel)
+                        correct++;
+                }
+
+                double acc = (double)correct / valFold.Count;
+                totalVal += valFold.Count;
+                totalCorrect += correct;
+
+                var minDay = valFold[0].Causal.EntryDayKeyUtc.Value;
+                var maxDay = valFold[valFold.Count - 1].Causal.EntryDayKeyUtc.Value;
+
+                Console.WriteLine(
+                    $"[leak-probe:oof] фолд#{i + 1}: обучение={trainFold.Count}, валидация={valFold.Count}, " +
+                    $"точность={acc:P2}, период={minDay:yyyy-MM-dd}..{maxDay:yyyy-MM-dd}");
+            }
+
+            if (totalVal > 0)
+            {
+                double oofAcc = (double)totalCorrect / totalVal;
+                Console.WriteLine($"[leak-probe:oof] OOF точность = {oofAcc:P2} (валидация_итого={totalVal})");
             }
         }
     }

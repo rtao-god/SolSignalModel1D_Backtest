@@ -51,8 +51,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl
 			if (leverage <= 0.0) throw new InvalidOperationException ("[pnl] leverage must be > 0 in ShouldApplyAntiDirection().");
 
 			// Anti-D только если SL-слой явно пометил день как рискованный.
-			// null => SL слой не посчитан/не применим => Anti-D не используем.
-			if (rec.SlHighDecision != true)
+			// Missing => SL слой не посчитан/не применим => Anti-D не используем.
+			if (!rec.SlHighDecision.HasValue || !rec.SlHighDecision.Value)
 				return false;
 
 			// MinMove — прокси дневного хода (должен быть каузальным, не из forward).

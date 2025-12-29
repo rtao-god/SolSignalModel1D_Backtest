@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics
@@ -117,11 +118,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics
 					{
 					// мягкие правила
 					// если модель сказала рост (2), а по факту боковик с микро вверх
-					if (r.PredLabel == 2 && r.TrueLabel == 1 && r.FactMicroUp)
+					if (r.PredLabel == 2 && r.TrueLabel == 1 && r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up)
 						ok = true;
 
 					// если модель сказала обвал (0), а по факту боковик с микро вниз
-					if (r.PredLabel == 0 && r.TrueLabel == 1 && r.FactMicroDown)
+					if (r.PredLabel == 0 && r.TrueLabel == 1 && r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Down)
 						ok = true;
 
 					// если модель сказала боковик+микроUp, а по факту рост

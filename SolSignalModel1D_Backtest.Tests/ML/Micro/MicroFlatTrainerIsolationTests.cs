@@ -1,4 +1,5 @@
 using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
@@ -30,13 +31,12 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 			var singleClass = rows
 				.Select (r =>
 				{
-					if (!r.FactMicroUp && !r.FactMicroDown) return r;
+					if (!r.MicroTruth.HasValue) return r;
 
 					return new LabeledCausalRow (
 						causal: r.Causal,
 						trueLabel: r.TrueLabel,
-						factMicroUp: true,
-						factMicroDown: false);
+						microTruth: OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up));
 				})
 				.ToList ();
 
@@ -135,11 +135,16 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Micro
 				solEma50vs200: 0.1,
 				btcEma50vs200: 0.2);
 
+			var microTruth = isMicro
+				? (microUp
+					? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+					: OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down))
+				: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
 			return new LabeledCausalRow (
 				causal: causal,
 				trueLabel: isMicro ? 1 : 2,
-				factMicroUp: microUp,
-				factMicroDown: microDown);
+				microTruth: microTruth);
 			}
 		}
 	}

@@ -26,7 +26,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
 
             var gatedDays = new HashSet<DateTime>(
                 records
-                    .Where(r => r.SlHighDecision == true)
+                    .Where(r => r.SlHighDecision.HasValue && r.SlHighDecision.Value)
                     .Select(r => r.EntryDayKeyUtc.Value.ToCausalDateUtc()));
 
             var globalDeltas = new List<double>();

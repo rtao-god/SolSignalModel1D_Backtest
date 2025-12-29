@@ -115,7 +115,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.StrategySimulators
                 // ===== Anti-direction overlay по ответу SL-модели =====
                 bool antiApplied = false;
 
-                if (rec.SlHighDecision == true && dirSign > 0)
+                if (rec.SlHighDecision.HasValue && rec.SlHighDecision.Value && dirSign > 0)
                 {
                     dirSign = -1;
                     antiApplied = true;

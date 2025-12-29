@@ -49,6 +49,38 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Utils
 				}
 			}
 
+		public static void EnsureUniformStepUtc<T> (
+			IReadOnlyList<T> xs,
+			Func<T, DateTime> keyUtc,
+			TimeSpan expectedStep,
+			string seriesName )
+			{
+			if (xs == null) throw new ArgumentNullException (nameof (xs));
+			if (keyUtc == null) throw new ArgumentNullException (nameof (keyUtc));
+			if (expectedStep <= TimeSpan.Zero)
+				throw new ArgumentOutOfRangeException (nameof (expectedStep), expectedStep, "expectedStep must be positive.");
+
+			if (xs.Count == 0)
+				return;
+
+			EnsureStrictlyAscendingUtc (xs, keyUtc, seriesName);
+
+			DateTime prev = keyUtc (xs[0]);
+
+			for (int i = 1; i < xs.Count; i++)
+				{
+				DateTime cur = keyUtc (xs[i]);
+				var delta = cur - prev;
+
+				if (delta != expectedStep)
+					throw new InvalidOperationException (
+						$"[series] {seriesName}: non-uniform step at i={i}. " +
+						$"prev={prev:O}, cur={cur:O}, step={delta}, expected={expectedStep}.");
+
+				prev = cur;
+				}
+			}
+
 		/// <summary>
 		/// Единственная "разрешённая" сортировка: на бутстрапе/входе.
 		/// Дальше по коду вместо OrderBy должны быть только EnsureStrictlyAscendingUtc.

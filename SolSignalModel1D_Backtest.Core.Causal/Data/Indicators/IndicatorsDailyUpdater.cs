@@ -67,16 +67,26 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.Indicators
 		private readonly string _dxyFillsPath;
 
 		public IndicatorsDailyUpdater ( HttpClient http )
+			: this (http, PathConfig.IndicatorsDir)
 			{
+			}
+
+		internal IndicatorsDailyUpdater ( HttpClient http, string indicatorsDir )
+			{
+			if (string.IsNullOrWhiteSpace (indicatorsDir))
+				throw new ArgumentException ("indicatorsDir must be non-empty.", nameof (indicatorsDir));
+
 			_http = http ?? throw new ArgumentNullException (nameof (http));
 
-			_fngPath = Path.Combine (PathConfig.IndicatorsDir, "fng.ndjson");
-			_dxyPath = Path.Combine (PathConfig.IndicatorsDir, "dxy.ndjson");
+			Directory.CreateDirectory (indicatorsDir);
+
+			_fngPath = Path.Combine (indicatorsDir, "fng.ndjson");
+			_dxyPath = Path.Combine (indicatorsDir, "dxy.ndjson");
 
 			_fngStore = new IndicatorsNdjsonStore (_fngPath);
 			_dxyStore = new IndicatorsNdjsonStore (_dxyPath);
 
-			_fillsDir = Path.Combine (PathConfig.IndicatorsDir, "_fills");
+			_fillsDir = Path.Combine (indicatorsDir, "_fills");
 			Directory.CreateDirectory (_fillsDir);
 
 			_fngFillsPath = Path.Combine (_fillsDir, "fng.fills.ndjson");

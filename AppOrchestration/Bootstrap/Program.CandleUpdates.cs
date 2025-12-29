@@ -1,4 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps;
 using SolSignalModel1D_Backtest.Core.Causal.Domain;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 
@@ -181,12 +182,97 @@ namespace SolSignalModel1D_Backtest
 				Console.WriteLine ($"[update-check] {paxgSymbol}: updates disabled");
 				}
 
-			// 3) Режимы апдейта (full/tail) берём из preflight.
+			// 3) Локальный 1m gap НЕ из KnownGaps -> чинить кеш: делаем full-backfill 1m до основного апдейта.
+			if (EnableSolCandleUpdates &&
+			    solPre != null &&
+			    !solPre.NeedsFullBackfill &&
+			    (SolCandleTfs & CandleUpdateTf.M1) != 0)
+				{
+				try
+					{
+					if (TryFindUnknownLocal1mGap (solSymbol, out var gap))
+						{
+						Console.WriteLine (
+							$"[update-check] {solSymbol}: local 1m gap is not in KnownGaps. " +
+							$"force 1m full backfill. gap=[{gap.ExpectedStartUtc:O}..{gap.ActualStartUtc:O}), missingBars={gap.MissingBars1m}.");
+
+						var repairUpdater = new CandleDailyUpdater (
+							http,
+							solSymbol,
+							PathConfig.CandlesDir,
+							catchupDays: 3,
+							enabledTf: CandleUpdateTf.M1
+						);
+
+						await repairUpdater.UpdateAllAsync (FullBackfillFromUtc);
+						}
+					}
+				catch (InvalidOperationException ex)
+					{
+					Console.WriteLine (
+						$"[update-check] {solSymbol}: локальный 1m-кеш повреждён. " +
+						$"форсируем 1m full-backfill. причина={ex.Message}");
+
+					var repairUpdater = new CandleDailyUpdater (
+						http,
+						solSymbol,
+						PathConfig.CandlesDir,
+						catchupDays: 3,
+						enabledTf: CandleUpdateTf.M1
+					);
+
+					await repairUpdater.UpdateAllAsync (FullBackfillFromUtc);
+					}
+				}
+
+			if (EnableBtcCandleUpdates &&
+			    btcPre != null &&
+			    !btcPre.NeedsFullBackfill &&
+			    (BtcCandleTfs & CandleUpdateTf.M1) != 0)
+				{
+				try
+					{
+					if (TryFindUnknownLocal1mGap (btcSymbol, out var gap))
+						{
+						Console.WriteLine (
+							$"[update-check] {btcSymbol}: local 1m gap is not in KnownGaps. " +
+							$"force 1m full backfill. gap=[{gap.ExpectedStartUtc:O}..{gap.ActualStartUtc:O}), missingBars={gap.MissingBars1m}.");
+
+						var repairUpdater = new CandleDailyUpdater (
+							http,
+							btcSymbol,
+							PathConfig.CandlesDir,
+							catchupDays: 3,
+							enabledTf: CandleUpdateTf.M1
+						);
+
+						await repairUpdater.UpdateAllAsync (FullBackfillFromUtc);
+						}
+					}
+				catch (InvalidOperationException ex)
+					{
+					Console.WriteLine (
+						$"[update-check] {btcSymbol}: локальный 1m-кеш повреждён. " +
+						$"форсируем 1m full-backfill. причина={ex.Message}");
+
+					var repairUpdater = new CandleDailyUpdater (
+						http,
+						btcSymbol,
+						PathConfig.CandlesDir,
+						catchupDays: 3,
+						enabledTf: CandleUpdateTf.M1
+					);
+
+					await repairUpdater.UpdateAllAsync (FullBackfillFromUtc);
+					}
+				}
+
+			// 4) Режимы апдейта (full/tail) берём из preflight.
 			bool solNeedsFull = EnableSolCandleUpdates && solPre != null && solPre.NeedsFullBackfill;
 			bool btcNeedsFull = EnableBtcCandleUpdates && btcPre != null && btcPre.NeedsFullBackfill;
 			bool paxgNeedsFull = EnablePaxgCandleUpdates && paxgPre != null && paxgPre.NeedsFullBackfill;
 
-			// 4) Создаём апдейтеры с нужным профилем TF.
+			// 5) Создаём апдейтеры с нужным профилем TF.
 			var tasks = new List<Task> ();
 
 			if (EnableSolCandleUpdates)
@@ -255,13 +341,54 @@ namespace SolSignalModel1D_Backtest
 			if (tasks.Count > 0)
 				await Task.WhenAll (tasks);
 
-			// 5) Итоговый “факт” по файлам: по 1 строке на символ.
+			// 6) Итоговый "факт" по файлам: по 1 строке на символ.
 			if (EnableSolCandleUpdates)
 				Console.WriteLine ($"[update-files] {solSymbol}: {BuildSymbolFilesStat (solSymbol, SolCandleTfs)}");
 			if (EnableBtcCandleUpdates)
 				Console.WriteLine ($"[update-files] {btcSymbol}: {BuildSymbolFilesStat (btcSymbol, BtcCandleTfs)}");
 			if (EnablePaxgCandleUpdates)
 				Console.WriteLine ($"[update-files] {paxgSymbol}: {BuildSymbolFilesStat (paxgSymbol, PaxgCandleTfs)}");
+			}
+
+		private static bool TryFindUnknownLocal1mGap ( string symbol, out CandleGapScanner.DetectedGap gap )
+			{
+			gap = default;
+
+			if (string.IsNullOrWhiteSpace (symbol))
+				throw new ArgumentException ("symbol is null/empty", nameof (symbol));
+
+			var weekdayPath = CandlePaths.File (symbol, "1m");
+			var weekendPath = CandlePaths.WeekendFile (symbol, "1m");
+
+			if (!File.Exists (weekdayPath) || !File.Exists (weekendPath))
+				return false;
+
+			var weekdays = ReadAll1m (symbol);
+			var weekends = ReadAll1mWeekends (symbol);
+
+			if (weekdays.Count == 0 || weekends.Count == 0)
+				return false;
+
+			EnsureSortedAndStrictUnique1m (weekdays, tag: "weekdays");
+			EnsureSortedAndStrictUnique1m (weekends, tag: "weekends");
+
+			var merged = MergeSortedStrictUnique1m (weekdays, weekends);
+			if (merged.Count == 0)
+				return false;
+
+			var gaps = CandleGapScanner.Scan1mGaps (merged, symbol, seriesName: $"update-preflight.{symbol}.1m");
+
+			for (int i = 0; i < gaps.Count; i++)
+				{
+				var g = gaps[i];
+				if (!CandleDataGaps.TryMatchKnownGap (symbol, "1m", g.ExpectedStartUtc, g.ActualStartUtc, out _))
+					{
+					gap = g;
+					return true;
+					}
+				}
+
+			return false;
 			}
 		}
 	}

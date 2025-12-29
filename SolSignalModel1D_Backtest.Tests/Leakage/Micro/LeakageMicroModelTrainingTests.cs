@@ -3,6 +3,7 @@ using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 {
@@ -102,8 +103,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
                 res.Add(new LabeledCausalRow(
                     causal: CloneCausal(r.Causal),
                     trueLabel: r.TrueLabel,
-                    factMicroUp: r.FactMicroUp,
-                    factMicroDown: r.FactMicroDown));
+                    microTruth: r.MicroTruth));
             }
 
             return res;
@@ -125,15 +125,19 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
                 bool newUp;
                 bool newDown;
 
-                if (r.FactMicroUp == r.FactMicroDown)
+                bool hasMicro = r.MicroTruth.HasValue;
+                bool microUp = hasMicro && r.MicroTruth.Value == MicroTruthDirection.Up;
+                bool microDown = hasMicro && r.MicroTruth.Value == MicroTruthDirection.Down;
+
+                if (!hasMicro)
                 {
                     newUp = (i % 2 == 0);
                     newDown = !newUp;
                 }
                 else
                 {
-                    newUp = !r.FactMicroUp;
-                    newDown = !r.FactMicroDown;
+                    newUp = !microUp;
+                    newDown = !microDown;
                 }
 
                 if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var nyEntry))
@@ -161,8 +165,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 
                 Assert.Equal(a.EntryUtc.Value, b.EntryUtc.Value);
                 Assert.Equal(a.TrueLabel, b.TrueLabel);
-                Assert.Equal(a.FactMicroUp, b.FactMicroUp);
-                Assert.Equal(a.FactMicroDown, b.FactMicroDown);
+                Assert.Equal(a.MicroTruth.HasValue, b.MicroTruth.HasValue);
+                if (a.MicroTruth.HasValue)
+                    Assert.Equal(a.MicroTruth.Value, b.MicroTruth.Value);
+                else
+                    Assert.Equal(a.MicroTruth.MissingReason, b.MicroTruth.MissingReason);
 
                 var va = a.Causal.FeaturesVector.ToArray();
                 var vb = b.Causal.FeaturesVector.ToArray();
@@ -270,8 +277,18 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
             return new LabeledCausalRow(
                 causal: causal,
                 trueLabel: trueLabel,
-                factMicroUp: microUp,
-                factMicroDown: microDown);
+                microTruth: BuildMicroTruth(trueLabel, microUp, microDown));
+        }
+
+        private static OptionalValue<MicroTruthDirection> BuildMicroTruth(int trueLabel, bool microUp, bool microDown)
+        {
+            if (trueLabel != 1)
+                return OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
+            if (microUp == microDown)
+                return OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral);
+
+            return OptionalValue<MicroTruthDirection>.Present(microUp ? MicroTruthDirection.Up : MicroTruthDirection.Down);
         }
     }
 }

@@ -4,6 +4,7 @@ using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 	{
@@ -121,11 +122,14 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 				solEma50vs200: 0.1,
 				btcEma50vs200: 0.2);
 
+			var microTruth = isMicro
+				? OptionalValue<MicroTruthDirection>.Present (microUp ? MicroTruthDirection.Up : MicroTruthDirection.Down)
+				: OptionalValue<MicroTruthDirection>.Missing (MissingReasonCodes.NonFlatTruth);
+
 			return new LabeledCausalRow (
 				causal: causal,
 				trueLabel: isMicro ? 1 : 2,
-				factMicroUp: microUp,
-				factMicroDown: microDown);
+				microTruth: microTruth);
 			}
 		}
 	}

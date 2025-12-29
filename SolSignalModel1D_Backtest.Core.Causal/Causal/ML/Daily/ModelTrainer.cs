@@ -135,7 +135,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily
             else
             {
                 var microRows = ordered
-                    .Where(r => r.TrueLabel == 1 && (r.FactMicroUp || r.FactMicroDown))
+                    .Where(r => r.TrueLabel == 1 && r.MicroTruth.HasValue)
                     .ToList();
 
                 if (microRows.Count < 40)
@@ -148,17 +148,17 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily
                     var microData = _ml.Data.LoadFromEnumerable(
                         microRows.Select(r => new MlSampleBinary
                         {
-                            Label = r.FactMicroUp,
+                            Label = r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up,
                             Features = MlTrainingUtils.ToFloatFixed(r.Causal.FeaturesVector)
                         }));
 
                     var microPipe = _ml.BinaryClassification.Trainers.LightGbm(
                         new LightGbmBinaryTrainer.Options
                         {
-                            NumberOfLeaves = 16,
-                            NumberOfIterations = 90,
-                            LearningRate = 0.07f,
-                            MinimumExampleCountPerLeaf = 15,
+                            NumberOfLeaves = 8,
+                            NumberOfIterations = 60,
+                            LearningRate = 0.05f,
+                            MinimumExampleCountPerLeaf = 25,
                             Seed = 42,
                             NumberOfThreads = _gbmThreads
                         });

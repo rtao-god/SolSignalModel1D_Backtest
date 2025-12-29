@@ -176,8 +176,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Backtest
                     MinMove = forwardMinMove,
 
                     TrueLabel = truth.TrueLabel,
-                    FactMicroUp = truth.FactMicroUp,
-                    FactMicroDown = truth.FactMicroDown
+                    MicroTruth = truth.MicroTruth
                 };
 
                 result.Add(new BacktestRecord

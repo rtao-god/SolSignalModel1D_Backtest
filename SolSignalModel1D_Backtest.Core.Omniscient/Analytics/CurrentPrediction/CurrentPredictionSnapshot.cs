@@ -1,5 +1,13 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
 	{
+	public enum CurrentSnapshotMode
+		{
+		CausalOnly = 0,
+		IncludesOmniscientDebug = 1
+		}
+
 	/// <summary>
 	/// Снимок "текущего прогноза":
 	/// - одна последняя PredictionRecord;
@@ -12,6 +20,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
 
 		public DateTime PredictionDateUtc { get; set; }
 
+		public CurrentSnapshotMode Mode { get; set; } = CurrentSnapshotMode.CausalOnly;
+
 		/// <summary>Сырый предсказанный класс (0/1/2).</summary>
 		public int PredLabel { get; set; }
 
@@ -23,9 +33,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
 
 		public bool RegimeDown { get; set; }
 
-		public double? SlProb { get; set; }
+		public OptionalScore SlProb { get; set; } = OptionalScore.Missing (MissingReasonCodes.NotEvaluated);
 
-		public bool? SlHighDecision { get; set; }
+		public OptionalValue<bool> SlHighDecision { get; set; } = OptionalValue<bool>.Missing (MissingReasonCodes.NotEvaluated);
 
 		public double Entry { get; set; }
 

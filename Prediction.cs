@@ -51,6 +51,7 @@ namespace SolSignalModel1D_Backtest
                 nyTz: NyTz);
 
             var trainRows = split.Train;
+            ValidateTrainBoundaryOrThrow(trainRows, trainUntilExitDayKeyUtc, NyTz);
 
             if (split.Excluded.Count > 0)
             {
@@ -177,28 +178,24 @@ namespace SolSignalModel1D_Backtest
 
             for (int i = 0; i < 14; i++)
             {
-                var nyNoon = TimeZoneInfo.ConvertTimeFromUtc(candidateExitDayKeyUtc.AddHours(12), nyTz);
-                if (nyNoon.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+                var candidateNoonUtc = candidateExitDayKeyUtc.AddHours(12);
+                var candidateNoonEntry = new EntryUtc(candidateNoonUtc);
+                if (!NyWindowing.TryGetNyTradingDay(candidateNoonEntry, nyTz, out var nyDay))
                 {
-                    var date = nyNoon.Date;
-                    var noonLocal = new DateTime(date.Year, date.Month, date.Day, 12, 0, 0, DateTimeKind.Unspecified);
-                    bool dst = nyTz.IsDaylightSavingTime(noonLocal);
-                    int morningHourLocal = dst ? 8 : 7;
-
-                    var morningLocal = new DateTime(date.Year, date.Month, date.Day, morningHourLocal, 0, 0, DateTimeKind.Unspecified);
-                    var exitLocal = morningLocal.AddMinutes(-2);
-                    var exitUtc = TimeZoneInfo.ConvertTimeToUtc(exitLocal, nyTz);
-
-                    if (exitUtc > maxExitUtc)
-                    {
-                        throw new InvalidOperationException(
-                            $"[engine] derived trainUntilUtc exceeds max baseline-exit. trainUntilUtc={exitUtc:O}, maxExitUtc={maxExitUtc:O}, holdoutDays={holdoutDays}.");
-                    }
-
-                    return exitUtc;
+                    candidateExitDayKeyUtc = candidateExitDayKeyUtc.AddDays(-1);
+                    continue;
                 }
 
-                candidateExitDayKeyUtc = candidateExitDayKeyUtc.AddDays(-1);
+                var morningEntryUtc = NyWindowing.ComputeEntryUtcFromNyDayOrThrow(nyDay, nyTz).Value;
+                var exitUtc = morningEntryUtc.AddMinutes(-2);
+
+                if (exitUtc > maxExitUtc)
+                {
+                    throw new InvalidOperationException(
+                        $"[engine] derived trainUntilUtc exceeds max baseline-exit. trainUntilUtc={exitUtc:O}, maxExitUtc={maxExitUtc:O}, holdoutDays={holdoutDays}.");
+                }
+
+                return exitUtc;
             }
 
             throw new InvalidOperationException(
@@ -235,6 +232,53 @@ namespace SolSignalModel1D_Backtest
                 throw new InvalidOperationException("[engine] failed to derive max baseline-exit: no working-day entries found.");
 
             return maxExit;
+        }
+
+        private static void ValidateTrainBoundaryOrThrow(
+            IReadOnlyList<LabeledCausalRow> trainRows,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz)
+        {
+            if (trainRows == null) throw new ArgumentNullException(nameof(trainRows));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+
+            var violations = new List<(DateTime EntryUtc, DateTime ExitDayKeyUtc)>();
+
+            for (int i = 0; i < trainRows.Count; i++)
+            {
+                var r = trainRows[i];
+                var entryUtc = r.Causal.EntryUtc.Value;
+
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz, out var exitUtc))
+                {
+                    throw new InvalidOperationException(
+                        $"[engine] baseline-exit undefined for train row. entryUtc={entryUtc:O}, dayKey={r.EntryDayKeyUtc.Value:yyyy-MM-dd}.");
+                }
+
+                var exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value).Value;
+                if (exitDayKeyUtc > trainUntilExitDayKeyUtc.Value)
+                    violations.Add((entryUtc, exitDayKeyUtc));
+            }
+
+            if (violations.Count == 0)
+                return;
+
+            var top = violations
+                .OrderByDescending(v => v.ExitDayKeyUtc)
+                .Take(10)
+                .Select(v => $"{v.EntryUtc:O} -> exitDayKey={v.ExitDayKeyUtc:yyyy-MM-dd}")
+                .ToArray();
+
+            Console.WriteLine(
+                $"[engine] ПОДОЗРЕНИЕ: train включает записи за границей baseline-exit. " +
+                $"count={violations.Count}, trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}, " +
+                $"sample=[{string.Join(", ", top)}]");
+
+            throw new InvalidOperationException(
+                $"[engine] train boundary violated. " +
+                $"count={violations.Count}, trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}.");
         }
     }
 }

@@ -72,8 +72,11 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Infra.Perf
 #if DEBUG
 			// Свой контролируемый "Press any key", вместо того, что добавляет VS при Ctrl+F5.
 			Console.WriteLine ();
-			Console.Write ("Нажмите любую клавишу для выхода...");
-			Console.ReadKey (intercept: true);
+			if (!Console.IsInputRedirected && Environment.UserInteractive)
+				{
+				Console.Write ("Нажмите любую клавишу для выхода...");
+				Console.ReadKey (intercept: true);
+				}
 #endif
 			}
 

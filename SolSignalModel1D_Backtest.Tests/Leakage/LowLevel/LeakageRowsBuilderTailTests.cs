@@ -100,8 +100,11 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				Assert.Equal (CausalTimeKey.EntryDayKeyUtc (a), CausalTimeKey.EntryDayKeyUtc (b));
 
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
-				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
-				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
+				Assert.Equal (a.MicroTruth.HasValue, b.MicroTruth.HasValue);
+				if (a.MicroTruth.HasValue)
+					Assert.Equal (a.MicroTruth.Value, b.MicroTruth.Value);
+				else
+					Assert.Equal (a.MicroTruth.MissingReason, b.MicroTruth.MissingReason);
 
 				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
 				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);

@@ -26,17 +26,16 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
             // ForwardOutcomes
             { "Forward.Entry",        "ForwardOutcomes.Entry должен задаваться только при создании записи." },
 			{ "Forward.MaxHigh24",    "ForwardOutcomes.MaxHigh24 должен задаваться только при создании записи." },
-			{ "Forward.MinLow24",     "ForwardOutcomes.MinLow24 должен задаваться только при создании записи." },
+            { "Forward.MinLow24",     "ForwardOutcomes.MinLow24 должен задаваться только при создании записи." },
 			{ "Forward.Close24",      "ForwardOutcomes.Close24 должен задаваться только при создании записи." },
 			{ "Forward.MinMove",      "ForwardOutcomes.MinMove должен задаваться только при создании записи." },
 			{ "Forward.WindowEndUtc", "ForwardOutcomes.WindowEndUtc должен задаваться только при создании записи." },
 			{ "Forward.DayMinutes",   "ForwardOutcomes.DayMinutes должен задаваться только при создании записи." },
+            { "Forward.MicroTruth",   "ForwardOutcomes.MicroTruth должен задаваться только при создании записи." },
 
             // CausalPredictionRecord — базовые факты и дневной слой:
-            { "Causal.TradingEntryUtc",  "EntryUtc должен задаваться только при построении CausalPredictionRecord." },
+			{ "Causal.TradingEntryUtc",  "EntryUtc должен задаваться только при построении CausalPredictionRecord." },
 			{ "Causal.TrueLabel",        "TrueLabel задаётся один раз при построении CausalPredictionRecord." },
-			{ "Causal.FactMicroUp",      "FactMicroUp — факт, не должен меняться в пайплайне." },
-			{ "Causal.FactMicroDown",    "FactMicroDown — факт, не должен меняться в пайплайне." },
 			{ "Causal.RegimeDown",       "RegimeDown — режим рынка, фиксируется при построении строки." },
 			{ "Causal.MinMove",          "MinMove — forward-метрика, не должна переписываться." },
 			{ "Causal.ProbUp_Day",       "Prob*_Day — чистый дневной слой, не должен меняться после prediction." },

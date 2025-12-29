@@ -1,3 +1,5 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats
 	{
 	/// <summary>
@@ -8,107 +10,107 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Mod
 	/// </summary>
 	public sealed class BacktestModelStatsSnapshot
 		{
-		public DateTime FromDateUtc { get; set; }
-		public DateTime ToDateUtc { get; set; }
+		public required DateTime FromDateUtc { get; init; }
+		public required DateTime ToDateUtc { get; init; }
 
-		public DailyConfusionStats Daily { get; set; } = new DailyConfusionStats ();
-		public TrendDirectionStats Trend { get; set; } = new TrendDirectionStats ();
-		public SlStats Sl { get; set; } = new SlStats ();
+		public required DailyConfusionStats Daily { get; init; }
+		public required TrendDirectionStats Trend { get; init; }
+		public required OptionalValue<SlStats> Sl { get; init; }
 		}
 
 	public sealed class DailyConfusionStats
 		{
-		public List<DailyClassStatsRow> Rows { get; } = new List<DailyClassStatsRow> ();
-		public int OverallCorrect { get; set; }
-		public int OverallTotal { get; set; }
-		public double OverallAccuracyPct { get; set; }
+		public required IReadOnlyList<DailyClassStatsRow> Rows { get; init; }
+		public required int OverallCorrect { get; init; }
+		public required int OverallTotal { get; init; }
+		public required double OverallAccuracyPct { get; init; }
 		}
 
 	public sealed class DailyClassStatsRow
 		{
-		public int TrueLabel { get; set; }
-		public string LabelName { get; set; } = string.Empty;
+		public required int TrueLabel { get; init; }
+		public required string LabelName { get; init; }
 
-		public int Pred0 { get; set; }
-		public int Pred1 { get; set; }
-		public int Pred2 { get; set; }
+		public required int Pred0 { get; init; }
+		public required int Pred1 { get; init; }
+		public required int Pred2 { get; init; }
 
-		public int Correct { get; set; }
-		public int Total { get; set; }
-		public double AccuracyPct { get; set; }
+		public required int Correct { get; init; }
+		public required int Total { get; init; }
+		public required double AccuracyPct { get; init; }
 		}
 
 	public sealed class TrendDirectionStats
 		{
-		public List<TrendDirectionStatsRow> Rows { get; } = new List<TrendDirectionStatsRow> ();
-		public int OverallCorrect { get; set; }
-		public int OverallTotal { get; set; }
-		public double OverallAccuracyPct { get; set; }
+		public required IReadOnlyList<TrendDirectionStatsRow> Rows { get; init; }
+		public required int OverallCorrect { get; init; }
+		public required int OverallTotal { get; init; }
+		public required double OverallAccuracyPct { get; init; }
 		}
 
 	public sealed class TrendDirectionStatsRow
 		{
-		public string Name { get; set; } = string.Empty;
-		public int TrueIndex { get; set; }
-		public int PredDown { get; set; }
-		public int PredUp { get; set; }
-		public int Correct { get; set; }
-		public int Total { get; set; }
-		public double AccuracyPct { get; set; }
+		public required string Name { get; init; }
+		public required int TrueIndex { get; init; }
+		public required int PredDown { get; init; }
+		public required int PredUp { get; init; }
+		public required int Correct { get; init; }
+		public required int Total { get; init; }
+		public required double AccuracyPct { get; init; }
 		}
 
 	public sealed class SlStats
 		{
-		public SlConfusionStats Confusion { get; set; } = new SlConfusionStats ();
-		public SlMetricsStats Metrics { get; set; } = new SlMetricsStats ();
-		public List<SlThresholdStatsRow> Thresholds { get; } = new List<SlThresholdStatsRow> ();
+		public required SlConfusionStats Confusion { get; init; }
+		public required SlMetricsStats Metrics { get; init; }
+		public required IReadOnlyList<SlThresholdStatsRow> Thresholds { get; init; }
 		}
 
 	public sealed class SlConfusionStats
 		{
-		public int TpLow { get; set; }
-		public int TpHigh { get; set; }
-		public int SlLow { get; set; }
-		public int SlHigh { get; set; }
-		public int SlSaved { get; set; }
+		public required int TpLow { get; init; }
+		public required int TpHigh { get; init; }
+		public required int SlLow { get; init; }
+		public required int SlHigh { get; init; }
+		public required int SlSaved { get; init; }
 
-		public int TotalSignalDays { get; set; }
-		public int ScoredDays { get; set; }
-		public int TotalOutcomeDays { get; set; }
+		public required int TotalSignalDays { get; init; }
+		public required int ScoredDays { get; init; }
+		public required int TotalOutcomeDays { get; init; }
 
-		public int TotalSlDays { get; set; }
-		public int TotalTpDays { get; set; }
+		public required int TotalSlDays { get; init; }
+		public required int TotalTpDays { get; init; }
 		}
 
 	public sealed class SlMetricsStats
 		{
-		public double Coverage { get; set; }
-		public double Tpr { get; set; }
-		public double Fpr { get; set; }
-		public double Precision { get; set; }
-		public double Recall { get; set; }
-		public double F1 { get; set; }
-		public double PrAuc { get; set; }
+		public required double Coverage { get; init; }
+		public required double Tpr { get; init; }
+		public required double Fpr { get; init; }
+		public required double Precision { get; init; }
+		public required double Recall { get; init; }
+		public required double F1 { get; init; }
+		public required double PrAuc { get; init; }
 		}
 
 	public sealed class SlThresholdStatsRow
 		{
-		public double Threshold { get; set; }
-		public double TprPct { get; set; }
-		public double FprPct { get; set; }
-		public double PredHighPct { get; set; }
+		public required double Threshold { get; init; }
+		public required double TprPct { get; init; }
+		public required double FprPct { get; init; }
+		public required double PredHighPct { get; init; }
 
-		public int HighTotal { get; set; }
-		public int TotalDays { get; set; }
+		public required int HighTotal { get; init; }
+		public required int TotalDays { get; init; }
 
 		/// <summary>
 		/// Условная "хорошесть" порога: TPR ≥ 60% и FPR ≤ 40%.
 		/// </summary>
-		public bool IsGood { get; set; }
+		public required bool IsGood { get; init; }
 
-		public int HighSlDays { get; set; }
-		public int HighTpDays { get; set; }
-		public int TotalSlDays { get; set; }
-		public int TotalTpDays { get; set; }
+		public required int HighSlDays { get; init; }
+		public required int HighTpDays { get; init; }
+		public required int TotalSlDays { get; init; }
+		public required int TotalTpDays { get; init; }
 		}
 	}

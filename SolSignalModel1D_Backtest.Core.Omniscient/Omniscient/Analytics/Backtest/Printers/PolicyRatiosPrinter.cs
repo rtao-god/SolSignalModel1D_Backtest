@@ -7,15 +7,18 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
 		{
 		public static void Print (
 			IEnumerable<BacktestPolicyResult> results,
+			string backtestId,
 			string title = "Policy ratios (Sharpe/Sortino/Calmar)" )
 			{
 			if (results == null) throw new ArgumentNullException (nameof (results));
+			if (string.IsNullOrWhiteSpace (backtestId))
+				throw new ArgumentException ("[policy-ratios] backtestId is required.", nameof (backtestId));
 
 			var list = results.ToList ();
 			if (list.Count == 0) return;
 
 			// ← вот здесь нужен snapshot-builder из namespace PolicyRatios
-			var snapshot = PolicyRatiosSnapshotBuilder.Build (list);
+			var snapshot = PolicyRatiosSnapshotBuilder.Build (list, backtestId);
 
 			ConsoleStyler.WriteHeader ($"=== {title} ===");
 

@@ -12,6 +12,7 @@ using SolSignalModel1D_Backtest.Tests.TestUtils;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
@@ -193,8 +194,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				DayMinutes = Array.Empty<Candle1m> (),
 				MinMove = minMove,
 				TrueLabel = 1,
-				FactMicroUp = false,
-				FactMicroDown = false
+				MicroTruth = OptionalValue<MicroTruthDirection>.Missing (MissingReasonCodes.MicroNeutral)
 				};
 
 			return new BacktestRecord

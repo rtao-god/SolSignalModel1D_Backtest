@@ -1,7 +1,7 @@
 using Microsoft.ML;
 using Microsoft.ML.Data;
 
-namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
+namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML.PFI
 {
     /// <summary>
     /// Ядро PFI:
@@ -137,6 +137,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
             permSchema[nameof(EvalSample.Features)].ColumnType =
                 new VectorDataViewType(NumberDataViewType.Single, featCount);
 
+            var permScorer = ResolvePermutationScorer(model);
+
             for (int j = 0; j < featCount; j++)
             {
                 // Собираем столбец j.
@@ -182,7 +184,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
                 }
 
                 var permData = ml.Data.LoadFromEnumerable(permSamples, permSchema);
-                var scoredPerm = model.Transform(permData);
+                var scoredPerm = permScorer.Transform(permData);
 
                 var permMetrics = ml.BinaryClassification.Evaluate(
                     scoredPerm,
@@ -195,7 +197,22 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
 
             // 5) Direction-метрики.
             var stats = ComputeFeatureStats(scoredRows, deltaAuc, featureNames, featCount, tag);
+            MaybeLogPfiSanity(tag, baselineAuc, scoredRows, stats);
             return stats;
+        }
+
+        private static ITransformer ResolvePermutationScorer(ITransformer model)
+        {
+            if (model is TransformerChain<ITransformer> chain && chain.Count > 1)
+            {
+                var last = chain.LastTransformer;
+                if (last == null)
+                    throw new InvalidOperationException("[pfi-core] TransformerChain.LastTransformer is null.");
+
+                return last;
+            }
+
+            return model;
         }
 
         private static List<FeatureStats> ComputeFeatureStats(
@@ -396,6 +413,147 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
                 int j = rng.Next(i + 1);
                 (idx[i], idx[j]) = (idx[j], idx[i]);
             }
+        }
+
+        private static void MaybeLogPfiSanity(
+            string tag,
+            double baselineAuc,
+            IReadOnlyList<BinaryScoredRow> scoredRows,
+            IReadOnlyList<FeatureStats> stats)
+        {
+            if (scoredRows == null || scoredRows.Count == 0) return;
+            if (stats == null || stats.Count == 0) return;
+
+            int pos = 0;
+            int neg = 0;
+
+            for (int i = 0; i < scoredRows.Count; i++)
+            {
+                if (scoredRows[i].Label) pos++;
+                else neg++;
+            }
+
+            if (pos == 0 || neg == 0) return;
+
+            double maxImp = stats.Max(s => s.ImportanceAuc);
+            if (baselineAuc < 0.999 || maxImp >= 0.01)
+                return;
+
+            double minScore = double.PositiveInfinity;
+            double maxScore = double.NegativeInfinity;
+            double sumScore = 0.0;
+
+            for (int i = 0; i < scoredRows.Count; i++)
+            {
+                double s = scoredRows[i].Score;
+                if (s < minScore) minScore = s;
+                if (s > maxScore) maxScore = s;
+                sumScore += s;
+            }
+
+            double avgScore = sumScore / scoredRows.Count;
+
+            Console.WriteLine(
+                $"[pfi-sanity:{tag}] ПОДОЗРЕНИЕ: AUC≈1 при низкой важности. " +
+                $"rows={scoredRows.Count}, pos={pos}, neg={neg}, baseAuc={baselineAuc:F4}, maxImp={maxImp:F4}");
+
+            Console.WriteLine(
+                $"[pfi-sanity:{tag}] score stats: min={minScore:0.####}, max={maxScore:0.####}, avg={avgScore:0.####}");
+
+            int sampleCount = Math.Min(5, scoredRows.Count);
+            for (int i = 0; i < sampleCount; i++)
+            {
+                var r = scoredRows[i];
+                Console.WriteLine($"[pfi-sanity:{tag}] sample[{i}] label={r.Label} score={r.Score:0.####}");
+            }
+
+            for (int i = Math.Max(0, scoredRows.Count - sampleCount); i < scoredRows.Count; i++)
+            {
+                var r = scoredRows[i];
+                Console.WriteLine($"[pfi-sanity:{tag}] sample[{i}] label={r.Label} score={r.Score:0.####}");
+            }
+
+            var shuffledAuc = ComputeAucOnShuffledScores(scoredRows);
+            if (!double.IsNaN(shuffledAuc))
+            {
+                Console.WriteLine($"[pfi-sanity:{tag}] AUC на перемешанном score = {shuffledAuc:F4}");
+            }
+        }
+
+        private static double ComputeAucOnShuffledScores(IReadOnlyList<BinaryScoredRow> rows)
+        {
+            if (rows == null || rows.Count == 0) return double.NaN;
+
+            int n = rows.Count;
+            var scores = new double[n];
+            var labels = new bool[n];
+
+            for (int i = 0; i < n; i++)
+            {
+                scores[i] = rows[i].Score;
+                labels[i] = rows[i].Label;
+            }
+
+            var idx = Enumerable.Range(0, n).ToArray();
+            var rng = new Random(42);
+
+            for (int i = n - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (idx[i], idx[j]) = (idx[j], idx[i]);
+            }
+
+            var shuffledScores = new double[n];
+            for (int i = 0; i < n; i++)
+                shuffledScores[i] = scores[idx[i]];
+
+            return ComputeAuc(labels, shuffledScores);
+        }
+
+        private static double ComputeAuc(IReadOnlyList<bool> labels, IReadOnlyList<double> scores)
+        {
+            if (labels == null || scores == null) return double.NaN;
+            if (labels.Count != scores.Count || labels.Count == 0) return double.NaN;
+
+            int n = labels.Count;
+            int pos = 0;
+            int neg = 0;
+
+            var pairs = new (double Score, bool Label)[n];
+            for (int i = 0; i < n; i++)
+            {
+                pairs[i] = (scores[i], labels[i]);
+                if (labels[i]) pos++; else neg++;
+            }
+
+            if (pos == 0 || neg == 0) return double.NaN;
+
+            Array.Sort(pairs, (a, b) => a.Score.CompareTo(b.Score));
+
+            double rankSumPos = 0.0;
+            int rank = 1;
+            int iIdx = 0;
+
+            while (iIdx < n)
+            {
+                int j = iIdx + 1;
+                while (j < n && pairs[j].Score.Equals(pairs[iIdx].Score))
+                    j++;
+
+                double avgRank = (rank + (rank + (j - iIdx) - 1)) / 2.0;
+
+                for (int k = iIdx; k < j; k++)
+                {
+                    if (pairs[k].Label)
+                        rankSumPos += avgRank;
+                }
+
+                rank += (j - iIdx);
+                iIdx = j;
+            }
+
+            double auc = (rankSumPos - pos * (pos + 1) / 2.0) / (pos * neg);
+            return auc;
         }
     }
 }

@@ -1,10 +1,11 @@
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats;
-using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Utils;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers
 {
@@ -17,6 +18,17 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
     /// </summary>
     public static class BacktestModelStatsPrinter
     {
+        [Flags]
+        public enum ModelComponentPrintFlags
+        {
+            None = 0,
+            LayerTriClass = 1 << 0,
+            MoveModel = 1 << 1,
+            DirModel = 1 << 2,
+            MicroModel = 1 << 3,
+            All = LayerTriClass | MoveModel | DirModel | MicroModel
+        }
+
         public static void Print(
             IReadOnlyList<BacktestRecord> records,
             IReadOnlyList<Candle1m> sol1m,
@@ -30,39 +42,45 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
             if (trainUntilExitDayKeyUtc.IsDefault) throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
+            const int RecentDays = 240;
+            const int DebugLastDays = 10;
+
+            var snapshot = BacktestDiagnosticsSnapshotBuilder.Build(
+                records: records,
+                sol1m: sol1m,
+                dailyTpPct: dailyTpPct,
+                dailySlPct: dailySlPct,
+                nyTz: nyTz,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                recentDays: RecentDays,
+                debugLastDays: DebugLastDays,
+                runKind: ModelRunKind.Analytics);
+
+            Print(snapshot);
+        }
+
+        public static void Print(BacktestDiagnosticsSnapshot snapshot)
+        {
+            if (snapshot == null) throw new ArgumentNullException(nameof(snapshot));
+
             ConsoleStyler.WriteHeader("==== MODEL STATS ====");
 
-            if (records.Count == 0)
+            var multi = snapshot.ModelStats;
+            var meta = multi.Meta;
+
+            if (meta.TotalRecordsCount == 0)
             {
                 Console.WriteLine("[model-stats] no records, nothing to print.");
                 return;
             }
 
-            var ordered = records
-                .OrderBy(r => r.EntryDayKeyUtc.Value)
-                .ToList();
-
-            var minDateUtc = ordered.First().EntryDayKeyUtc.Value;
-            var maxDateUtc = ordered.Last().EntryDayKeyUtc.Value;
+            var fullSeg = snapshot.Segments.FirstOrDefault(s => s.Kind == BacktestDiagnosticsSegmentKind.Full);
+            string fullRange = fullSeg?.EntryFromUtc.HasValue == true
+                ? $"{fullSeg.EntryFromUtc:yyyy-MM-dd}..{fullSeg.EntryToUtc:yyyy-MM-dd}"
+                : "n/a";
 
             Console.WriteLine(
-                $"[model-stats] full records period = {minDateUtc:yyyy-MM-dd}..{maxDateUtc:yyyy-MM-dd}, " +
-                $"totalRecords = {ordered.Count}");
-
-            const int RecentDays = 240;
-            var runKind = ModelRunKind.Analytics;
-
-            var multi = BacktestModelStatsMultiSnapshotBuilder.Build(
-                allRecords: ordered,
-                sol1m: sol1m,
-                nyTz: nyTz,
-                dailyTpPct: dailyTpPct,
-                dailySlPct: dailySlPct,
-                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
-                recentDays: RecentDays,
-                runKind: runKind);
-
-            var meta = multi.Meta;
+                $"[model-stats] full records period = {fullRange}, totalRecords = {meta.TotalRecordsCount}");
 
             Console.WriteLine(
                 $"[model-stats] runKind={meta.RunKind}, " +
@@ -73,30 +91,32 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
                 $"recentDays={meta.RecentDays}, " +
                 $"recentRecords={meta.RecentRecordsCount}");
 
-            var fromRecentUtc = maxDateUtc.AddDays(-RecentDays);
-            var recentRecords = ordered
-                .Where(r => r.EntryDayKeyUtc.Value >= fromRecentUtc)
-                .ToList();
-
-            if (recentRecords.Count == 0)
+            if (snapshot.Meta.ShuffleSanityAccuracyPct.HasValue && snapshot.Meta.ShuffleSanityN > 0)
             {
-                recentRecords = ordered;
+                Console.WriteLine(
+                    $"[model-stats][shuffle] sanity acc on shuffled labels = {snapshot.Meta.ShuffleSanityAccuracyPct:0.0}% (n={snapshot.Meta.ShuffleSanityN})");
+            }
+            else
+            {
+                Console.WriteLine("[model-stats][shuffle] no records for sanity test – skipped.");
             }
 
-            RunShuffleSanityTest(recentRecords);
+            var componentFlags = ResolveComponentFlags();
 
-            PrintSegmentIfExists(multi, ModelStatsSegmentKind.OosOnly, "OOS segment");
-            PrintSegmentIfExists(multi, ModelStatsSegmentKind.TrainOnly, "Train segment");
-            PrintSegmentIfExists(multi, ModelStatsSegmentKind.RecentWindow, "Recent segment");
-            PrintSegmentIfExists(multi, ModelStatsSegmentKind.FullHistory, "Full-history segment");
+            PrintSegmentIfExists(snapshot, ModelStatsSegmentKind.OosOnly, BacktestDiagnosticsSegmentKind.Oos, "OOS segment", componentFlags);
+            PrintSegmentIfExists(snapshot, ModelStatsSegmentKind.TrainOnly, BacktestDiagnosticsSegmentKind.Train, "Train segment", componentFlags);
+            PrintSegmentIfExists(snapshot, ModelStatsSegmentKind.RecentWindow, BacktestDiagnosticsSegmentKind.Recent, "Recent segment", componentFlags);
+            PrintSegmentIfExists(snapshot, ModelStatsSegmentKind.FullHistory, BacktestDiagnosticsSegmentKind.Full, "Full-history segment", componentFlags);
         }
 
         private static void PrintSegmentIfExists(
-            BacktestModelStatsMultiSnapshot multi,
+            BacktestDiagnosticsSnapshot snapshot,
             ModelStatsSegmentKind kind,
-            string segmentTitle)
+            BacktestDiagnosticsSegmentKind diagKind,
+            string segmentTitle,
+            ModelComponentPrintFlags componentFlags)
         {
-            var segment = multi.Segments
+            var segment = snapshot.ModelStats.Segments
                 .FirstOrDefault(s => s.Kind == kind);
 
             if (segment == null)
@@ -115,6 +135,16 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
 
             PrintSlStats(segment.Stats.Sl);
             Console.WriteLine();
+
+            if (componentFlags != ModelComponentPrintFlags.None)
+            {
+                var diagSeg = snapshot.Segments.FirstOrDefault(s => s.Kind == diagKind);
+                if (diagSeg != null)
+                {
+                    PrintComponentStats(diagSeg.ComponentStats, segment.Label, componentFlags);
+                    Console.WriteLine();
+                }
+            }
         }
 
         private static void PrintDailyConfusion(DailyConfusionStats daily, string? scopeLabel = null)
@@ -212,10 +242,21 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
             t.WriteToConsole();
         }
 
-        private static void PrintSlStats(SlStats sl)
+        private static void PrintSlStats(OptionalValue<SlStats> sl)
         {
-            var confusion = sl.Confusion;
-            var metrics = sl.Metrics;
+            if (!sl.HasValue)
+            {
+                ConsoleStyler.WriteHeader("SL-model confusion (runtime, path-based)");
+                Console.WriteLine($"[sl-model] отсутствует: {sl.MissingReason}");
+                Console.WriteLine();
+                ConsoleStyler.WriteHeader("SL-model metrics (runtime)");
+                Console.WriteLine($"[sl-model] отсутствует: {sl.MissingReason}");
+                return;
+            }
+
+            var value = sl.Value;
+            var confusion = value.Confusion;
+            var metrics = value.Metrics;
 
             ConsoleStyler.WriteHeader("SL-model confusion (runtime, path-based)");
 
@@ -246,7 +287,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
                 metrics.F1,
                 metrics.PrAuc);
 
-            PrintSlThresholdSweep(sl);
+            PrintSlThresholdSweep(value);
         }
 
         private static void PrintSlSummaryLine(
@@ -291,7 +332,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
 
             if (thresholds == null || thresholds.Count == 0)
             {
-                Console.WriteLine("[sl-thr] no days with both TP/SL outcome and SlProb > 0 – sweep skipped.");
+                Console.WriteLine("[sl-thr] no days with both TP/SL outcome and SlProb available – sweep skipped.");
                 return;
             }
 
@@ -321,52 +362,147 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtes
             t.WriteToConsole();
         }
 
-        private static void RunShuffleSanityTest(IReadOnlyList<BacktestRecord> recordsForMetrics)
+        private static void PrintComponentStats(
+            BacktestDiagnosticsComponentStatsSnapshot stats,
+            string scopeLabel,
+            ModelComponentPrintFlags flags)
         {
-            if (recordsForMetrics == null || recordsForMetrics.Count == 0)
+            if (stats == null) throw new ArgumentNullException(nameof(stats));
+
+            ConsoleStyler.WriteHeader($"MODEL COMPONENTS [{scopeLabel}]");
+
+            if (flags.HasFlag(ModelComponentPrintFlags.LayerTriClass))
             {
-                Console.WriteLine("[model-stats][shuffle] no records for sanity test – skipped.");
+                PrintTriClassSummary(stats);
+                Console.WriteLine();
+            }
+
+            if (flags.HasFlag(ModelComponentPrintFlags.MoveModel))
+            {
+                PrintMoveModelSummary(stats.Move);
+                Console.WriteLine();
+            }
+
+            if (flags.HasFlag(ModelComponentPrintFlags.DirModel))
+            {
+                PrintDirModelSummary(stats.Dir);
+                Console.WriteLine();
+            }
+
+            if (flags.HasFlag(ModelComponentPrintFlags.MicroModel))
+            {
+                PrintMicroModelSummary(stats.Micro);
+            }
+        }
+
+        private static void PrintTriClassSummary(BacktestDiagnosticsComponentStatsSnapshot stats)
+        {
+            var t = new TextTable();
+            t.AddHeader("layer", "N", "correct", "accuracy");
+
+            t.AddRow("Day", stats.Day.N.ToString(), stats.Day.Correct.ToString(), FormatPct(stats.Day.Accuracy));
+            t.AddRow("Day+Micro", stats.DayMicro.N.ToString(), stats.DayMicro.Correct.ToString(), FormatPct(stats.DayMicro.Accuracy));
+            t.AddRow("Total", stats.Total.N.ToString(), stats.Total.Correct.ToString(), FormatPct(stats.Total.Accuracy));
+
+            t.WriteToConsole();
+        }
+
+        private static void PrintMoveModelSummary(MoveComponentStats stats)
+        {
+            var t = new TextTable();
+            t.AddHeader("model", "N", "correct", "accuracy", "true_move", "true_flat", "pred_move", "pred_flat");
+            t.AddRow(
+                "Move (move vs flat)",
+                stats.N.ToString(),
+                stats.Correct.ToString(),
+                FormatPct(stats.Accuracy),
+                stats.TrueMove.ToString(),
+                stats.TrueFlat.ToString(),
+                stats.PredMove.ToString(),
+                stats.PredFlat.ToString());
+            t.WriteToConsole();
+        }
+
+        private static void PrintDirModelSummary(DirComponentStats stats)
+        {
+            var t = new TextTable();
+            t.AddHeader("model", "N", "correct", "accuracy", "move_pred_true", "move_true_but_truth_flat");
+            t.AddRow(
+                "Dir (up vs down, move-days)",
+                stats.N.ToString(),
+                stats.Correct.ToString(),
+                FormatPct(stats.Accuracy),
+                stats.MovePredTrue.ToString(),
+                stats.MoveTrueButTruthFlat.ToString());
+            t.WriteToConsole();
+        }
+
+        private static void PrintMicroModelSummary(OptionalValue<MicroComponentStats> stats)
+        {
+            if (!stats.HasValue)
+            {
+                string reason = stats.MissingReason ?? "<no-reason>";
+                Console.WriteLine($"[model-components] micro stats missing: reason={reason}");
                 return;
             }
 
-            var filtered = recordsForMetrics
-                .Where(r => r.TrueLabel is >= 0 and <= 2
-                            && r.PredLabel is >= 0 and <= 2)
-                .ToList();
+            var value = stats.Value;
+            var t = new TextTable();
+            t.AddHeader("model", "N", "correct", "accuracy", "fact_micro_days", "pred_micro_days", "coverage");
+            t.AddRow(
+                "Micro (flat days)",
+                value.N.ToString(),
+                value.Correct.ToString(),
+                FormatPct(value.Accuracy),
+                value.FactMicroDays.ToString(),
+                value.PredMicroDays.ToString(),
+                FormatPct(value.Coverage));
+            t.WriteToConsole();
+        }
 
-            if (filtered.Count == 0)
-            {
-                Console.WriteLine("[model-stats][shuffle] no valid (true,pred) pairs – skipped.");
-                return;
-            }
+        private static string FormatPct(double value)
+        {
+            if (double.IsNaN(value)) return "NaN";
+            return $"{value * 100.0:0.0}%";
+        }
 
-            var labels = filtered
-                .Select(r => r.TrueLabel)
+        private static ModelComponentPrintFlags ResolveComponentFlags()
+        {
+            string? raw = Environment.GetEnvironmentVariable("MODEL_STATS_COMPONENTS");
+            if (string.IsNullOrWhiteSpace(raw))
+                return ModelComponentPrintFlags.All;
+
+            var parts = raw
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(p => p.ToLowerInvariant())
                 .ToArray();
 
-            var rng = new Random(123);
+            if (parts.Length == 0)
+                return ModelComponentPrintFlags.All;
 
-            for (int i = labels.Length - 1; i > 0; i--)
+            ModelComponentPrintFlags flags = ModelComponentPrintFlags.None;
+
+            foreach (var p in parts)
             {
-                int j = rng.Next(i + 1);
-                (labels[i], labels[j]) = (labels[j], labels[i]);
-            }
-
-            int diag = 0;
-            int n = filtered.Count;
-
-            for (int i = 0; i < n; i++)
-            {
-                if (labels[i] == filtered[i].PredLabel)
+                if (p == "all")
                 {
-                    diag++;
+                    flags = ModelComponentPrintFlags.All;
+                    break;
                 }
+
+                if (p == "day" || p == "layers" || p == "tri" || p == "tri-class")
+                    flags |= ModelComponentPrintFlags.LayerTriClass;
+                else if (p == "move")
+                    flags |= ModelComponentPrintFlags.MoveModel;
+                else if (p == "dir" || p == "direction")
+                    flags |= ModelComponentPrintFlags.DirModel;
+                else if (p == "micro")
+                    flags |= ModelComponentPrintFlags.MicroModel;
+                else
+                    throw new InvalidOperationException($"[model-components] unknown MODEL_STATS_COMPONENTS flag: '{p}'. raw='{raw}'.");
             }
 
-            double accPct = (double)diag / n * 100.0;
-
-            Console.WriteLine(
-                $"[model-stats][shuffle] sanity acc on shuffled labels = {accPct:0.0}% (n={n})");
+            return flags == ModelComponentPrintFlags.None ? ModelComponentPrintFlags.All : flags;
         }
 
         private static void WriteColoredLine(ConsoleColor color, string text)

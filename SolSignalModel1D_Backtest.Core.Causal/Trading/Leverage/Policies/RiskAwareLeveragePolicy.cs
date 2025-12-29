@@ -39,8 +39,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage.Policies
 			{
 			if (causal == null) throw new ArgumentNullException (nameof (causal));
 
-			// bool? трактуем строго: только true = high-risk. null/false => не high-risk.
-			if (causal.SlHighDecision == true)
+			// Optional<bool>: только явный true = high-risk. Missing/false => не high-risk.
+			if (causal.SlHighDecision.HasValue && causal.SlHighDecision.Value)
 				return _highRiskLeverage;
 
 			return _normalLeverage;

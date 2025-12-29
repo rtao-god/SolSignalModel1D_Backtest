@@ -1,12 +1,7 @@
-using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Printers;
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Aggregation;
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapshots.Micro;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
-using SolSignalModel1D_Backtest.Core.Omniscient.Causal.Analytics.Backtest.Adapters;
-using OmniscientModelStatsPrinter =
-    SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Analytics.Backtest.Printers.BacktestModelStatsPrinter;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Diagnostics;
 using System.Globalization;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
@@ -147,62 +142,22 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
                     Console.WriteLine($"  {morningOnly[i].Value:yyyy-MM-dd}");
             }
 
-            // ===== Каузальная аналитика (split строго по baseline-exit) =====
-            var eligible = new List<BacktestAggRow>(recordsCount);
-            var excluded = new List<BacktestAggRow>(Math.Min(256, recordsCount));
-            var train = new List<BacktestAggRow>(recordsCount);
-            var oos = new List<BacktestAggRow>(Math.Min(256, recordsCount));
+            const int RecentDays = 240;
+            const int DebugLastDays = 10;
 
-            for (int i = 0; i < recordsCount; i++)
-            {
-                var r = records[i];
-
-                var agg = r.ToAggRow();
-
-                var cls = NyTrainSplit.ClassifyByBaselineExit(
-                    entryUtc: r.EntryUtc,
-                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
-                    nyTz: NyTz,
-                    baselineExitDayKeyUtc: out _);
-
-                if (cls == NyTrainSplit.EntryClass.Excluded)
-                {
-                    excluded.Add(agg);
-                    continue;
-                }
-
-                eligible.Add(agg);
-
-                if (cls == NyTrainSplit.EntryClass.Train) train.Add(agg);
-                else oos.Add(agg);
-            }
-
-            var sets = new AggregationInputSets
-            {
-                Boundary = new TrainBoundaryMeta(trainUntilExitDayKeyUtc),
-                Eligible = eligible,
-                Excluded = excluded,
-                Train = train,
-                Oos = oos
-            };
-
-            var probsSnap = AggregationProbsSnapshotBuilder.Build(sets, recentDays: 240, debugLastDays: 10);
-            AggregationProbsPrinter.Print(probsSnap);
-
-            var metricsSnap = AggregationMetricsSnapshotBuilder.Build(sets, recentDays: 240);
-            AggregationMetricsPrinter.Print(metricsSnap);
-
-            var microSnap = MicroStatsSnapshotBuilder.Build(sets.Eligible);
-            MicroStatsPrinter.Print(microSnap);
-
-            OmniscientModelStatsPrinter.Print(
+            var diagnostics = BacktestDiagnosticsSnapshotBuilder.Build(
                 records: records,
                 sol1m: candles1m,
                 dailyTpPct: config.DailyTpPct,
                 dailySlPct: config.DailyStopPct,
                 nyTz: NyTz,
-                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc
-            );
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                recentDays: RecentDays,
+                debugLastDays: DebugLastDays,
+                runKind: ModelRunKind.Analytics);
+
+            BacktestDiagnosticsSnapshotValidator.ValidateOrThrow(diagnostics);
+            BacktestDiagnosticsPrinter.Print(diagnostics);
         }
     }
 }

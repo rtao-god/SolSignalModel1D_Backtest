@@ -128,7 +128,13 @@ namespace SolSignalModel1D_Backtest
                         $"PredLabel={causal.PredLabel}, PredMicroUp={causal.PredMicroUp}, PredMicroDown={causal.PredMicroDown}");
                 }
 
-                if (causal.SlHighDecision != true)
+                if (!causal.SlHighDecision.HasValue)
+                {
+                    causal.DelayedWhyNot = "sl missing";
+                    continue;
+                }
+
+                if (!causal.SlHighDecision.Value)
                 {
                     causal.DelayedWhyNot = "sl gate";
                     continue;

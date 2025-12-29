@@ -1,7 +1,9 @@
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Trading.Evaluator;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data
 {
@@ -15,8 +17,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data
 
         // ===== Truth =====
         public int TrueLabel => Forward.TrueLabel;
-        public bool FactMicroUp => Forward.FactMicroUp;
-        public bool FactMicroDown => Forward.FactMicroDown;
+        public OptionalValue<MicroTruthDirection> MicroTruth => Forward.MicroTruth;
 
         // ===== Pred labels =====
         public int PredLabel => Causal.PredLabel;
@@ -60,8 +61,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data
         public IReadOnlyList<Candle1m> DayMinutes => Forward.DayMinutes;
 
         // ===== SL runtime =====
-        public double? SlProb => Causal.SlProb;
-        public bool? SlHighDecision => Causal.SlHighDecision;
+        public OptionalScore SlProb => Causal.SlProb;
+        public OptionalValue<bool> SlHighDecision => Causal.SlHighDecision;
         public double? Conf_SlLong => Causal.Conf_SlLong;
         public double? Conf_SlShort => Causal.Conf_SlShort;
 

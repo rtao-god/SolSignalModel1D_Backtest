@@ -1,3 +1,5 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using SolSignalModel1D_Backtest.Core.Omniscient.Data;
@@ -42,6 +44,10 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
             for (int i = 0; i < vec.Length; i++)
                 vec[i] = 0.123;
 
+            var microTruth = trueLabel == 1
+                ? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+                : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
             return new BacktestRecord
             {
                 Causal = new CausalPredictionRecord
@@ -81,8 +87,7 @@ namespace SolSignalModel1D_Backtest.Tests.SelfCheck
                     DayMinutes = Array.Empty<Candle1m>(),
 
                     TrueLabel = trueLabel,
-                    FactMicroUp = false,
-                    FactMicroDown = false
+                    MicroTruth = microTruth
                 }
             };
         }

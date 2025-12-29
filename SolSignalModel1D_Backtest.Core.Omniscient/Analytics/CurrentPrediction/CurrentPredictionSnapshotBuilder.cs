@@ -32,6 +32,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             IReadOnlyList<ICausalLeveragePolicy> policies,
             double walletBalanceUsd)
         {
+            return Build(records, policies, walletBalanceUsd, CurrentSnapshotMode.CausalOnly);
+        }
+
+        public static CurrentPredictionSnapshot Build(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd,
+            CurrentSnapshotMode mode)
+        {
             if (records == null)
                 throw new ArgumentNullException(
                     nameof(records),
@@ -45,10 +54,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
                 .OrderBy(r => (r.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.")).EntryDayKeyUtc.Value)
                 .Last();
 
-            if (HasForward(last))
+            if (mode == CurrentSnapshotMode.IncludesOmniscientDebug && HasForward(last))
                 WarnForwardIfNeeded(count: 1, firstDayUtc: last.Causal.EntryDayKeyUtc.Value, lastDayUtc: last.Causal.EntryDayKeyUtc.Value);
 
-            return BuildFromRecord(last, policies, walletBalanceUsd);
+            return BuildFromRecord(last, policies, walletBalanceUsd, mode);
         }
 
         /// <summary>
@@ -58,6 +67,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             BacktestRecord rec,
             IReadOnlyList<ICausalLeveragePolicy> policies,
             double walletBalanceUsd)
+        {
+            return BuildFromRecord(rec, policies, walletBalanceUsd, CurrentSnapshotMode.CausalOnly);
+        }
+
+        public static CurrentPredictionSnapshot BuildFromRecord(
+            BacktestRecord rec,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd,
+            CurrentSnapshotMode mode)
         {
             if (rec == null)
                 throw new ArgumentNullException(
@@ -83,13 +101,14 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             {
                 GeneratedAtUtc = DateTime.UtcNow,
                 PredictionDateUtc = predictionDayUtc,
+                Mode = mode,
                 PredLabel = rec.PredLabel,
                 PredLabelDisplay = FormatLabel(rec),
                 MicroDisplay = FormatMicro(rec),
                 RegimeDown = rec.RegimeDown,
 
-                SlProb = rec.SlProb ?? throw new InvalidOperationException("[current] SlProb is null — SL layer missing."),
-                SlHighDecision = rec.SlHighDecision ?? throw new InvalidOperationException("[current] SlHighDecision is null — SL layer missing."),
+                SlProb = rec.SlProb,
+                SlHighDecision = rec.SlHighDecision,
 
                 Entry = rec.Entry,
                 MinMove = rec.MinMove,
@@ -97,6 +116,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
 
                 WalletBalanceUsd = walletBalanceUsd
             };
+
+            if (snapshot.SlProb.HasValue != snapshot.SlHighDecision.HasValue)
+            {
+                throw new InvalidOperationException(
+                    $"[current] SL availability mismatch for {rec.EntryUtc.Value:O}. " +
+                    $"slProb.HasValue={snapshot.SlProb.HasValue}, slHigh.HasValue={snapshot.SlHighDecision.HasValue}.");
+            }
 
             bool hasAnyForward =
                 rec.MaxHigh24 != 0.0 ||
@@ -116,7 +142,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
                     "Ожидается либо полный набор, либо полное отсутствие.");
             }
 
-            if (hasAllForward)
+            if (hasAllForward && mode == CurrentSnapshotMode.IncludesOmniscientDebug)
             {
                 snapshot.Forward24h = new Forward24hSnapshot
                 {
@@ -145,6 +171,16 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             double walletBalanceUsd,
             int historyWindowDays)
         {
+            return BuildHistory(records, policies, walletBalanceUsd, historyWindowDays, CurrentSnapshotMode.CausalOnly);
+        }
+
+        public static IReadOnlyList<CurrentPredictionSnapshot> BuildHistory(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd,
+            int historyWindowDays,
+            CurrentSnapshotMode mode)
+        {
             if (records == null)
                 throw new ArgumentNullException(
                     nameof(records),
@@ -167,7 +203,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
                 .ToList();
 
             int forwardCount = ordered.Count(HasForward);
-            if (forwardCount > 0)
+            if (mode == CurrentSnapshotMode.IncludesOmniscientDebug && forwardCount > 0)
             {
                 var firstDayUtc = ordered.First().Causal.EntryDayKeyUtc.Value;
                 var lastDayUtc = ordered.Last().Causal.EntryDayKeyUtc.Value;
@@ -178,7 +214,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
 
             foreach (var rec in ordered)
             {
-                result.Add(BuildFromRecord(rec, policies, walletBalanceUsd));
+                result.Add(BuildFromRecord(rec, policies, walletBalanceUsd, mode));
             }
 
             return result;
@@ -192,6 +228,16 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             IReadOnlyList<ICausalLeveragePolicy> policies,
             double walletBalanceUsd,
             DateTime predictionDateUtc)
+        {
+            return BuildForDate(records, policies, walletBalanceUsd, predictionDateUtc, CurrentSnapshotMode.CausalOnly);
+        }
+
+        public static CurrentPredictionSnapshot BuildForDate(
+            IReadOnlyList<BacktestRecord> records,
+            IReadOnlyList<ICausalLeveragePolicy> policies,
+            double walletBalanceUsd,
+            DateTime predictionDateUtc,
+            CurrentSnapshotMode mode)
         {
             if (records == null)
                 throw new ArgumentNullException(
@@ -214,10 +260,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
                     $"[current] Не найдена запись для даты {targetDateUtc:yyyy-MM-dd} (UTC) при построении CurrentPredictionSnapshot.");
             }
 
-            if (HasForward(recForDay))
+            if (mode == CurrentSnapshotMode.IncludesOmniscientDebug && HasForward(recForDay))
                 WarnForwardIfNeeded(count: 1, firstDayUtc: targetDateUtc, lastDayUtc: targetDateUtc);
 
-            return BuildFromRecord(recForDay, policies, walletBalanceUsd);
+            return BuildFromRecord(recForDay, policies, walletBalanceUsd, mode);
         }
 
         private static void BuildExplanationItems(
@@ -252,10 +298,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             }
 
             // SlProb хранится как вероятность 0..1, отображаем в процентах.
-            double slProbPct = (snapshot.SlProb ?? throw new InvalidOperationException("[current] SlProb is null in snapshot — SL layer missing.")) * 100.0;
+            double slProbPct = snapshot.SlProb.GetValueOrThrow("[current] SlProb missing in snapshot.") * 100.0;
 
-            bool isRiskDay = snapshot.SlHighDecision
-                ?? throw new InvalidOperationException("[current] SlHighDecision is null in snapshot — SL layer missing.");
+            bool isRiskDay = snapshot.SlHighDecision.GetValueOrThrow("[current] SlHighDecision missing in snapshot.");
 
             items.Add(new CurrentPredictionExplanationItem
             {
@@ -348,7 +393,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
             var causal = rec.Causal ?? throw new InvalidOperationException("[current] rec.Causal is null — causal layer missing.");
 
             bool hasDir = TryGetDirection(rec, out var goLongModel, out _);
-            bool isRiskDay = rec.SlHighDecision ?? throw new InvalidOperationException("[current] SlHighDecision is null — SL layer missing.");
+            bool isRiskDay = rec.SlHighDecision.GetValueOrThrow("[current] SlHighDecision missing for policy rows.");
 
             double leverage = policy.ResolveLeverage(causal);
 

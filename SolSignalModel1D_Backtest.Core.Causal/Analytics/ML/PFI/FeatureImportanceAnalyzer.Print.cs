@@ -1,4 +1,4 @@
-namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
+namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML.PFI
 	{
 	/// <summary>
 	/// Печать подробной таблички PFI + direction для одной модели.

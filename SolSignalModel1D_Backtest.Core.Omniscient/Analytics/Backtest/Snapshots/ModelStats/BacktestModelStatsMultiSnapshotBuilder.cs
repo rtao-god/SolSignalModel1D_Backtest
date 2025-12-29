@@ -25,27 +25,6 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
             if (trainUntilExitDayKeyUtc.IsDefault) throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
             if (recentDays <= 0) throw new ArgumentOutOfRangeException(nameof(recentDays), "recentDays must be > 0.");
 
-            var multi = new BacktestModelStatsMultiSnapshot
-            {
-                Meta =
-                {
-                    RunKind = runKind,
-                    TrainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc,
-                    TrainUntilIsoDate = trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    RecentDays = recentDays
-                }
-            };
-
-            if (allRecords.Count == 0)
-            {
-                multi.Meta.HasOos = false;
-                multi.Meta.TrainRecordsCount = 0;
-                multi.Meta.OosRecordsCount = 0;
-                multi.Meta.TotalRecordsCount = 0;
-                multi.Meta.RecentRecordsCount = 0;
-                return multi;
-            }
-
             static DateTime EntryUtcDt(BacktestRecord r) => r.Causal.EntryUtc.Value;
 
             var ordered = allRecords
@@ -65,9 +44,49 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                     $"This is a pipeline bug: filter out excluded days before analytics.");
             }
 
-            var fullRecords = new List<BacktestRecord>(trainRecords.Count + oosRecords.Count);
-            fullRecords.AddRange(trainRecords);
-            fullRecords.AddRange(oosRecords);
+            return BuildFromSplit(
+                trainRecords: trainRecords,
+                oosRecords: oosRecords,
+                sol1m: sol1m,
+                nyTz: nyTz,
+                dailyTpPct: dailyTpPct,
+                dailySlPct: dailySlPct,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                recentDays: recentDays,
+                runKind: runKind);
+        }
+
+        public static BacktestModelStatsMultiSnapshot BuildFromSplit(
+            IReadOnlyList<BacktestRecord> trainRecords,
+            IReadOnlyList<BacktestRecord> oosRecords,
+            IReadOnlyList<Candle1m> sol1m,
+            TimeZoneInfo nyTz,
+            double dailyTpPct,
+            double dailySlPct,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            int recentDays,
+            ModelRunKind runKind)
+        {
+            if (trainRecords == null) throw new ArgumentNullException(nameof(trainRecords));
+            if (oosRecords == null) throw new ArgumentNullException(nameof(oosRecords));
+            if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault) throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+            if (recentDays <= 0) throw new ArgumentOutOfRangeException(nameof(recentDays), "recentDays must be > 0.");
+
+            static DateTime EntryUtcDt(BacktestRecord r) => r.Causal.EntryUtc.Value;
+
+            if (trainRecords.Count == 0 && oosRecords.Count == 0)
+            {
+                throw new InvalidOperationException("[model-stats] train+oos records are empty.");
+            }
+
+            var trainOrdered = trainRecords.OrderBy(EntryUtcDt).ToList();
+            var oosOrdered = oosRecords.OrderBy(EntryUtcDt).ToList();
+
+            var fullRecords = new List<BacktestRecord>(trainOrdered.Count + oosOrdered.Count);
+            fullRecords.AddRange(trainOrdered);
+            fullRecords.AddRange(oosOrdered);
 
             var maxEntryUtc = EntryUtcDt(fullRecords[^1]);
 
@@ -77,37 +96,45 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 .ToList();
 
             if (recentRecords.Count == 0)
-                recentRecords = fullRecords;
+                throw new InvalidOperationException("[model-stats] recentRecords=0 after recent window.");
 
-            var meta = multi.Meta;
-            meta.HasOos = oosRecords.Count > 0;
-            meta.TrainRecordsCount = trainRecords.Count;
-            meta.OosRecordsCount = oosRecords.Count;
-            meta.TotalRecordsCount = fullRecords.Count;
-            meta.RecentRecordsCount = recentRecords.Count;
+            var meta = new ModelStatsMeta
+            {
+                RunKind = runKind,
+                TrainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc,
+                TrainUntilIsoDate = trainUntilExitDayKeyUtc.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                RecentDays = recentDays,
+                HasOos = oosOrdered.Count > 0,
+                TrainRecordsCount = trainOrdered.Count,
+                OosRecordsCount = oosOrdered.Count,
+                TotalRecordsCount = fullRecords.Count,
+                RecentRecordsCount = recentRecords.Count
+            };
+
+            var segments = new List<BacktestModelStatsSegmentSnapshot>();
 
             AddSegmentIfNotEmpty(
-                multi,
+                segments,
                 ModelStatsSegmentKind.OosOnly,
                 label: "OOS-only (baseline-exit > trainUntil-exit-day-key)",
-                oosRecords,
+                oosOrdered,
                 sol1m,
                 nyTz,
                 dailyTpPct,
                 dailySlPct);
 
             AddSegmentIfNotEmpty(
-                multi,
+                segments,
                 ModelStatsSegmentKind.TrainOnly,
                 label: "Train-only (baseline-exit <= trainUntil-exit-day-key)",
-                trainRecords,
+                trainOrdered,
                 sol1m,
                 nyTz,
                 dailyTpPct,
                 dailySlPct);
 
             AddSegmentIfNotEmpty(
-                multi,
+                segments,
                 ModelStatsSegmentKind.RecentWindow,
                 label: $"Recent window (last {recentDays} days)",
                 recentRecords,
@@ -117,7 +144,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 dailySlPct);
 
             AddSegmentIfNotEmpty(
-                multi,
+                segments,
                 ModelStatsSegmentKind.FullHistory,
                 label: "Full history (eligible days)",
                 fullRecords,
@@ -126,11 +153,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 dailyTpPct,
                 dailySlPct);
 
-            return multi;
+            return new BacktestModelStatsMultiSnapshot
+            {
+                Meta = meta,
+                Segments = segments
+            };
         }
 
         private static void AddSegmentIfNotEmpty(
-            BacktestModelStatsMultiSnapshot multi,
+            List<BacktestModelStatsSegmentSnapshot> segments,
             ModelStatsSegmentKind kind,
             string label,
             IReadOnlyList<BacktestRecord> segmentRecords,
@@ -139,6 +170,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
             double dailyTpPct,
             double dailySlPct)
         {
+            if (segments == null) throw new ArgumentNullException(nameof(segments));
             if (segmentRecords == null) throw new ArgumentNullException(nameof(segmentRecords));
             if (segmentRecords.Count == 0)
                 return;
@@ -160,7 +192,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 Stats = stats
             };
 
-            multi.Segments.Add(segment);
+            segments.Add(segment);
         }
 
         private static (List<BacktestRecord> Train, List<BacktestRecord> Oos, List<BacktestRecord> Excluded) SplitByBaselineExitDayKey(

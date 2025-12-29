@@ -47,11 +47,20 @@ namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.SL
                 if (!goLong && !goShort)
                     continue;
 
-                double slProb = c.SlProb
-                    ?? throw new InvalidOperationException($"[sl] SlProb is null for day={c.EntryDayKeyUtc} (SL layer not evaluated).");
+                if (!c.SlProb.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"[sl] SlProb is missing for day={c.EntryDayKeyUtc} (SL layer not evaluated).");
+                }
 
-                bool slHigh = c.SlHighDecision
-                    ?? throw new InvalidOperationException($"[sl] SlHighDecision is null for day={c.EntryDayKeyUtc} (SL layer not evaluated).");
+                if (!c.SlHighDecision.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"[sl] SlHighDecision is missing for day={c.EntryDayKeyUtc} (SL layer not evaluated).");
+                }
+
+                double slProb = c.SlProb.Value;
+                bool slHigh = c.SlHighDecision.Value;
 
                 if (slProb < 0.0 || slProb > 1.0)
                 {

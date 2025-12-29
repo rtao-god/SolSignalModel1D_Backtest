@@ -1,4 +1,4 @@
-namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML
+namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.ML.PFI
 	{
 	/// <summary>
 	/// Агрегированные статистики по одной фиче для бинарной модели.

@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.Time;
@@ -87,8 +88,13 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				else if (score < -0.35) trueLabel = 0;
 				else trueLabel = 1;
 
-				bool factMicroUp = trueLabel == 1 && score > 0;
-				bool factMicroDown = trueLabel == 1 && score < 0;
+				var microTruth = trueLabel == 1
+					? (score > 0
+						? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+						: score < 0
+							? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down)
+							: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral))
+					: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
 
 				var causal = new CausalDataRow (
 					entryUtc: entryUtc,
@@ -125,7 +131,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 					solEma50vs200: x2 * 0.01,
 					btcEma50vs200: x1 * 0.01);
 
-				rows.Add (new LabeledCausalRow (causal, trueLabel, factMicroUp, factMicroDown));
+				rows.Add (new LabeledCausalRow (causal, trueLabel, microTruth));
 				}
 
 			return rows;
@@ -154,11 +160,14 @@ namespace SolSignalModel1D_Backtest.Tests.ML.Daily
 				bool move = moveFlags[i];
 				int newLabel = move ? 2 : 1;
 
+				var microTruth = newLabel == 1
+					? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+					: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
 				result.Add (new LabeledCausalRow (
 					causal: src.Causal,
 					trueLabel: newLabel,
-					factMicroUp: false,
-					factMicroDown: false));
+					microTruth: microTruth));
 				}
 
 			return result;

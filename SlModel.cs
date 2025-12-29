@@ -4,6 +4,7 @@ using SolSignalModel1D_Backtest.Core.Causal.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Diagnostics.SL;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
@@ -164,10 +165,10 @@ namespace SolSignalModel1D_Backtest
 
                 var causal = rec.Causal;
 
-                // Важно: после SL-стадии значения должны быть non-null для ВСЕХ дней.
-                // 0.0/false = "SL не применялся для дня" (например, нет направления/сделки).
-                causal.SlProb = 0.0;
-                causal.SlHighDecision = false;
+                // Важно: после SL-стадии значения должны быть заданы явно:
+                // missing = "SL не применялся для дня" (например, нет направления/сделки).
+                causal.SlProb = OptionalScore.Missing(MissingReasonCodes.NoSignalDay);
+                causal.SlHighDecision = OptionalValue<bool>.Missing(MissingReasonCodes.NoSignalDay);
 
                 bool goLong = causal.PredLabel == 2 || (causal.PredLabel == 1 && causal.PredMicroUp);
                 bool goShort = causal.PredLabel == 0 || (causal.PredLabel == 1 && causal.PredMicroDown);
@@ -213,8 +214,8 @@ namespace SolSignalModel1D_Backtest
                 double p = slPred.Probability;
                 bool predHigh = slPred.PredictedLabel && p >= SlRiskThreshold;
 
-                causal.SlProb = p;
-                causal.SlHighDecision = predHigh;
+                causal.SlProb = OptionalScore.Present(p);
+                causal.SlHighDecision = OptionalValue<bool>.Present(predHigh);
 
                 scored++;
 

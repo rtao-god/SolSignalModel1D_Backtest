@@ -29,10 +29,17 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction
 			ConsoleStyler.WriteHeader ("=== ТЕКУЩИЙ ПРОГНОЗ ===");
 			Console.WriteLine ($"Дата прогноза (NY): {nyTime:yyyy-MM-dd HH:mm}");
 			Console.WriteLine ($"Текущее время (Tbilisi): {tbNow:yyyy-MM-dd HH:mm}");
+			Console.WriteLine ($"CurrentSnapshotMode = {snapshot.Mode}");
 			Console.WriteLine ($"Predicted class: {snapshot.PredLabelDisplay}");
 			Console.WriteLine ($"Micro: {snapshot.MicroDisplay}");
 			Console.WriteLine ($"Regime: {(snapshot.RegimeDown ? "DOWN" : "NORMAL")}");
-			Console.WriteLine ($"SL-prob: {snapshot.SlProb:0.00} → SlHighDecision={snapshot.SlHighDecision}");
+			string slProbText = snapshot.SlProb.HasValue
+				? snapshot.SlProb.Value.ToString ("0.00")
+				: $"missing:{snapshot.SlProb.MissingReason}";
+			string slHighText = snapshot.SlHighDecision.HasValue
+				? snapshot.SlHighDecision.Value.ToString ()
+				: $"missing:{snapshot.SlHighDecision.MissingReason}";
+			Console.WriteLine ($"SL-prob: {slProbText} → SlHighDecision={slHighText}");
 			Console.WriteLine ($"Entry: {snapshot.Entry:0.0000} USDT");
 			Console.WriteLine ();
 

@@ -54,15 +54,18 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
             int upCount = 0, dnCount = 0;
             for (int i = 0; i < flatsRaw.Count; i++)
             {
-                if (flatsRaw[i].FactMicroUp) upCount++;
-                if (flatsRaw[i].FactMicroDown) dnCount++;
+                if (!flatsRaw[i].TryGetMicroTruth(out var dir))
+                    continue;
+
+                if (dir == MicroTruthDirection.Up) upCount++;
+                else dnCount++;
             }
 
             if (upCount == 0 || dnCount == 0)
             {
                 throw new InvalidOperationException(
                     $"[2stage-micro] датасет микро-дней одноклассовый (up={upCount}, down={dnCount}) " +
-                    $"при flats={flatsRaw.Count}. Проверь разметку FactMicroUp/FactMicroDown.");
+                    $"при flats={flatsRaw.Count}. Проверь разметку MicroTruth.");
             }
 
             int take = Math.Min(upCount, dnCount);
@@ -77,14 +80,14 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
             {
                 var r = flatsRaw[i];
 
-                if (upNeed > 0 && r.FactMicroUp)
+                if (upNeed > 0 && r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up)
                 {
                     upBalanced.Add(r);
                     upNeed--;
                     continue;
                 }
 
-                if (dnNeed > 0 && r.FactMicroDown)
+                if (dnNeed > 0 && r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Down)
                 {
                     dnBalanced.Add(r);
                     dnNeed--;
@@ -145,7 +148,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
                 samples.Add(new MlSampleBinary
                 {
-                    Label = r.FactMicroUp,
+                    Label = r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up,
                     Features = feats
                 });
             }
@@ -160,10 +163,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
             var options = new LightGbmBinaryTrainer.Options
             {
-                NumberOfLeaves = 12,
-                NumberOfIterations = 70,
-                LearningRate = 0.07f,
-                MinimumExampleCountPerLeaf = 15,
+                NumberOfLeaves = 8,
+                NumberOfIterations = 60,
+                LearningRate = 0.05f,
+                MinimumExampleCountPerLeaf = 25,
                 Seed = 42,
                 NumberOfThreads = Environment.ProcessorCount
             };

@@ -1,4 +1,6 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
@@ -33,8 +35,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Data
         public double MinMove { get; init; }
 
         public int TrueLabel { get; init; }
-        public bool FactMicroUp { get; init; }
-        public bool FactMicroDown { get; init; }
+        public OptionalValue<MicroTruthDirection> MicroTruth { get; init; }
 
         public int PathFirstPassDir { get; init; }
         public DateTime? PathFirstPassTimeUtc { get; init; }

@@ -11,32 +11,32 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Mod
 		/// <summary>
 		/// Тип сегмента: train / oos / full / recent.
 		/// </summary>
-		public ModelStatsSegmentKind Kind { get; set; }
+		public required ModelStatsSegmentKind Kind { get; init; }
 
 		/// <summary>
 		/// Читабельная подпись сегмента, которую можно показывать в консоли/отчётах/фронте.
 		/// </summary>
-		public string Label { get; set; } = string.Empty;
+		public required string Label { get; init; }
 
 		/// <summary>
 		/// Минимальная дата в сегменте (UTC) по PredictionRecord.DateUtc.
 		/// </summary>
-		public DateTime FromDateUtc { get; set; }
+		public required DateTime FromDateUtc { get; init; }
 
 		/// <summary>
 		/// Максимальная дата в сегменте (UTC) по PredictionRecord.DateUtc.
 		/// </summary>
-		public DateTime ToDateUtc { get; set; }
+		public required DateTime ToDateUtc { get; init; }
 
 		/// <summary>
 		/// Количество PredictionRecord в сегменте.
 		/// </summary>
-		public int RecordsCount { get; set; }
+		public required int RecordsCount { get; init; }
 
 		/// <summary>
 		/// Подробный снимок модельных статистик по данному сегменту.
 		/// </summary>
-		public BacktestModelStatsSnapshot Stats { get; set; } = new BacktestModelStatsSnapshot ();
+		public required BacktestModelStatsSnapshot Stats { get; init; }
 		}
 
 	/// <summary>
@@ -51,13 +51,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.Mod
 		/// <summary>
 		/// Общие метаданные запуска модели и разбиения на сегменты.
 		/// </summary>
-		public ModelStatsMeta Meta { get; set; } = new ModelStatsMeta ();
+		public required ModelStatsMeta Meta { get; init; }
 
 		/// <summary>
 		/// Набор сегментов (Train, OOS, Full, Recent).
 		/// Список неплотный: пустые сегменты просто не добавляются.
 		/// </summary>
-		public List<BacktestModelStatsSegmentSnapshot> Segments { get; } =
-			new List<BacktestModelStatsSegmentSnapshot> ();
+		public required IReadOnlyList<BacktestModelStatsSegmentSnapshot> Segments { get; init; }
 		}
 	}

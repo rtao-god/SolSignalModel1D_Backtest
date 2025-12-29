@@ -23,12 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 
             if (totalInput == 0)
             {
-                return new AggregationMetricsSnapshot
-                {
-                    TotalInputRecords = 0,
-                    ExcludedCount = 0,
-                    Segments = Array.Empty<AggregationMetricsSegmentSnapshot>()
-                };
+                throw new InvalidOperationException("[agg-metrics] totalInput=0: невозможно построить метрики без данных.");
             }
 
             var recent = BuildRecent(eligible, recentDays);
@@ -90,7 +85,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
         private static IReadOnlyList<BacktestAggRow> BuildRecent(IReadOnlyList<BacktestAggRow> eligible, int recentDays)
         {
             if (eligible.Count == 0)
-                return Array.Empty<BacktestAggRow>();
+            {
+                throw new InvalidOperationException("[agg-metrics] eligible=0: recent-сегмент не может быть вычислен.");
+            }
 
             var maxDay = eligible[^1].EntryDayKeyUtc.Value;
             var from = maxDay.AddDays(-recentDays);
@@ -108,17 +105,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 
             if (seg.Count == 0)
             {
-                return new AggregationMetricsSegmentSnapshot
-                {
-                    SegmentName = name,
-                    SegmentLabel = label,
-                    FromDateUtc = null,
-                    ToDateUtc = null,
-                    RecordsCount = 0,
-                    Day = EmptyLayer("Day"),
-                    DayMicro = EmptyLayer("Day+Micro"),
-                    Total = EmptyLayer("Total")
-                };
+                throw new InvalidOperationException($"[agg-metrics] empty segment '{name}'.");
             }
 
             return new AggregationMetricsSegmentSnapshot
@@ -132,22 +119,6 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
                 Day = ComputeLayerMetrics(seg, "Day", r => r.PredLabel_Day, r => (r.ProbUp_Day, r.ProbFlat_Day, r.ProbDown_Day)),
                 DayMicro = ComputeLayerMetrics(seg, "Day+Micro", r => r.PredLabel_DayMicro, r => (r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro)),
                 Total = ComputeLayerMetrics(seg, "Total", r => r.PredLabel_Total, r => (r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total))
-            };
-        }
-
-        private static LayerMetricsSnapshot EmptyLayer(string layerName)
-        {
-            return new LayerMetricsSnapshot
-            {
-                LayerName = layerName,
-                Confusion = new int[3, 3],
-                N = 0,
-                Correct = 0,
-                Accuracy = double.NaN,
-                MicroF1 = double.NaN,
-                LogLoss = double.NaN,
-                InvalidForLogLoss = 0,
-                ValidForLogLoss = 0
             };
         }
 

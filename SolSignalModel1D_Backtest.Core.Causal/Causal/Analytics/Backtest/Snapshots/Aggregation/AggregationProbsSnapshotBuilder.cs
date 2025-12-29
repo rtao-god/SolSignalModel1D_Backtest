@@ -25,15 +25,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 
             if (totalInput == 0)
             {
-                return new AggregationProbsSnapshot
-                {
-                    MinDateUtc = default,
-                    MaxDateUtc = default,
-                    TotalInputRecords = 0,
-                    ExcludedCount = 0,
-                    Segments = Array.Empty<AggregationProbsSegmentSnapshot>(),
-                    DebugLastDays = Array.Empty<AggregationProbsDebugRow>()
-                };
+                throw new InvalidOperationException("[agg-probs] totalInput=0: невозможно построить вероятности без данных.");
             }
 
             var (minDateUtc, maxDateUtc) = ComputeMinMaxUtc(eligible, excluded);
@@ -148,13 +140,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
                 }
             }
 
-            return has ? (min, max) : (default, default);
+            if (!has)
+                throw new InvalidOperationException("[agg-probs] no dates to compute min/max.");
+
+            return (min, max);
         }
 
         private static IReadOnlyList<BacktestAggRow> BuildRecent(IReadOnlyList<BacktestAggRow> eligible, int recentDays)
         {
             if (eligible.Count == 0)
-                return Array.Empty<BacktestAggRow>();
+                throw new InvalidOperationException("[agg-probs] eligible=0: recent-сегмент не может быть вычислен.");
 
             var maxDateUtc = eligible[^1].EntryDayKeyUtc.Value;
             var fromRecentUtc = maxDateUtc.AddDays(-recentDays);
@@ -173,21 +168,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
 
             if (seg.Count == 0)
             {
-                dst.Add(new AggregationProbsSegmentSnapshot
-                {
-                    SegmentName = segmentName,
-                    SegmentLabel = segmentLabel,
-                    FromDateUtc = null,
-                    ToDateUtc = null,
-                    RecordsCount = 0,
-                    Day = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
-                    DayMicro = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
-                    Total = new AggregationLayerAvg { PUp = 0, PFlat = 0, PDown = 0, Sum = 0 },
-                    AvgConfDay = 0,
-                    AvgConfMicro = 0,
-                    RecordsWithSlScore = 0
-                });
-                return;
+                throw new InvalidOperationException($"[agg-probs] empty segment '{segmentName}'.");
             }
 
             double sumUpDay = 0, sumFlatDay = 0, sumDownDay = 0;
@@ -226,7 +207,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
                 sumConfDay += r.Conf_Day;
                 sumConfMicro += r.Conf_Micro;
 
-                if (r.SlProb > 0.0) slNonZero++;
+                if (r.SlProb.HasValue) slNonZero++;
             }
 
             double invN = 1.0 / seg.Count;
@@ -279,7 +260,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
             int debugLastDays)
         {
             if (eligible.Count == 0)
-                return Array.Empty<AggregationProbsDebugRow>();
+                throw new InvalidOperationException("[agg-probs] eligible=0: debug-last-days не может быть вычислен.");
 
             var tail = eligible.Skip(Math.Max(0, eligible.Count - debugLastDays)).ToList();
 
@@ -293,13 +274,14 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Analytics.Backtest.Snapsh
                     r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro,
                     eps);
 
+                bool slDecision = r.SlHighDecision.HasValue && r.SlHighDecision.Value;
                 bool slUsed =
                     HasOverlayChange(
                         r.ProbUp_DayMicro, r.ProbFlat_DayMicro, r.ProbDown_DayMicro,
                         r.ProbUp_Total, r.ProbFlat_Total, r.ProbDown_Total,
                         eps)
-                    || r.SlHighDecision
-                    || r.SlProb > 0.0;
+                    || slDecision
+                    || r.SlProb.HasValue;
 
                 bool microAgree = r.PredLabel_DayMicro == r.PredLabel_Day;
 

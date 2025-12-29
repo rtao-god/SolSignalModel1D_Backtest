@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
@@ -6,7 +7,6 @@ using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
-using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Backtest
@@ -24,8 +24,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
             public int TrueLabel { get; init; }
             public int PredLabel { get; init; }
-            public bool FactMicroUp { get; init; }
-            public bool FactMicroDown { get; init; }
+            public OptionalValue<MicroTruthDirection> MicroTruth { get; init; }
 
             public double Entry { get; init; }
             public double MaxHigh24 { get; init; }
@@ -64,6 +63,14 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
                 double pUp = 0.5, pFlat = 0.2, pDown = 0.3;
 
+                string reason = trueLabel switch
+                {
+                    2 => "day:move-up",
+                    0 => "day:move-down",
+                    1 => "day:flat",
+                    _ => throw new InvalidOperationException($"[test] Unexpected trueLabel={trueLabel}.")
+                };
+
                 var causal = new CausalPredictionRecord
                 {
                     TradingEntryUtc = nyEntryUtc,
@@ -95,11 +102,11 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
                     PredMicroDown = false,
 
                     RegimeDown = causalRow.RegimeDown,
-                    Reason = "test",
+                    Reason = reason,
                     MinMove = causalRow.MinMove,
 
-                    SlProb = 0.0,
-                    SlHighDecision = false,
+                    SlProb = OptionalScore.Present(0.0),
+                    SlHighDecision = OptionalValue<bool>.Present(false),
                     Conf_SlLong = 0.0,
                     Conf_SlShort = 0.0,
 
@@ -111,13 +118,16 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
                     TargetLevelClass = null
                 };
 
+                var microTruth = trueLabel == 1
+                    ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
                 var forward = new ForwardOutcomes
                 {
                     EntryUtc = new EntryUtc(entryUtcRaw),
 
                     TrueLabel = trueLabel,
-                    FactMicroUp = false,
-                    FactMicroDown = false,
+                    MicroTruth = microTruth,
 
                     Entry = 100.0,
                     MaxHigh24 = 110.0,
@@ -141,8 +151,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
                 mornings.Add(new LabeledCausalRow(
                     causal: causalRow,
                     trueLabel: forward.TrueLabel,
-                    factMicroUp: forward.FactMicroUp,
-                    factMicroDown: forward.FactMicroDown));
+                    microTruth: forward.MicroTruth));
             }
 
             var candles1m = Array.Empty<Candle1m>();
@@ -168,8 +177,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
                     TrueLabel = r.TrueLabel,
                     PredLabel = r.PredLabel,
-                    FactMicroUp = r.FactMicroUp,
-                    FactMicroDown = r.FactMicroDown,
+                    MicroTruth = r.MicroTruth,
 
                     Entry = r.Entry,
                     MaxHigh24 = r.MaxHigh24,
@@ -202,8 +210,7 @@ namespace SolSignalModel1D_Backtest.Tests.Backtest
 
                 Assert.Equal(snap.TrueLabel, rec.TrueLabel);
                 Assert.Equal(snap.PredLabel, rec.PredLabel);
-                Assert.Equal(snap.FactMicroUp, rec.FactMicroUp);
-                Assert.Equal(snap.FactMicroDown, rec.FactMicroDown);
+                Assert.Equal(snap.MicroTruth, rec.MicroTruth);
 
                 Assert.Equal(snap.Entry, rec.Entry);
                 Assert.Equal(snap.MaxHigh24, rec.MaxHigh24);

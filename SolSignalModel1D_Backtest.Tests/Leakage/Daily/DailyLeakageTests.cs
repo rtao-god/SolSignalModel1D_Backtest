@@ -4,8 +4,10 @@ using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using Xunit;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 {
@@ -69,8 +71,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 Reason = "test",
                 MinMove = 0.01,
 
-                SlProb = null,
-                SlHighDecision = null,
+                SlProb = OptionalScore.Missing(MissingReasonCodes.NotEvaluated),
+                SlHighDecision = OptionalValue<bool>.Missing(MissingReasonCodes.NotEvaluated),
                 Conf_SlLong = null,
                 Conf_SlShort = null,
 
@@ -85,14 +87,17 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 
             var exitUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, NyWindowing.NyTz).Value;
 
+            var microTruth = trueLabel == 1
+                ? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+                : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
             var forward = new ForwardOutcomes
             {
                 EntryUtc = entryUtc,
                 WindowEndUtc = exitUtc,
 
                 TrueLabel = trueLabel,
-                FactMicroUp = false,
-                FactMicroDown = false,
+                MicroTruth = microTruth,
 
                 Entry = 100.0,
                 MaxHigh24 = 110.0,

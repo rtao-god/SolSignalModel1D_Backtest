@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
@@ -19,11 +20,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Evaluation
 			if (r.Forward.TrueLabel == 2 && predClass == 1 && micro.ConsiderUp) return true;
 			if (r.Forward.TrueLabel == 0 && predClass == 1 && micro.ConsiderDown) return true;
 
-			if (r.Forward.TrueLabel == 1 && r.FactMicroUp && predClass == 2) return true;
-			if (r.Forward.TrueLabel == 1 && r.FactMicroDown && predClass == 0) return true;
+			bool hasMicroTruth = r.MicroTruth.HasValue;
+			bool factMicroUp = hasMicroTruth && r.MicroTruth.Value == MicroTruthDirection.Up;
+			bool factMicroDown = hasMicroTruth && r.MicroTruth.Value == MicroTruthDirection.Down;
 
-			if (r.Forward.TrueLabel == 1 && r.FactMicroUp && predClass == 1 && micro.ConsiderUp) return true;
-			if (r.Forward.TrueLabel == 1 && r.FactMicroDown && predClass == 1 && micro.ConsiderDown) return true;
+			if (r.Forward.TrueLabel == 1 && factMicroUp && predClass == 2) return true;
+			if (r.Forward.TrueLabel == 1 && factMicroDown && predClass == 0) return true;
+
+			if (r.Forward.TrueLabel == 1 && factMicroUp && predClass == 1 && micro.ConsiderUp) return true;
+			if (r.Forward.TrueLabel == 1 && factMicroDown && predClass == 1 && micro.ConsiderDown) return true;
 
 			return false;
 			}
@@ -37,8 +42,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Evaluation
 			bool predMicroUp = micro.ConsiderUp;
 			bool predMicroDown = micro.ConsiderDown;
 
-			bool factMicroUp = r.FactMicroUp;
-			bool factMicroDown = r.FactMicroDown;
+			bool factMicroUp = r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up;
+			bool factMicroDown = r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Down;
 
 			if (fact == 2)
 				{

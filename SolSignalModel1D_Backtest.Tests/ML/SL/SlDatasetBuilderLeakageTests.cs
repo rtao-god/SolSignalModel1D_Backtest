@@ -1,3 +1,5 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using SolSignalModel1D_Backtest.Core.Causal.Infra;
@@ -84,8 +86,7 @@ namespace SolSignalModel1D_Backtest.Tests.ML.SL
                     Forward = new ForwardOutcomes
                     {
                         TrueLabel = 2,
-                        FactMicroUp = false,
-                        FactMicroDown = false,
+                        MicroTruth = OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth),
 
                         EntryUtc = entry,
                         Entry = entryPrice,

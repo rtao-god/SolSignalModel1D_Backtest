@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Evaluation
@@ -9,22 +10,20 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Evaluation
 		{
 		public readonly struct Truth
 			{
-			public Truth ( int trueLabel, bool factMicroUp, bool factMicroDown )
+			public Truth ( int trueLabel, OptionalValue<MicroTruthDirection> microTruth )
 				{
 				TrueLabel = trueLabel;
-				FactMicroUp = factMicroUp;
-				FactMicroDown = factMicroDown;
+				MicroTruth = microTruth;
 
 				if (trueLabel < 0 || trueLabel > 2)
 					throw new ArgumentOutOfRangeException (nameof (trueLabel), trueLabel, "TrueLabel must be in [0..2].");
 
-				if (factMicroUp && factMicroDown)
-					throw new InvalidOperationException ("[MicroAwareEvaluator] Invalid truth: FactMicroUp && FactMicroDown.");
+				if (microTruth.HasValue && trueLabel != 1)
+					throw new InvalidOperationException ("[MicroAwareEvaluator] MicroTruth must be missing for non-flat label.");
 				}
 
 			public int TrueLabel { get; }
-			public bool FactMicroUp { get; }
-			public bool FactMicroDown { get; }
+			public OptionalValue<MicroTruthDirection> MicroTruth { get; }
 			}
 
 		public static bool IsCorrectMicroAware ( CausalPredictionRecord pred, Truth truth )
@@ -44,11 +43,15 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Evaluation
 			if (fact == 2 && cls == 1 && microUp) return true;
 			if (fact == 0 && cls == 1 && microDown) return true;
 
-			if (fact == 1 && truth.FactMicroUp && cls == 2) return true;
-			if (fact == 1 && truth.FactMicroDown && cls == 0) return true;
+			bool hasMicroTruth = truth.MicroTruth.HasValue;
+			bool factMicroUp = hasMicroTruth && truth.MicroTruth.Value == MicroTruthDirection.Up;
+			bool factMicroDown = hasMicroTruth && truth.MicroTruth.Value == MicroTruthDirection.Down;
 
-			if (fact == 1 && truth.FactMicroUp && cls == 1 && microUp) return true;
-			if (fact == 1 && truth.FactMicroDown && cls == 1 && microDown) return true;
+			if (fact == 1 && factMicroUp && cls == 2) return true;
+			if (fact == 1 && factMicroDown && cls == 0) return true;
+
+			if (fact == 1 && factMicroUp && cls == 1 && microUp) return true;
+			if (fact == 1 && factMicroDown && cls == 1 && microDown) return true;
 
 			return false;
 			}
@@ -79,7 +82,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Evaluation
 				return 0.0;
 				}
 
-			if (fact == 1 && truth.FactMicroUp)
+			if (fact == 1 && truth.MicroTruth.HasValue && truth.MicroTruth.Value == MicroTruthDirection.Up)
 				{
 				if (cls == 1 && predMicroUp) return 1.0;
 				if (cls == 2) return 0.8;
@@ -87,7 +90,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Evaluation
 				return 0.0;
 				}
 
-			if (fact == 1 && truth.FactMicroDown)
+			if (fact == 1 && truth.MicroTruth.HasValue && truth.MicroTruth.Value == MicroTruthDirection.Down)
 				{
 				if (cls == 1 && predMicroDown) return 1.0;
 				if (cls == 0) return 0.8;

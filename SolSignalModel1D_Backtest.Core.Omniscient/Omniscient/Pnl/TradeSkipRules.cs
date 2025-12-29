@@ -20,8 +20,10 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Pnl
 				if (rec.RegimeDown)
 					return true;
 
-				double slProb = rec.SlProb
-					?? throw new InvalidOperationException ("[skip] SlProb is null — SL layer missing before PnL.");
+				if (!rec.SlProb.HasValue)
+					throw new InvalidOperationException ("[skip] SlProb is missing — SL layer missing before PnL.");
+
+				double slProb = rec.SlProb.Value;
 
 				if (slProb > UltraSafeSlThresh)
 					return true;

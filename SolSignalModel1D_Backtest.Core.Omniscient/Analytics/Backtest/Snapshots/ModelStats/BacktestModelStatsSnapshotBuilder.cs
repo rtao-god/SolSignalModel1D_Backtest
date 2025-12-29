@@ -1,4 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
@@ -36,22 +37,27 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
             if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
             if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-            var snapshot = new BacktestModelStatsSnapshot();
+            if (records.Count == 0)
+                throw new InvalidOperationException("[model-stats] records=0: невозможно построить модельные метрики без данных.");
 
-            if (records.Count > 0)
+            var fromDateUtc = records.Min(r => r.EntryDayKeyUtc.Value);
+            var toDateUtc = records.Max(r => r.EntryDayKeyUtc.Value);
+
+            var daily = ComputeDailyConfusion(records);
+            var trend = ComputeTrendDirectionConfusion(records);
+            var sl = ComputeSlStats(records, sol1m, dailyTpPct, dailySlPct, nyTz);
+
+            return new BacktestModelStatsSnapshot
             {
-                snapshot.FromDateUtc = records.Min(r => r.EntryDayKeyUtc.Value);
-                snapshot.ToDateUtc = records.Max(r => r.EntryDayKeyUtc.Value);
-            }
-
-            ComputeDailyConfusion(records, snapshot.Daily);
-            ComputeTrendDirectionConfusion(records, snapshot.Trend);
-            ComputeSlStats(records, sol1m, dailyTpPct, dailySlPct, nyTz, snapshot.Sl);
-
-            return snapshot;
+                FromDateUtc = fromDateUtc,
+                ToDateUtc = toDateUtc,
+                Daily = daily,
+                Trend = trend,
+                Sl = sl
+            };
         }
 
-        private static void ComputeDailyConfusion(IReadOnlyList<BacktestRecord> records, DailyConfusionStats daily)
+        private static DailyConfusionStats ComputeDailyConfusion(IReadOnlyList<BacktestRecord> records)
         {
             int[,] m = new int[3, 3];
             int[] rowSum = new int[3];
@@ -67,17 +73,27 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 total++;
             }
 
+            if (total == 0)
+            {
+                throw new InvalidOperationException(
+                    "[model-stats] daily confusion has no valid labels/predictions.");
+            }
+
+            var rows = new List<DailyClassStatsRow>(3);
             int diag = 0;
 
             for (int y = 0; y < 3; y++)
             {
                 int correct = m[y, y];
                 int totalRow = rowSum[y];
-                double acc = totalRow > 0 ? (double)correct / totalRow * 100.0 : 0.0;
+                if (totalRow == 0)
+                    throw new InvalidOperationException($"[model-stats] daily confusion row empty for label={y}.");
+
+                double acc = (double)correct / totalRow * 100.0;
 
                 diag += correct;
 
-                daily.Rows.Add(new DailyClassStatsRow
+                rows.Add(new DailyClassStatsRow
                 {
                     TrueLabel = y,
                     LabelName = LabelName(y),
@@ -90,9 +106,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 });
             }
 
-            daily.OverallCorrect = diag;
-            daily.OverallTotal = total;
-            daily.OverallAccuracyPct = total > 0 ? (double)diag / total * 100.0 : 0.0;
+            return new DailyConfusionStats
+            {
+                Rows = rows,
+                OverallCorrect = diag,
+                OverallTotal = total,
+                OverallAccuracyPct = (double)diag / total * 100.0
+            };
         }
 
         private static string LabelName(int x) => x switch
@@ -103,7 +123,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
             _ => x.ToString()
         };
 
-        private static void ComputeTrendDirectionConfusion(IReadOnlyList<BacktestRecord> records, TrendDirectionStats trend)
+        private static TrendDirectionStats ComputeTrendDirectionConfusion(IReadOnlyList<BacktestRecord> records)
         {
             int[,] m = new int[2, 2];
             int[] rowSum = new int[2];
@@ -138,19 +158,29 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 total++;
             }
 
+            if (total == 0)
+            {
+                throw new InvalidOperationException(
+                    "[model-stats] trend confusion has no valid labels/predictions.");
+            }
+
             string[] names = { "DOWN days", "UP days" };
 
+            var rows = new List<TrendDirectionStatsRow>(2);
             int diag = 0;
 
             for (int y = 0; y < 2; y++)
             {
                 int correct = m[y, y];
                 int totalRow = rowSum[y];
-                double acc = totalRow > 0 ? (double)correct / totalRow * 100.0 : 0.0;
+                if (totalRow == 0)
+                    throw new InvalidOperationException($"[model-stats] trend confusion row empty for label={y}.");
+
+                double acc = (double)correct / totalRow * 100.0;
 
                 diag += correct;
 
-                trend.Rows.Add(new TrendDirectionStatsRow
+                rows.Add(new TrendDirectionStatsRow
                 {
                     Name = names[y],
                     TrueIndex = y,
@@ -162,21 +192,22 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 });
             }
 
-            trend.OverallCorrect = diag;
-            trend.OverallTotal = total;
-            trend.OverallAccuracyPct = total > 0 ? (double)diag / total * 100.0 : 0.0;
+            return new TrendDirectionStats
+            {
+                Rows = rows,
+                OverallCorrect = diag,
+                OverallTotal = total,
+                OverallAccuracyPct = (double)diag / total * 100.0
+            };
         }
 
-        private static void ComputeSlStats(
+        private static OptionalValue<SlStats> ComputeSlStats(
             IReadOnlyList<BacktestRecord> records,
             IReadOnlyList<Candle1m> sol1m,
             double dailyTpPct,
             double dailySlPct,
-            TimeZoneInfo nyTz,
-            SlStats slStats)
+            TimeZoneInfo nyTz)
         {
-            if (slStats == null) throw new ArgumentNullException(nameof(slStats));
-
             var minutes = sol1m.OrderBy(m => m.OpenTimeUtc).ToList();
 
             int tp_low = 0, tp_high = 0, sl_low = 0, sl_high = 0;
@@ -201,15 +232,27 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
 
                 bool isSlDay = outcome == DayOutcome.SlFirst;
 
-                if (r.SlHighDecision is not bool predHigh)
+                if (r.SlProb.HasValue != r.SlHighDecision.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"[model-stats] SL availability mismatch at {EntryUtcOf(r).Value:O}. " +
+                        $"slProb.HasValue={r.SlProb.HasValue}, slHigh.HasValue={r.SlHighDecision.HasValue}.");
+                }
+
+                if (!r.SlHighDecision.HasValue)
                     continue;
 
-                double? probOpt = r.SlProb;
-                bool hasScore = probOpt.HasValue && probOpt.Value > 0.0;
+                bool predHigh = r.SlHighDecision.Value;
 
-                if (hasScore)
+                if (!r.SlProb.HasValue)
                 {
-                    double prob = probOpt!.Value;
+                    throw new InvalidOperationException(
+                        $"[model-stats] SL decision without score at {EntryUtcOf(r).Value:O}.");
+                }
+
+                if (r.SlProb.HasValue)
+                {
+                    double prob = r.SlProb.Value;
                     scoredDays++;
 
                     prPoints.Add((prob, isSlDay ? 1 : 0));
@@ -227,37 +270,57 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 }
             }
 
-            var confusion = slStats.Confusion;
-            confusion.TpLow = tp_low;
-            confusion.TpHigh = tp_high;
-            confusion.SlLow = sl_low;
-            confusion.SlHigh = sl_high;
-            confusion.SlSaved = slSaved;
-            confusion.TotalSignalDays = totalSignalDays;
-            confusion.ScoredDays = scoredDays;
-            confusion.TotalOutcomeDays = thrDays.Count;
+            if (totalSignalDays == 0)
+                return OptionalValue<SlStats>.Missing(MissingReasonCodes.SlNoSignalDays);
+
+            if (scoredDays == 0)
+                return OptionalValue<SlStats>.Missing(MissingReasonCodes.SlNoScoredDays);
+
+            if (thrDays.Count == 0)
+                return OptionalValue<SlStats>.Missing(MissingReasonCodes.SlNoOutcomeDays);
 
             int totalSl = thrDays.Count(d => d.IsSlDay);
             int totalTp = thrDays.Count - totalSl;
 
-            confusion.TotalSlDays = totalSl;
-            confusion.TotalTpDays = totalTp;
+            if (totalSl == 0)
+                return OptionalValue<SlStats>.Missing(MissingReasonCodes.SlNoSlDays);
+            if (totalTp == 0)
+                return OptionalValue<SlStats>.Missing(MissingReasonCodes.SlNoTpDays);
 
             int tp = sl_high;
             int fn = sl_low;
             int fp = tp_high;
             int tn = tp_low;
 
-            double tpr = tp + fn > 0 ? (double)tp / (tp + fn) : 0.0;
-            double fpr = fp + tn > 0 ? (double)fp / (fp + tn) : 0.0;
-            double precision = tp + fp > 0 ? (double)tp / (tp + fp) : 0.0;
+            double tpr = (double)tp / (tp + fn);
+            double fpr = (double)fp / (fp + tn);
+            double precision = (double)tp / (tp + fp);
             double recall = tpr;
-            double f1 = precision + recall > 0 ? 2.0 * precision * recall / (precision + recall) : 0.0;
+            double f1 = 2.0 * precision * recall / (precision + recall);
 
-            double coverage = totalSignalDays > 0 ? (double)scoredDays / totalSignalDays : 0.0;
-            double prAuc = prPoints.Count >= 2 ? ComputePrAuc(prPoints) : 0.0;
+            double coverage = (double)scoredDays / totalSignalDays;
+            if (prPoints.Count < 2)
+                return OptionalValue<SlStats>.Missing(MissingReasonCodes.SlPrAucNotEnoughPoints);
 
-            slStats.Metrics = new SlMetricsStats
+            var prAuc = ComputePrAuc(prPoints);
+            if (!prAuc.HasValue)
+                return OptionalValue<SlStats>.Missing(prAuc.MissingReason ?? MissingReasonCodes.SlPrAucNotEnoughPoints);
+
+            var confusion = new SlConfusionStats
+            {
+                TpLow = tp_low,
+                TpHigh = tp_high,
+                SlLow = sl_low,
+                SlHigh = sl_high,
+                SlSaved = slSaved,
+                TotalSignalDays = totalSignalDays,
+                ScoredDays = scoredDays,
+                TotalOutcomeDays = thrDays.Count,
+                TotalSlDays = totalSl,
+                TotalTpDays = totalTp
+            };
+
+            var metrics = new SlMetricsStats
             {
                 Coverage = coverage,
                 Tpr = tpr,
@@ -265,14 +328,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 Precision = precision,
                 Recall = recall,
                 F1 = f1,
-                PrAuc = prAuc
+                PrAuc = prAuc.Value
             };
 
-            slStats.Thresholds.Clear();
-            if (thrDays.Count == 0)
-                return;
-
             double[] thresholds = { 0.30, 0.40, 0.50, 0.60 };
+            var rows = new List<SlThresholdStatsRow>(thresholds.Length);
 
             foreach (double thr in thresholds)
             {
@@ -280,13 +340,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 int highTp = thrDays.Count(d => !d.IsSlDay && d.Prob >= thr);
                 int highTotal = highSl + highTp;
 
-                double tprLocal = totalSl > 0 ? (double)highSl / totalSl * 100.0 : 0.0;
-                double fprLocal = totalTp > 0 ? (double)highTp / totalTp * 100.0 : 0.0;
-                double highFrac = thrDays.Count > 0 ? (double)highTotal / thrDays.Count * 100.0 : 0.0;
+                double tprLocal = (double)highSl / totalSl * 100.0;
+                double fprLocal = (double)highTp / totalTp * 100.0;
+                double highFrac = (double)highTotal / thrDays.Count * 100.0;
 
                 bool isGood = tprLocal >= 60.0 && fprLocal <= 40.0;
 
-                slStats.Thresholds.Add(new SlThresholdStatsRow
+                rows.Add(new SlThresholdStatsRow
                 {
                     Threshold = thr,
                     TprPct = tprLocal,
@@ -301,6 +361,13 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                     TotalTpDays = totalTp
                 });
             }
+
+            return OptionalValue<SlStats>.Present(new SlStats
+            {
+                Confusion = confusion,
+                Metrics = metrics,
+                Thresholds = rows
+            });
         }
 
         private static DayOutcome GetDayOutcomeFromMinutes(
@@ -400,16 +467,18 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
             return predUp || predDown;
         }
 
-        private static double ComputePrAuc(List<(double Score, int Label)> points)
+        private static OptionalValue<double> ComputePrAuc(List<(double Score, int Label)> points)
         {
             if (points == null || points.Count == 0)
-                return 0.0;
+                return OptionalValue<double>.Missing(MissingReasonCodes.SlPrAucNotEnoughPoints);
 
             int totalPos = points.Count(p => p.Label == 1);
             if (totalPos == 0)
-                return 0.0;
+                return OptionalValue<double>.Missing(MissingReasonCodes.SlPrAucNoPos);
 
             int totalNeg = points.Count - totalPos;
+            if (totalNeg == 0)
+                return OptionalValue<double>.Missing(MissingReasonCodes.SlPrAucNoNeg);
 
             var sorted = points.OrderByDescending(p => p.Score).ToList();
 
@@ -436,7 +505,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
                 prevPrecision = precision;
             }
 
-            return auc;
+            return OptionalValue<double>.Present(auc);
         }
     }
 }

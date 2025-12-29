@@ -74,7 +74,8 @@ namespace SolSignalModel1D_Backtest
                     records,
                     _trainUntilExitDayKeyUtc,
                     NyTz,
-                    boundarySampleCount: 2
+                    boundarySampleCount: 2,
+                    allRows: allRows
                 );
 
                 DailyPnlProbe.RunSimpleProbe(records, _trainUntilExitDayKeyUtc, NyTz);
@@ -209,8 +210,8 @@ namespace SolSignalModel1D_Backtest
             var trainAcc = Acc(trainRecords);
             var oosAcc = Acc(oosRecords);
 
-            Console.WriteLine($"[daily-acc] trainAcc(dataset-based) = {trainAcc:0.000}");
-            Console.WriteLine($"[daily-acc] oosAcc(date-based)      = {oosAcc:0.000}");
+            Console.WriteLine($"[daily-acc] trainAcc(in-sample, dataset-based) = {trainAcc:0.000}");
+            Console.WriteLine($"[daily-acc] oosAcc(out-of-sample, date-based)  = {oosAcc:0.000}");
         }
 
         private static void SplitByTrainUntilUtc(

@@ -103,7 +103,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
             if (bundle.MicroFlatModel != null)
             {
                 var microRows = evalRows
-                    .Where(r => r.FactMicroUp || r.FactMicroDown)
+                    .Where(r => r.MicroTruth.HasValue)
                     .ToList();
 
                 if (microRows.Count >= 10)
@@ -111,7 +111,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Shared
                     var microData = ml.Data.LoadFromEnumerable(
                         microRows.Select(r => new MlSampleBinary
                         {
-                            Label = r.FactMicroUp,
+                            Label = r.MicroTruth.HasValue && r.MicroTruth.Value == MicroTruthDirection.Up,
                             Features = MlTrainingUtils.ToFloatFixed(r.Causal.FeaturesVector)
                         })
                     );

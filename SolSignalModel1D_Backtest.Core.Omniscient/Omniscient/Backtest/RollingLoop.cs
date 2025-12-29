@@ -55,8 +55,8 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Backtest
 			PolicyBreakdownPrinter.PrintSummary (withSlBase, "Policy summary (WITH SL)");
 			PolicyBreakdownPrinter.PrintMonthlySkew (withSlBase, 12);
 
-			PolicyRatiosPrinter.Print (withSlBase, "Policy ratios (WITH SL)");
-			PolicyRatiosPrinter.Print (noSlBase, "Policy ratios (NO SL)");
+			PolicyRatiosPrinter.Print (withSlBase, "runtime_with_sl", "Policy ratios (WITH SL)");
+			PolicyRatiosPrinter.Print (noSlBase, "runtime_no_sl", "Policy ratios (NO SL)");
 
 			var withSlAnti = SimulateAllPolicies (
 				policies,

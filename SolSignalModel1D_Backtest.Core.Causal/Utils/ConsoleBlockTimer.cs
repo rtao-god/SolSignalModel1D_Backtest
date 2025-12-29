@@ -55,7 +55,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Utils
 				// Пытаемся сохранить исходный заголовок консоли.
 				try
 					{
-					originalTitle = Console.Title;
+					if (OperatingSystem.IsWindows ())
+						originalTitle = Console.Title;
 					}
 				catch
 					{
@@ -87,7 +88,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Utils
 					}
 
 				// Пытаемся вернуть исходный заголовок.
-				if (originalTitle != null)
+				if (originalTitle != null && OperatingSystem.IsWindows ())
 					{
 					try
 						{
@@ -131,7 +132,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Utils
 
 				try
 					{
-					Console.Title = $"{baseTitle} {frame}";
+					if (OperatingSystem.IsWindows ())
+						Console.Title = $"{baseTitle} {frame}";
 					}
 				catch
 					{

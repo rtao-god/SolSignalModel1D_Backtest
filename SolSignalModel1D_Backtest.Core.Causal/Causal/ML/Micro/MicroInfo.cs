@@ -23,7 +23,7 @@ namespace SolSignalModel1D_Backtest.Core.Causal.ML.Micro
 
 		/// <summary>
 		/// Флаг "прогноз совпал с фактом".
-		/// Заполняется только если есть разметка FactMicroUp/FactMicroDown.
+		/// Заполняется только если есть разметка MicroTruth.
 		/// </summary>
 		public bool Correct { get; set; }
 		}

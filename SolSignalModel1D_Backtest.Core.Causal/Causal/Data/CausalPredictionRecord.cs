@@ -1,4 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Data
 {
@@ -79,8 +80,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Data
         public string Reason { get; init; } = string.Empty;
         public double MinMove { get; init; }
 
-        public double? SlProb { get; set; }
-        public bool? SlHighDecision { get; set; }
+        public OptionalScore SlProb { get; set; }
+        public OptionalValue<bool> SlHighDecision { get; set; }
         public double? Conf_SlLong { get; set; }
         public double? Conf_SlShort { get; set; }
 
@@ -94,16 +95,12 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Causal.Data
 
         public double GetSlProbOrThrow()
         {
-            if (SlProb is null)
-                throw new InvalidOperationException($"[causal] SL not evaluated for day={EntryDayKeyUtc}, but SlProb requested.");
-            return SlProb.Value;
+            return SlProb.GetValueOrThrow($"[causal] SL not evaluated for day={EntryDayKeyUtc}");
         }
 
         public bool GetSlHighDecisionOrThrow()
         {
-            if (SlHighDecision is null)
-                throw new InvalidOperationException($"[causal] SL not evaluated for day={EntryDayKeyUtc}, but SlHighDecision requested.");
-            return SlHighDecision.Value;
+            return SlHighDecision.GetValueOrThrow($"[causal] SL not evaluated for day={EntryDayKeyUtc}");
         }
 
         public (double TpPct, double SlPct) GetDelayedTpSlOrThrow()

@@ -19,24 +19,20 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Causal.Analytics.Backtest.Ad
                     $"[proj] Invalid micro prediction flags: both PredMicroUp and PredMicroDown are true for {entryUtcInstant:O}.");
             }
 
-            if (r.FactMicroUp && r.FactMicroDown)
+            if (r.MicroTruth.HasValue && r.TrueLabel != 1)
             {
                 throw new InvalidOperationException(
-                    $"[proj] Invalid micro fact flags: both FactMicroUp and FactMicroDown are true for {entryUtcInstant:O}.");
+                    $"[proj] MicroTruth present for non-flat TrueLabel={r.TrueLabel} at {entryUtcInstant:O}.");
             }
 
-            if (r.SlProb is not double slProb)
-            {
-                throw new InvalidOperationException(
-                    $"[proj] SlProb is null for {entryUtcInstant:O}. " +
-                    "Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
-            }
+            var slProb = r.SlProb;
+            var slHighDecision = r.SlHighDecision;
 
-            if (r.SlHighDecision is not bool slHighDecision)
+            if (slProb.HasValue != slHighDecision.HasValue)
             {
                 throw new InvalidOperationException(
-                    $"[proj] SlHighDecision is null for {entryUtcInstant:O}. " +
-                    "Это означает, что SL-слой не был посчитан до стадии агрегационной аналитики (pipeline bug).");
+                    $"[proj] SL availability mismatch for {entryUtcInstant:O}. " +
+                    $"slProb.HasValue={slProb.HasValue}, slHigh.HasValue={slHighDecision.HasValue}.");
             }
 
             var entryDayKeyUtc = r.TradingEntryUtc.EntryDayKeyUtc;
@@ -91,8 +87,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Causal.Analytics.Backtest.Ad
 
                 PredMicroUp = r.PredMicroUp,
                 PredMicroDown = r.PredMicroDown,
-                FactMicroUp = r.FactMicroUp,
-                FactMicroDown = r.FactMicroDown
+                MicroTruth = r.MicroTruth
             };
         }
 

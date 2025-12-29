@@ -1,4 +1,4 @@
-using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML.PFI;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Pfi
 	{

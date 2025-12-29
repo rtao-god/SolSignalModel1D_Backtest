@@ -92,8 +92,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				var b = dictB[dateUtc];
 
 				Assert.Equal (a.TrueLabel, b.TrueLabel);
-				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
-				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
+				Assert.Equal (a.MicroTruth, b.MicroTruth);
 
 				var fa = a.Causal.FeaturesVector.Span;
 				var fb = b.Causal.FeaturesVector.Span;

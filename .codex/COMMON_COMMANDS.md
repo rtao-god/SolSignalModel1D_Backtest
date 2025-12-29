@@ -1,7 +1,10 @@
-# Commands (for Codex and humans)
+# Commands (Просто для облегчения)
+
+## Советы
+- убирай из rg ndjson и json файлы, если они не нужны, чтобы они не отвлекали.
 
 ## Build / test
-- `dotnet build`
+- `dotnet build .\SolSignalModel1D_Backtest.sln`
 - `dotnet test`
 
 ## Targeted tests (example patterns)

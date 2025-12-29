@@ -1,4 +1,5 @@
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts
 {
@@ -45,8 +46,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts
         /// <summary>
         /// SL-скоры/решения, чтобы понимать, "использовался ли" SL слой.
         /// </summary>
-        public required double SlProb { get; init; }
-        public required bool SlHighDecision { get; init; }
+        public required OptionalScore SlProb { get; init; }
+        public required OptionalValue<bool> SlHighDecision { get; init; }
 
         /// <summary>
         /// Микро-направления (используются для MicroStats и для direction-логики).
@@ -56,10 +57,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts
         public required bool PredMicroDown { get; init; }
 
         /// <summary>
-        /// Ground-truth микро-направления (если применимо).
-        /// Инвариант: одновременно true быть не должно.
+        /// Ground-truth микро-направление (только для flat-дней; иначе Missing).
         /// </summary>
-        public required bool FactMicroUp { get; init; }
-        public required bool FactMicroDown { get; init; }
+        public required OptionalValue<MicroTruthDirection> MicroTruth { get; init; }
     }
 }

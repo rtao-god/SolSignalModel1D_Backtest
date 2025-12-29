@@ -30,6 +30,26 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Gaps
 				interval: "1m",
 				expectedStartUtc: new DateTime (2023, 3, 24, 12, 40, 0, DateTimeKind.Utc),
 				actualStartUtc:   new DateTime (2023, 3, 24, 14, 0, 0, DateTimeKind.Utc)),
+
+			// === BTCUSDT (наблюдали локально; требуется подтверждение gap-scan) ===
+
+			new KnownCandleGap (
+				symbol: "BTCUSDT",
+				interval: "1m",
+				expectedStartUtc: new DateTime (2021, 8, 13, 2, 0, 0, DateTimeKind.Utc),
+				actualStartUtc:   new DateTime (2021, 8, 13, 6, 30, 0, DateTimeKind.Utc)),
+
+			new KnownCandleGap (
+				symbol: "BTCUSDT",
+				interval: "1m",
+				expectedStartUtc: new DateTime (2021, 9, 29, 7, 0, 0, DateTimeKind.Utc),
+				actualStartUtc:   new DateTime (2021, 9, 29, 9, 0, 0, DateTimeKind.Utc)),
+
+			new KnownCandleGap (
+				symbol: "BTCUSDT",
+				interval: "1m",
+				expectedStartUtc: new DateTime (2023, 3, 24, 12, 40, 0, DateTimeKind.Utc),
+				actualStartUtc:   new DateTime (2023, 3, 24, 14, 0, 0, DateTimeKind.Utc)),
 			};
 		}
 	}

@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.Labeling;
 using SolSignalModel1D_Backtest.Core.Causal.Analytics.MinMove;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
@@ -30,6 +31,42 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
         private const int RsiSlopeSteps = 3;
 
         private const string Sol1mSymbol = "SOLUSDT";
+
+        private static readonly string[] Candle6hFeatureNames = new[]
+        {
+            nameof(CausalDataRowDto.SolRet30),
+            nameof(CausalDataRowDto.BtcRet30),
+            nameof(CausalDataRowDto.SolBtcRet30),
+
+            nameof(CausalDataRowDto.SolRet1),
+            nameof(CausalDataRowDto.SolRet3),
+            nameof(CausalDataRowDto.BtcRet1),
+            nameof(CausalDataRowDto.BtcRet3),
+
+            nameof(CausalDataRowDto.GoldChg30),
+            nameof(CausalDataRowDto.BtcVs200),
+
+            nameof(CausalDataRowDto.SolRsiCenteredScaled),
+            nameof(CausalDataRowDto.RsiSlope3Scaled),
+
+            nameof(CausalDataRowDto.GapBtcSol1),
+            nameof(CausalDataRowDto.GapBtcSol3),
+
+            "RegimeDownFlag",
+            nameof(CausalDataRowDto.AtrPct),
+            nameof(CausalDataRowDto.DynVol),
+            "HardRegimeIs2Flag",
+
+            nameof(CausalDataRowDto.SolAboveEma50),
+            nameof(CausalDataRowDto.SolEma50vs200),
+            nameof(CausalDataRowDto.BtcEma50vs200),
+        };
+
+        private static readonly string[] IndicatorFeatureNames = new[]
+        {
+            nameof(CausalDataRowDto.FngNorm),
+            nameof(CausalDataRowDto.DxyChg30),
+        };
 
         public static DailyRowsBuildResult BuildDailyRows(
             List<Candle6h> solWinTrain,
@@ -67,6 +104,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
             SeriesGuards.EnsureStrictlyAscendingUtc(paxgWinTrain, c => c.OpenTimeUtc, "RowBuilder.paxgWinTrain");
             SeriesGuards.EnsureStrictlyAscendingUtc(solAll1m, c => c.OpenTimeUtc, "RowBuilder.solAll1m");
 
+            SeriesGuards.EnsureUniformStepUtc(solAll6h, c => c.OpenTimeUtc, TimeSpan.FromHours(6), "RowBuilder.solAll6h");
+
             var sol1mGaps = CandleGapScanner.Scan1mGaps(solAll1m, symbol: Sol1mSymbol, seriesName: "RowBuilder.solAll1m");
             var sol1mGapJournal = new CandleGapJournal(symbol: Sol1mSymbol, interval: "1m");
 
@@ -100,6 +139,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
             var labeledRows = new List<LabeledCausalRowDto>(solWinTrain.Count);
             int ambiguousHitCount = 0;
             DateTime? firstAmbiguousEntryUtc = null;
+
+            var leakProbe = new RowFeatureLeakageProbe(maxRows: 20);
 
             for (int solIdx = 0; solIdx < solWinTrain.Count; solIdx++)
             {
@@ -313,6 +354,13 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
 
                 double minMove = mm.MinMove;
 
+                var leakRow = leakProbe.BeginRow(entryUtc);
+                for (int i = 0; i < Candle6hFeatureNames.Length; i++)
+                    leakRow.MarkCandle6h(Candle6hFeatureNames[i], featureOpenUtc, featureCloseUtc);
+
+                for (int i = 0; i < IndicatorFeatureNames.Length; i++)
+                    leakRow.MarkIndicator(IndicatorFeatureNames[i], indicatorDayUtc);
+
                 var causal = new CausalDataRowDto(
                     entryUtc: nyEntryUtc,
                     regimeDown: isDownRegime,
@@ -379,13 +427,16 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
                     continue;
                 }
 
-                bool factMicroUp = false;
-                bool factMicroDown = false;
+                var microTruth = OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
 
                 if (trueLabel == 1)
                 {
-                    if (pathUp > Math.Abs(pathDown) + 0.001) factMicroUp = true;
-                    else if (Math.Abs(pathDown) > pathUp + 0.001) factMicroDown = true;
+                    if (pathUp > Math.Abs(pathDown) + 0.001)
+                        microTruth = OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up);
+                    else if (Math.Abs(pathDown) > pathUp + 0.001)
+                        microTruth = OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down);
+                    else
+                        microTruth = OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral);
                 }
 
                 causalRows.Add(causal);
@@ -393,8 +444,9 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
                 labeledRows.Add(new LabeledCausalRowDto(
                     causal: causal,
                     trueLabel: trueLabel,
-                    factMicroUp: factMicroUp,
-                    factMicroDown: factMicroDown));
+                    microTruth: microTruth));
+
+                leakProbe.Commit(leakRow);
 
                 EnsureMinMoveHistoryMonotonic(minMoveHistory, causalDayUtc, entryUtc);
                 minMoveHistory.Add(new MinMoveHistoryRow(causalDayUtc, realizedAmp));
@@ -406,6 +458,8 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
                 Console.WriteLine(
                     $"[RowBuilder] исключены дни с двойным пробоем в одной минуте: count={ambiguousHitCount}, firstEntryUtc={first}.");
             }
+
+            leakProbe.FlushAndThrowIfLeak();
 
             return new DailyRowsBuildResult
             {
@@ -436,6 +490,10 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
         {
             if (candleCloseUtc > entryUtc)
             {
+                Console.WriteLine(
+                    $"[leak-probe:6h] Обнаружена незакрытая свеча: feature='{featureName}', " +
+                    $"entryUtc={entryUtc:O}, candleOpenUtc={candleOpenUtc:O}, candleCloseUtc={candleCloseUtc:O}.");
+
                 throw new InvalidOperationException(
                     $"[RowBuilder] leakage guard: feature '{featureName}' uses unclosed candle. " +
                     $"entryUtc={entryUtc:O}, candleOpenUtc={candleOpenUtc:O}, candleCloseUtc={candleCloseUtc:O}.");
@@ -466,6 +524,247 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder
                     $"[RowBuilder] MinMoveHistory must be strictly increasing by day. " +
                     $"lastDayUtc={lastDayUtc:O}, currentDayUtc={currentDayUtc:O}, entryUtc={entryUtc:O}.");
             }
+        }
+
+        private sealed class RowFeatureLeakageProbe
+        {
+            private readonly List<RowLeakRecord> _leaks = new();
+            private readonly int _maxRows;
+
+            public RowFeatureLeakageProbe(int maxRows)
+            {
+                if (maxRows <= 0)
+                    throw new ArgumentOutOfRangeException(nameof(maxRows), maxRows, "maxRows must be > 0.");
+
+                _maxRows = maxRows;
+            }
+
+            public RowLeakProbe BeginRow(DateTime entryUtc) => new RowLeakProbe(entryUtc);
+
+            public void Commit(RowLeakProbe row)
+            {
+                if (row == null) throw new ArgumentNullException(nameof(row));
+
+                if (!row.TryGetMaxUsed(out var maxUsedUtc, out var maxFeatures))
+                    return;
+
+                var delta = maxUsedUtc - row.EntryUtc;
+                if (delta <= TimeSpan.Zero)
+                    return;
+
+                _leaks.Add(new RowLeakRecord
+                {
+                    EntryUtc = row.EntryUtc,
+                    MaxUsedUtc = maxUsedUtc,
+                    MaxFutureLeak = delta,
+                    LatestCandle6hUtcUsed = row.LatestCandle6hUtcUsed,
+                    LatestIndicatorDayUtcUsed = row.LatestIndicatorDayUtcUsed,
+                    LatestCandle1mUtcUsed = row.LatestCandle1mUtcUsed,
+                    MaxFeatures = maxFeatures.ToArray()
+                });
+            }
+
+            public void FlushAndThrowIfLeak()
+            {
+                if (_leaks.Count == 0)
+                    return;
+
+                var ordered = _leaks
+                    .OrderByDescending(r => r.MaxFutureLeak)
+                    .ThenBy(r => r.EntryUtc)
+                    .ToList();
+
+                var top = ordered.Take(_maxRows).ToList();
+
+                Console.WriteLine(
+                    $"[leak-probe:features] ПОДОЗРЕНИЕ: подглядывание в будущее в daily-фичах. строк={_leaks.Count}, топ={top.Count}.");
+
+                for (int i = 0; i < top.Count; i++)
+                {
+                    var r = top[i];
+                    var entryDayKey = r.EntryUtc.ToCausalDateUtc();
+
+                    Console.WriteLine(
+                        $"[leak-probe:features] #{i + 1} входUtc={r.EntryUtc:O}, деньКлючUtc={entryDayKey:yyyy-MM-dd}, " +
+                        $"максИспользUtc={r.MaxUsedUtc:O}, максУтечкаСек={r.MaxFutureLeak.TotalSeconds:0}");
+
+                    var maxFeatures = r.MaxFeatures.Length == 0
+                        ? "(нет фич)"
+                        : string.Join(", ", r.MaxFeatures.Select(FormatFeature));
+
+                    Console.WriteLine($"[leak-probe:features]    максФичи={maxFeatures}");
+
+                    string latest6h = r.LatestCandle6hUtcUsed.HasValue
+                        ? r.LatestCandle6hUtcUsed.Value.ToString("O")
+                        : "<не используется>";
+
+                    string latestIndicators = r.LatestIndicatorDayUtcUsed.HasValue
+                        ? r.LatestIndicatorDayUtcUsed.Value.ToString("yyyy-MM-dd")
+                        : "<не используется>";
+
+                    string latest1m = r.LatestCandle1mUtcUsed.HasValue
+                        ? r.LatestCandle1mUtcUsed.Value.ToString("O")
+                        : "<не используется>";
+
+                    Console.WriteLine(
+                        $"[leak-probe:features]    последние: свеча6h={latest6h}, индикаторы={latestIndicators}, свеча1m={latest1m}");
+                }
+
+                var topLeak = top[0];
+                throw new InvalidOperationException(
+                    $"[RowBuilder] future feature usage detected. " +
+                    $"count={_leaks.Count}, topEntryUtc={topLeak.EntryUtc:O}, maxUsedUtc={topLeak.MaxUsedUtc:O}, " +
+                    $"maxLeakSec={topLeak.MaxFutureLeak.TotalSeconds:0}.");
+            }
+
+            private static string FormatFeature(FeatureTimeInfo info)
+            {
+                if (info.SourceKind == FeatureSourceKind.Candle6h)
+                {
+                    string open = info.CandleOpenUtc.HasValue ? info.CandleOpenUtc.Value.ToString("O") : "n/a";
+                    string close = info.CandleCloseUtc.HasValue ? info.CandleCloseUtc.Value.ToString("O") : "n/a";
+                    return $"{info.FeatureName}@{info.UsedUtc:O} (6h: {open}..{close})";
+                }
+
+                if (info.SourceKind == FeatureSourceKind.Indicator)
+                    return $"{info.FeatureName}@{info.UsedUtc:yyyy-MM-dd} (индикатор)";
+
+                if (info.SourceKind == FeatureSourceKind.Candle1m)
+                    return $"{info.FeatureName}@{info.UsedUtc:O} (1m)";
+
+                return $"{info.FeatureName}@{info.UsedUtc:O}";
+            }
+        }
+
+        private sealed class RowLeakProbe
+        {
+            private DateTime? _maxUsedUtc;
+            private readonly List<FeatureTimeInfo> _maxFeatures = new();
+
+            public DateTime EntryUtc { get; }
+
+            public DateTime? LatestCandle6hUtcUsed { get; private set; }
+            public DateTime? LatestIndicatorDayUtcUsed { get; private set; }
+            public DateTime? LatestCandle1mUtcUsed { get; private set; }
+
+            public RowLeakProbe(DateTime entryUtc)
+            {
+                if (entryUtc == default)
+                    throw new ArgumentException("entryUtc must be initialized.", nameof(entryUtc));
+                if (entryUtc.Kind != DateTimeKind.Utc)
+                    throw new ArgumentException("entryUtc must be UTC.", nameof(entryUtc));
+
+                EntryUtc = entryUtc;
+            }
+
+            public void MarkCandle6h(string featureName, DateTime candleOpenUtc, DateTime candleCloseUtc)
+            {
+                if (candleOpenUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[RowBuilder] candleOpenUtc must be UTC for feature '{featureName}'.");
+                if (candleCloseUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[RowBuilder] candleCloseUtc must be UTC for feature '{featureName}'.");
+
+                MarkFeature(featureName, candleCloseUtc, FeatureSourceKind.Candle6h, candleOpenUtc, candleCloseUtc);
+
+                if (!LatestCandle6hUtcUsed.HasValue || candleCloseUtc > LatestCandle6hUtcUsed.Value)
+                    LatestCandle6hUtcUsed = candleCloseUtc;
+            }
+
+            public void MarkIndicator(string featureName, DateTime indicatorDayUtc)
+            {
+                if (indicatorDayUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[RowBuilder] indicatorDayUtc must be UTC for feature '{featureName}'.");
+
+                MarkFeature(featureName, indicatorDayUtc, FeatureSourceKind.Indicator, null, null);
+
+                if (!LatestIndicatorDayUtcUsed.HasValue || indicatorDayUtc > LatestIndicatorDayUtcUsed.Value)
+                    LatestIndicatorDayUtcUsed = indicatorDayUtc;
+            }
+
+            public void MarkCandle1m(string featureName, DateTime usedUtc)
+            {
+                if (usedUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[RowBuilder] usedUtc must be UTC for feature '{featureName}'.");
+
+                MarkFeature(featureName, usedUtc, FeatureSourceKind.Candle1m, null, null);
+
+                if (!LatestCandle1mUtcUsed.HasValue || usedUtc > LatestCandle1mUtcUsed.Value)
+                    LatestCandle1mUtcUsed = usedUtc;
+            }
+
+            public bool TryGetMaxUsed(out DateTime maxUsedUtc, out IReadOnlyList<FeatureTimeInfo> maxFeatures)
+            {
+                if (!_maxUsedUtc.HasValue)
+                {
+                    maxUsedUtc = default;
+                    maxFeatures = Array.Empty<FeatureTimeInfo>();
+                    return false;
+                }
+
+                maxUsedUtc = _maxUsedUtc.Value;
+                maxFeatures = _maxFeatures;
+                return true;
+            }
+
+            private void MarkFeature(
+                string featureName,
+                DateTime usedUtc,
+                FeatureSourceKind sourceKind,
+                DateTime? candleOpenUtc,
+                DateTime? candleCloseUtc)
+            {
+                if (string.IsNullOrWhiteSpace(featureName))
+                    throw new ArgumentException("featureName must be non-empty.", nameof(featureName));
+
+                if (usedUtc.Kind != DateTimeKind.Utc)
+                    throw new InvalidOperationException($"[RowBuilder] usedUtc must be UTC for feature '{featureName}'.");
+
+                if (!_maxUsedUtc.HasValue || usedUtc > _maxUsedUtc.Value)
+                {
+                    _maxUsedUtc = usedUtc;
+                    _maxFeatures.Clear();
+                }
+
+                if (_maxUsedUtc.HasValue && usedUtc == _maxUsedUtc.Value)
+                {
+                    _maxFeatures.Add(new FeatureTimeInfo
+                    {
+                        FeatureName = featureName,
+                        UsedUtc = usedUtc,
+                        SourceKind = sourceKind,
+                        CandleOpenUtc = candleOpenUtc,
+                        CandleCloseUtc = candleCloseUtc
+                    });
+                }
+            }
+        }
+
+        private sealed class RowLeakRecord
+        {
+            public DateTime EntryUtc { get; init; }
+            public DateTime MaxUsedUtc { get; init; }
+            public TimeSpan MaxFutureLeak { get; init; }
+            public DateTime? LatestCandle6hUtcUsed { get; init; }
+            public DateTime? LatestIndicatorDayUtcUsed { get; init; }
+            public DateTime? LatestCandle1mUtcUsed { get; init; }
+            public FeatureTimeInfo[] MaxFeatures { get; init; } = Array.Empty<FeatureTimeInfo>();
+        }
+
+        private enum FeatureSourceKind
+        {
+            Candle6h = 0,
+            Indicator = 1,
+            Candle1m = 2,
+            Other = 3
+        }
+
+        private sealed class FeatureTimeInfo
+        {
+            public string FeatureName { get; init; } = string.Empty;
+            public DateTime UsedUtc { get; init; }
+            public FeatureSourceKind SourceKind { get; init; }
+            public DateTime? CandleOpenUtc { get; init; }
+            public DateTime? CandleCloseUtc { get; init; }
         }
     }
 }

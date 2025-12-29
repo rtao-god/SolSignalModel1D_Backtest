@@ -5,7 +5,7 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
 	{
 	public sealed class PolicyRatiosPerPolicy
 		{
-		public string PolicyName { get; set; } = string.Empty;
+		public required string PolicyName { get; init; }
 
 		public int TradesCount { get; set; }
 
@@ -36,9 +36,9 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
 
 	public sealed class PolicyRatiosSnapshot
 		{
-		public string BacktestId { get; set; } = string.Empty;
+		public required string BacktestId { get; init; }
 
-		public List<PolicyRatiosPerPolicy> Policies { get; } = new ();
+		public required IReadOnlyList<PolicyRatiosPerPolicy> Policies { get; init; }
 
 		public int PoliciesCount => Policies.Count;
 		}
@@ -47,22 +47,21 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
 		{
 		public static PolicyRatiosSnapshot Build (
 			IEnumerable<BacktestPolicyResult> results,
-			string? backtestId = null )
+			string backtestId )
 			{
 			if (results == null) throw new ArgumentNullException (nameof (results));
+			if (string.IsNullOrWhiteSpace (backtestId))
+				throw new ArgumentException ("[policy-ratios] backtestId is required.", nameof (backtestId));
 
 			var list = results.ToList ();
 
-			var snapshot = new PolicyRatiosSnapshot
-				{
-				BacktestId = backtestId ?? string.Empty
-				};
+			var policies = new List<PolicyRatiosPerPolicy> (list.Count);
 
 			foreach (var r in list)
 				{
 				var m = PolicyRatiosMetricsCalculator.Compute (r);
 
-				snapshot.Policies.Add (new PolicyRatiosPerPolicy
+				policies.Add (new PolicyRatiosPerPolicy
 					{
 					PolicyName = r.PolicyName,
 					TradesCount = m.TradesCount,
@@ -81,7 +80,11 @@ namespace SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots
 					});
 				}
 
-			return snapshot;
+			return new PolicyRatiosSnapshot
+				{
+				BacktestId = backtestId,
+				Policies = policies
+				};
 			}
 		}
 	}

@@ -30,4 +30,8 @@
 		<ProjectReference Include="SolSignalModel1D_Backtest.SanityChecks\SolSignalModel1D_Backtest.SanityChecks.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="cache\indicators\_fills\" />
+	</ItemGroup>
+
 </Project>

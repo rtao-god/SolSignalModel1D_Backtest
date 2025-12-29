@@ -10,19 +10,19 @@ namespace SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats
     /// </summary>
     public sealed class ModelStatsMeta
     {
-        public ModelRunKind RunKind { get; set; }
+        public required ModelRunKind RunKind { get; init; }
 
-        public bool HasOos { get; set; }
+        public required bool HasOos { get; init; }
 
-        public TrainUntilExitDayKeyUtc TrainUntilExitDayKeyUtc { get; set; }
+        public required TrainUntilExitDayKeyUtc TrainUntilExitDayKeyUtc { get; init; }
 
-        public string TrainUntilIsoDate { get; set; } = string.Empty;
+        public required string TrainUntilIsoDate { get; init; }
 
-        public int TrainRecordsCount { get; set; }
-        public int OosRecordsCount { get; set; }
-        public int TotalRecordsCount { get; set; }
+        public required int TrainRecordsCount { get; init; }
+        public required int OosRecordsCount { get; init; }
+        public required int TotalRecordsCount { get; init; }
 
-        public int RecentDays { get; set; }
-        public int RecentRecordsCount { get; set; }
+        public required int RecentDays { get; init; }
+        public required int RecentRecordsCount { get; init; }
     }
 }

@@ -2,7 +2,6 @@ using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.PolicyRatios;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.Backtest.Snapshots.ModelStats;
 using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction;
-using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML;
 using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
@@ -17,6 +16,7 @@ using SolSignalModel1D_Backtest.Reports.Reporting.Ml;
 using SolSignalModel1D_Backtest.Reports.Reporting.Pfi;
 using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.ML.PFI;
 
 namespace SolSignalModel1D_Backtest.Reports.Backtest.Reports
 {

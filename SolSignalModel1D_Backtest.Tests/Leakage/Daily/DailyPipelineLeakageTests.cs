@@ -1,3 +1,4 @@
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
 using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
 using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
@@ -204,11 +205,14 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 int pos = trainIdx.IndexOf(i);
                 int newLabel = labels[pos];
 
+                var microTruth = newLabel == 1
+                    ? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
                 res.Add(new LabeledCausalRow(
                     causal: r.Causal,
                     trueLabel: newLabel,
-                    factMicroUp: r.FactMicroUp,
-                    factMicroDown: r.FactMicroDown));
+                    microTruth: microTruth));
             }
 
             return res;
@@ -274,8 +278,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 res.Add(new LabeledCausalRow(
                     causal: randomized,
                     trueLabel: r.TrueLabel,
-                    factMicroUp: r.FactMicroUp,
-                    factMicroDown: r.FactMicroDown));
+                    microTruth: r.MicroTruth));
             }
 
             return res;
@@ -320,6 +323,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                     factMicroDown = !factMicroUp;
                 }
 
+                var microTruth = label == 1
+                    ? (factMicroUp
+                        ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+                        : OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down))
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
                 var causal = new CausalDataRow(
                     entryUtc: entryUtc,
                     regimeDown: regimeDown,
@@ -358,8 +367,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
                 rows.Add(new LabeledCausalRow(
                     causal: causal,
                     trueLabel: label,
-                    factMicroUp: factMicroUp,
-                    factMicroDown: factMicroDown));
+                    microTruth: microTruth));
             }
 
             return rows.OrderBy(DayKeyUtc).ToList();
