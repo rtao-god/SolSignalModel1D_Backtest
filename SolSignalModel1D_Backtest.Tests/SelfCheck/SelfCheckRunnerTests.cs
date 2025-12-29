@@ -1,97 +1,153 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Xunit;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.SanityChecks;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
+using Xunit;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.SelfCheck
-	{
-	/// <summary>
-	/// Тесты для SelfCheckRunner на синтетических данных:
-	/// - ловим "магическую" точность 100%;
-	/// - допускаем разумную точность ~60%.
-	/// </summary>
-	public class SelfCheckRunnerTests
-		{
-		[Fact]
-		public async Task DailyCheck_FlagsTooGoodTrainAccuracy ()
-			{
-			// Arrange: 300 дней, все в train, accuracy = 100%.
-			var records = new List<PredictionRecord> ();
-			var start = new DateTime (2020, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+{
+    public class SelfCheckRunnerTests
+    {
+        private static BacktestRecord MakeRecord(DateTime entryUtc, int trueLabel, int predLabel)
+        {
+            static (double Up, double Flat, double Down) MakeTriProbs(int cls)
+            {
+                const double Hi = 0.90;
+                const double Lo = 0.05;
 
-			for (int i = 0; i < 300; i++)
-				{
-				var dt = start.AddDays (i);
-				int label = i % 3;
+                return cls switch
+                {
+                    2 => (Hi, Lo, Lo),
+                    1 => (Lo, Hi, Lo),
+                    0 => (Lo, Lo, Hi),
+                    _ => throw new ArgumentOutOfRangeException(nameof(cls), cls, "PredLabel must be in [0..2].")
+                };
+            }
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = dt,
-					TrueLabel = label,
-					PredLabel = label
-					});
-				}
+            if (entryUtc.Kind != DateTimeKind.Utc)
+                throw new ArgumentException("entryUtc must be UTC.", nameof(entryUtc));
 
-			var ctx = new SelfCheckContext
-				{
-				Records = records,
-				TrainUntilUtc = start.AddYears (10) // всё идёт в train
-				};
+            var (pUp, pFlat, pDown) = MakeTriProbs(predLabel);
 
-			// Act
-			var result = await SelfCheckRunner.RunAsync (ctx);
+            var rawEntryUtc = new EntryUtc(entryUtc);
+            var nyEntryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow(rawEntryUtc, TimeZones.NewYork);
 
-			// Assert: ожидаем провал self-check'а.
-			Assert.False (result.Success);
-			Assert.Contains (result.Errors, e => e.Contains ("train accuracy", StringComparison.OrdinalIgnoreCase));
-			}
+            var vec = new double[MlSchema.FeatureCount];
+            for (int i = 0; i < vec.Length; i++)
+                vec[i] = 0.123;
 
-		[Fact]
-		public async Task DailyCheck_AllowsReasonableAccuracy ()
-			{
-			// Arrange: 300 дней, accuracy ≈ 60% (адекватный уровень).
-			var records = new List<PredictionRecord> ();
-			var start = new DateTime (2020, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+            var microTruth = trueLabel == 1
+                ? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+                : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
 
-			for (int i = 0; i < 300; i++)
-				{
-				var dt = start.AddDays (i);
-				int trueLabel = i % 3;
-				int predLabel;
+            return new BacktestRecord
+            {
+                Causal = new CausalPredictionRecord
+                {
+                    TradingEntryUtc = nyEntryUtc,
 
-				// 6 из 10 случаев предсказываем правильно, 4 — со сдвигом.
-				if (i % 10 < 6)
-					{
-					predLabel = trueLabel;
-					}
-				else
-					{
-					predLabel = (trueLabel + 1) % 3;
-					}
+                    FeaturesVector = vec,
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = dt,
-					TrueLabel = trueLabel,
-					PredLabel = predLabel
-					});
-				}
+                    PredLabel = predLabel,
+                    PredLabel_Day = predLabel,
+                    PredLabel_DayMicro = predLabel,
 
-			var ctx = new SelfCheckContext
-				{
-				Records = records,
-				TrainUntilUtc = start.AddDays (200) // часть дней уйдёт в OOS
-				};
+                    ProbUp_Day = pUp,
+                    ProbFlat_Day = pFlat,
+                    ProbDown_Day = pDown,
 
-			// Act
-			var result = await SelfCheckRunner.RunAsync (ctx);
+                    ProbUp_DayMicro = pUp,
+                    ProbFlat_DayMicro = pFlat,
+                    ProbDown_DayMicro = pDown,
 
-			// Assert: жёстких ошибок быть не должно.
-			Assert.True (result.Success);
-			}
-		}
-	}
+                    ProbUp_Total = pUp,
+                    ProbFlat_Total = pFlat,
+                    ProbDown_Total = pDown,
+
+                    Conf_Day = Math.Max(pUp, Math.Max(pFlat, pDown))
+                },
+
+                Forward = new ForwardOutcomes
+                {
+                    EntryUtc = rawEntryUtc,
+                    WindowEndUtc = entryUtc.AddHours(24),
+                    Entry = 100.0,
+                    MaxHigh24 = 110.0,
+                    MinLow24 = 90.0,
+                    Close24 = 100.0,
+                    MinMove = 0.01,
+                    DayMinutes = Array.Empty<Candle1m>(),
+
+                    TrueLabel = trueLabel,
+                    MicroTruth = microTruth
+                }
+            };
+        }
+
+        [Fact]
+        public async Task DailyCheck_FlagsTooGoodTrainAccuracy()
+        {
+            var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2020, 1, 1, 0),
+                count: 300,
+                hour: 8);
+
+            var records = new List<BacktestRecord>(datesUtc.Count);
+
+            for (int i = 0; i < datesUtc.Count; i++)
+            {
+                int label = i % 3;
+                records.Add(MakeRecord(datesUtc[i], label, label));
+            }
+
+            var ctx = new SelfCheckContext
+            {
+                Records = records,
+                NyTz = TimeZones.NewYork,
+                TrainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(new DateTime(2035, 1, 1, 0, 0, 0, DateTimeKind.Utc))
+            };
+
+            var result = await SelfCheckRunner.RunAsync(ctx);
+
+            Assert.False(result.Success);
+            Assert.Contains(result.Errors, e => e.Contains("train accuracy", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task DailyCheck_AllowsReasonableAccuracy()
+        {
+            var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2020, 1, 1, 0),
+                count: 300,
+                hour: 8);
+
+            var records = new List<BacktestRecord>(datesUtc.Count);
+
+            for (int i = 0; i < datesUtc.Count; i++)
+            {
+                int trueLabel = i % 3;
+                int predLabel = (i % 2 == 0) ? trueLabel : (trueLabel + 1) % 3;
+                records.Add(MakeRecord(datesUtc[i], trueLabel, predLabel));
+            }
+
+            var ctx = new SelfCheckContext
+            {
+                Records = records,
+                NyTz = TimeZones.NewYork,
+                TrainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcMomentOrThrow(datesUtc[200])
+            };
+
+            var result = await SelfCheckRunner.RunAsync(ctx);
+
+            Assert.True(result.Success);
+        }
+    }
+}

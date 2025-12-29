@@ -1,168 +1,272 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.Backtest
-	{
-	/// <summary>
-	/// Тест-инвариант: аналитика/бэктест не должны менять базовые поля PredictionRecord.
-	/// Если какой-то принтер/движок начнёт мутировать Date/TrueLabel/PredLabel/MinMove и т.п.,
-	/// этот тест должен упасть.
-	///
-	/// Тест специально использует BacktestRunner.Run — тот же путь,
-	/// что и консольный пайплайн.
-	/// </summary>
-	public sealed class PredictionRecordImmutabilityTests
-		{
-		private sealed class CoreSnapshot
-			{
-			public DateTime DateUtc { get; init; }
-			public int TrueLabel { get; init; }
-			public int PredLabel { get; init; }
-			public bool FactMicroUp { get; init; }
-			public bool FactMicroDown { get; init; }
-			public double Entry { get; init; }
-			public double MaxHigh24 { get; init; }
-			public double MinLow24 { get; init; }
-			public double Close24 { get; init; }
-			public bool RegimeDown { get; init; }
-			public double MinMove { get; init; }
-			}
+{
+    /// <summary>
+    /// Инвариант: бэктест/аналитика не должны мутировать базовые поля BacktestRecord
+    /// (каузальная часть + forward-исходы).
+    /// </summary>
+    public sealed class PredictionRecordImmutabilityTests
+    {
+        private sealed class CoreSnapshot
+        {
+            public DateTime EntryUtc { get; init; }
+            public DateTime EntryDayKeyUtc00 { get; init; }
 
-		[Fact]
-		public void BacktestRunner_DoesNotMutate_CorePredictionRecordFields ()
-			{
-			// Arrange: синтетический набор PredictionRecord с валидными вероятностями.
-			// Важно:
-			// - TrueLabel == PredLabel, чтобы не ловить p_true=0 в логлоссе/агрегации.
-			// - Prob*_Day / Prob*_DayMicro / Prob*_Total суммируются в 1.
-			var utcStart = new DateTime (2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-			var records = new List<PredictionRecord> ();
+            public int TrueLabel { get; init; }
+            public int PredLabel { get; init; }
+            public OptionalValue<MicroTruthDirection> MicroTruth { get; init; }
 
-			for (int i = 0; i < 20; i++)
-				{
-				var date = utcStart.AddDays (i);
-				int label = i % 3;
+            public double Entry { get; init; }
+            public double MaxHigh24 { get; init; }
+            public double MinLow24 { get; init; }
+            public double Close24 { get; init; }
 
-				// Одна и та же нормализованная тройка вероятностей по всем слоям.
-				double pUp = 0.5;
-				double pFlat = 0.2;
-				double pDown = 0.3;
+            public bool RegimeDown { get; init; }
+            public double MinMove { get; init; }
+        }
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = date,
-					TrueLabel = label,
-					PredLabel = label,
+        [Fact]
+        public void BacktestRunner_DoesNotMutate_CoreBacktestRecordFields()
+        {
+            var entriesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(2025, 1, 1, 0),
+                count: 20,
+                hour: 8);
 
-					FactMicroUp = false,
-					FactMicroDown = false,
+            var records = new List<BacktestRecord>(20);
+            var mornings = new List<LabeledCausalRow>(20);
 
-					Entry = 100.0,
-					MaxHigh24 = 110.0,
-					MinLow24 = 90.0,
-					Close24 = 102.0,
+            for (int i = 0; i < 20; i++)
+            {
+                var entryUtcRaw = entriesUtc[i];
+                int trueLabel = i % 3;
 
-					RegimeDown = (i % 5 == 0),
-					MinMove = 0.02,
+                var nyEntryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow(new EntryUtc(entryUtcRaw), NyWindowing.NyTz);
 
-					// Вероятности для дневного слоя
-					ProbUp_Day = pUp,
-					ProbFlat_Day = pFlat,
-					ProbDown_Day = pDown,
+                var causalRow = MakeCausalRow(
+                    entryUtc: nyEntryUtc,
+                    isMorning: true,
+                    regimeDown: (i % 5 == 0),
+                    hardRegime: i % 3,
+                    minMove: 0.02,
+                    seed: i);
 
-					// Вероятности для Day+Micro слоя
-					ProbUp_DayMicro = pUp,
-					ProbFlat_DayMicro = pFlat,
-					ProbDown_DayMicro = pDown,
+                double pUp = 0.5, pFlat = 0.2, pDown = 0.3;
 
-					// Вероятности для Total слоя (Day+Micro+SL)
-					ProbUp_Total = pUp,
-					ProbFlat_Total = pFlat,
-					ProbDown_Total = pDown,
+                string reason = trueLabel switch
+                {
+                    2 => "day:move-up",
+                    0 => "day:move-down",
+                    1 => "day:flat",
+                    _ => throw new InvalidOperationException($"[test] Unexpected trueLabel={trueLabel}.")
+                };
 
-					// Остальные поля (SL / Delayed / Anti и т.п.) в этом тесте не контролируются
-					// и могут использоваться как внутреннее состояние, поэтому оставляем по умолчанию.
-					});
-				}
+                var causal = new CausalPredictionRecord
+                {
+                    TradingEntryUtc = nyEntryUtc,
+                    FeaturesVector = causalRow.FeaturesVector,
+                    Features = null,
 
-			// Утренние точки: используем те же даты, чтобы путь данных был консистентным,
-			// но фичи пустые — BacktestRunner/aggregation сейчас их не читает.
-			var mornings = records
-				.Select (r => new DataRow
-					{
-					Date = r.DateUtc,
-					Features = Array.Empty<double> (),
-					Label = r.TrueLabel,
-					RegimeDown = r.RegimeDown,
-					IsMorning = true
-					})
-				.ToList ();
+                    PredLabel = trueLabel,
+                    PredLabel_Day = trueLabel,
+                    PredLabel_DayMicro = trueLabel,
+                    PredLabel_Total = trueLabel,
 
-			var candles1m = Array.Empty<Candle1m> ();
-			var policies = Array.Empty<RollingLoop.PolicySpec> ();
+                    ProbUp_Day = pUp,
+                    ProbFlat_Day = pFlat,
+                    ProbDown_Day = pDown,
 
-			var config = new BacktestConfig
-				{
-				DailyStopPct = 0.05,
-				DailyTpPct = 0.03
-				};
+                    ProbUp_DayMicro = pUp,
+                    ProbFlat_DayMicro = pFlat,
+                    ProbDown_DayMicro = pDown,
 
-			var trainUntilUtc = utcStart.AddDays (10);
+                    ProbUp_Total = pUp,
+                    ProbFlat_Total = pFlat,
+                    ProbDown_Total = pDown,
 
-			// Снимаем "снимок" базовых полей до запуска аналитики.
-			var snapshots = records
-				.Select (r => new CoreSnapshot
-					{
-					DateUtc = r.DateUtc,
-					TrueLabel = r.TrueLabel,
-					PredLabel = r.PredLabel,
-					FactMicroUp = r.FactMicroUp,
-					FactMicroDown = r.FactMicroDown,
-					Entry = r.Entry,
-					MaxHigh24 = r.MaxHigh24,
-					MinLow24 = r.MinLow24,
-					Close24 = r.Close24,
-					RegimeDown = r.RegimeDown,
-					MinMove = r.MinMove
-					})
-				.ToList ();
+                    Conf_Day = 0.7,
+                    Conf_Micro = 0.7,
 
-			// Act: запускаем тот же рантайм-путь, что и в консоли.
-			var runner = new BacktestRunner ();
-			runner.Run (
-				mornings: mornings,
-				records: records,
-				candles1m: candles1m,
-				policies: policies,
-				config: config,
-				trainUntilUtc: trainUntilUtc);
+                    MicroPredicted = false,
+                    PredMicroUp = false,
+                    PredMicroDown = false,
 
-			// Assert: проверяем, что базовые поля каждого PredictionRecord не изменились.
-			Assert.Equal (snapshots.Count, records.Count);
+                    RegimeDown = causalRow.RegimeDown,
+                    Reason = reason,
+                    MinMove = causalRow.MinMove,
 
-			for (int i = 0; i < records.Count; i++)
-				{
-				var rec = records[i];
-				var snap = snapshots[i];
+                    SlProb = OptionalScore.Present(0.0),
+                    SlHighDecision = OptionalValue<bool>.Present(false),
+                    Conf_SlLong = 0.0,
+                    Conf_SlShort = 0.0,
 
-				Assert.Equal (snap.DateUtc, rec.DateUtc);
-				Assert.Equal (snap.TrueLabel, rec.TrueLabel);
-				Assert.Equal (snap.PredLabel, rec.PredLabel);
-				Assert.Equal (snap.FactMicroUp, rec.FactMicroUp);
-				Assert.Equal (snap.FactMicroDown, rec.FactMicroDown);
-				Assert.Equal (snap.Entry, rec.Entry);
-				Assert.Equal (snap.MaxHigh24, rec.MaxHigh24);
-				Assert.Equal (snap.MinLow24, rec.MinLow24);
-				Assert.Equal (snap.Close24, rec.Close24);
-				Assert.Equal (snap.RegimeDown, rec.RegimeDown);
-				Assert.Equal (snap.MinMove, rec.MinMove);
-				}
-			}
-		}
-	}
+                    DelayedSource = null,
+                    DelayedEntryAsked = false,
+                    DelayedEntryUsed = false,
+                    DelayedIntradayTpPct = null,
+                    DelayedIntradaySlPct = null,
+                    TargetLevelClass = null
+                };
+
+                var microTruth = trueLabel == 1
+                    ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
+                var forward = new ForwardOutcomes
+                {
+                    EntryUtc = new EntryUtc(entryUtcRaw),
+
+                    TrueLabel = trueLabel,
+                    MicroTruth = microTruth,
+
+                    Entry = 100.0,
+                    MaxHigh24 = 110.0,
+                    MinLow24 = 90.0,
+                    Close24 = 102.0,
+
+                    MinMove = causalRow.MinMove,
+                    WindowEndUtc = entryUtcRaw.AddDays(1),
+
+                    DayMinutes = Array.Empty<Candle1m>()
+                };
+
+                var rec = new BacktestRecord
+                {
+                    Causal = causal,
+                    Forward = forward
+                };
+
+                records.Add(rec);
+
+                mornings.Add(new LabeledCausalRow(
+                    causal: causalRow,
+                    trueLabel: forward.TrueLabel,
+                    microTruth: forward.MicroTruth));
+            }
+
+            var candles1m = Array.Empty<Candle1m>();
+            var policies = Array.Empty<RollingLoop.PolicySpec>();
+
+            var config = new BacktestConfig
+            {
+                DailyStopPct = 0.05,
+                DailyTpPct = 0.03
+            };
+
+            var trainUntilEntryUtc = records[10].EntryUtc.Value;
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                NyWindowing.ComputeExitDayKeyUtc(
+                    new EntryUtc(trainUntilEntryUtc),
+                    NyWindowing.NyTz));
+
+            var snapshots = records
+                .Select(r => new CoreSnapshot
+                {
+                    EntryUtc = r.EntryUtc.Value,
+                    EntryDayKeyUtc00 = r.EntryDayKeyUtc.Value,
+
+                    TrueLabel = r.TrueLabel,
+                    PredLabel = r.PredLabel,
+                    MicroTruth = r.MicroTruth,
+
+                    Entry = r.Entry,
+                    MaxHigh24 = r.MaxHigh24,
+                    MinLow24 = r.MinLow24,
+                    Close24 = r.Close24,
+
+                    RegimeDown = r.RegimeDown,
+                    MinMove = r.MinMove
+                })
+                .ToList();
+
+            var runner = new BacktestRunner();
+            runner.Run(
+                mornings: mornings,
+                records: records,
+                candles1m: candles1m,
+                policies: policies,
+                config: config,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc);
+
+            Assert.Equal(snapshots.Count, records.Count);
+
+            for (int i = 0; i < records.Count; i++)
+            {
+                var rec = records[i];
+                var snap = snapshots[i];
+
+                Assert.Equal(snap.EntryUtc, rec.EntryUtc.Value);
+                Assert.Equal(snap.EntryDayKeyUtc00, rec.EntryDayKeyUtc.Value);
+
+                Assert.Equal(snap.TrueLabel, rec.TrueLabel);
+                Assert.Equal(snap.PredLabel, rec.PredLabel);
+                Assert.Equal(snap.MicroTruth, rec.MicroTruth);
+
+                Assert.Equal(snap.Entry, rec.Entry);
+                Assert.Equal(snap.MaxHigh24, rec.MaxHigh24);
+                Assert.Equal(snap.MinLow24, rec.MinLow24);
+                Assert.Equal(snap.Close24, rec.Close24);
+
+                Assert.Equal(snap.RegimeDown, rec.RegimeDown);
+                Assert.Equal(snap.MinMove, rec.MinMove);
+            }
+        }
+
+        private static CausalDataRow MakeCausalRow(
+            NyTradingEntryUtc entryUtc,
+            bool isMorning,
+            bool regimeDown,
+            int hardRegime,
+            double minMove,
+            int seed)
+        {
+            double s = seed;
+
+            return new CausalDataRow(
+                entryUtc: entryUtc,
+                regimeDown: regimeDown,
+                isMorning: isMorning,
+                hardRegime: hardRegime,
+                minMove: minMove,
+
+                solRet30: 0.001 * s,
+                btcRet30: 0.0005 * s,
+                solBtcRet30: 0.001 * s - 0.0005 * s,
+
+                solRet1: 0.0001 * s,
+                solRet3: 0.0003 * s,
+                btcRet1: 0.00005 * s,
+                btcRet3: 0.00015 * s,
+
+                fngNorm: 0.2,
+                dxyChg30: 0.0,
+                goldChg30: 0.0,
+
+                btcVs200: 0.1,
+
+                solRsiCenteredScaled: 0.0,
+                rsiSlope3Scaled: 0.0,
+
+                gapBtcSol1: 0.0,
+                gapBtcSol3: 0.0,
+
+                atrPct: 0.02,
+                dynVol: 0.015,
+
+                solAboveEma50: 1.0,
+                solEma50vs200: 0.1,
+                btcEma50vs200: 0.1);
+        }
+    }
+}
+

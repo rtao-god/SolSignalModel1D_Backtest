@@ -1,5 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles;
+using SolSignalModel1D_Backtest.Diagnostics;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -43,6 +44,20 @@ namespace SolSignalModel1D_Backtest
 			if (!File.Exists (path)) return new List<Candle1m> ();
 			var store = new CandleNdjsonStore (path);
 			var lines = store.ReadRange (DateTime.MinValue, DateTime.MaxValue);
+			if (LeakageSwitches.IsEnabled (LeakageMode.CandlesShiftPricesForward1m) && lines.Count > 1)
+				{
+				for (int i = 0; i < lines.Count - 1; i++)
+					{
+					var cur = lines[i];
+					var next = lines[i + 1];
+					lines[i] = new CandleNdjsonStore.CandleLine (
+						cur.OpenTimeUtc,
+						next.Open,
+						next.High,
+						next.Low,
+						next.Close);
+					}
+				}
 			return lines.Select (l => new Candle1m
 				{
 				OpenTimeUtc = l.OpenTimeUtc,

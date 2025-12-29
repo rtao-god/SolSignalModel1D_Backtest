@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Core.Infra.Perf;
+using SolSignalModel1D_Backtest.Core.Causal.Infra.Perf;
 
 namespace SolSignalModel1D_Backtest
 	{

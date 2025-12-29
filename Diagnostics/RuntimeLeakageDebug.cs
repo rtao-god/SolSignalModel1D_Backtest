@@ -1,138 +1,336 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
 
 namespace SolSignalModel1D_Backtest.Diagnostics
-	{
-	/// <summary>
-	/// Вспомогательный класс для консольной проверки разделения train/OOS
-	/// на реальных PredictionRecord, без участия тестового проекта.
-	/// </summary>
-	internal static class RuntimeLeakageDebug
-		{
-		/// <summary>
-		/// Печатает в консоль:
-		/// - границу trainUntilUtc;
-		/// - accuracy по train и по OOS;
-		/// - несколько строк около границы (последние train и первые OOS дни).
-		/// Ничего не меняет в логике моделирования/бэктеста.
-		/// </summary>
-		public static void PrintDailyModelTrainOosProbe (
-			IReadOnlyList<PredictionRecord> records,
-			DateTime trainUntilUtc,
-			int boundarySampleCount = 2 )
-			{
-			if (records == null || records.Count == 0)
-				{
-				Console.WriteLine ("[leak-probe] records is null or empty; nothing to probe.");
-				return;
-				}
+{
+    internal static class RuntimeLeakageDebug
+    {
+        public static void PrintDailyModelTrainOosProbe(
+            IReadOnlyList<BacktestRecord> records,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz,
+            int boundarySampleCount = 2,
+            IReadOnlyList<LabeledCausalRow>? allRows = null,
+            int oofFolds = 5)
+        {
+            if (records == null || records.Count == 0)
+            {
+                Console.WriteLine("[leak-probe] records is null or empty; nothing to probe.");
+                return;
+            }
 
-			if (trainUntilUtc == default)
-				{
-				Console.WriteLine ("[leak-probe] trainUntilUtc is default(DateTime); probe is not meaningful.");
-				return;
-				}
+            if (nyTz == null)
+            {
+                Console.WriteLine("[leak-probe] nyTz is null; probe is not meaningful.");
+                return;
+            }
 
-			// Упорядочиваем по дате, чтобы корректно выделять последний train и первый OOS.
-			var ordered = records
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
 
-			var train = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
+            var ordered = records
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
 
-			var oos = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz);
 
-			// Локальная функция для расчёта accuracy по TrueLabel/PredLabel.
-			(int total, int correct, double acc) Acc ( List<PredictionRecord> xs )
-				{
-				if (xs.Count == 0)
-					{
-					return (0, 0, double.NaN);
-					}
+            var train = split.Train;
+            var oos = split.Oos;
 
-				int correct = 0;
+            if (split.Excluded.Count > 0)
+            {
+                Console.WriteLine(
+                    $"[leak-probe] WARNING: excluded={split.Excluded.Count} days (baseline-exit undefined by contract). " +
+                    "Эти дни не учитываются ни в train, ни в OOS.");
+            }
 
-				for (int i = 0; i < xs.Count; i++)
-					{
-					var r = xs[i];
-					if (r.TrueLabel == r.PredLabel)
-						{
-						correct++;
-						}
-					}
+            bool TryGetExitDayKeyUtc(BacktestRecord r, out ExitDayKeyUtc exitDayKeyUtc)
+            {
+                var entryUtc = new EntryUtc(r.Causal.EntryUtc.Value);
+                if (!NyWindowing.TryComputeBaselineExitUtc(entryUtc, nyTz, out var exitUtc))
+                {
+                    exitDayKeyUtc = default;
+                    return false;
+                }
 
-				double accVal = (double) correct / xs.Count;
-				return (xs.Count, correct, accVal);
-				}
+                exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
+                return true;
+            }
 
-			var trainAcc = Acc (train);
-			var oosAcc = Acc (oos);
+            (int total, int correct, double acc) Acc(IReadOnlyList<BacktestRecord> xs)
+            {
+                if (xs == null) throw new ArgumentNullException(nameof(xs));
+                if (xs.Count == 0)
+                    return (0, 0, double.NaN);
 
-			Console.WriteLine (
-				$"[leak-probe] trainUntilUtc = {trainUntilUtc:yyyy-MM-dd}, totalRecords = {ordered.Count}");
+                int correct = 0;
 
-			Console.WriteLine (
-				$"[leak-probe] TRAIN: count={trainAcc.total}, correct={trainAcc.correct}, acc={trainAcc.acc:P2}");
+                for (int i = 0; i < xs.Count; i++)
+                {
+                    var r = xs[i];
+                    if (r.TrueLabel == r.Causal.PredLabel)
+                        correct++;
+                }
 
-			if (oos.Count == 0)
-				{
-				Console.WriteLine ("[leak-probe] OOS: count=0 (нет дней DateUtc > trainUntilUtc)");
-				}
-			else
-				{
-				Console.WriteLine (
-					$"[leak-probe] OOS:   count={oosAcc.total}, correct={oosAcc.correct}, acc={oosAcc.acc:P2}");
-				}
+                double accVal = (double)correct / xs.Count;
+                return (xs.Count, correct, accVal);
+            }
 
-			// Компактный вывод нескольких строк около границы train/OOS.
-			static void PrintRow ( string kind, PredictionRecord r )
-				{
-				Console.WriteLine (
-					$"[leak-probe] {kind} {r.DateUtc:yyyy-MM-dd} " +
-					$"true={r.TrueLabel} pred={r.PredLabel} " +
-					$"microUp={r.PredMicroUp} microDown={r.PredMicroDown} " +
-					$"minMove={r.MinMove:0.000}");
-				}
+            var trainAcc = Acc(train);
+            var oosAcc = Acc(oos);
+            bool suspiciousGap = false;
 
-			var trainSample = train
-				.OrderByDescending (r => r.DateUtc)
-				.Take (boundarySampleCount)
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+            DateTime? trainMaxExitDay = null;
+            DateTime? oosMinExitDay = null;
+            int exitBeforeEntryCount = 0;
+            DateTime? exitBeforeEntrySample = null;
 
-			var oosSample = oos
-				.OrderBy (r => r.DateUtc)
-				.Take (boundarySampleCount)
-				.ToList ();
+            void TrackExitDays(IReadOnlyList<BacktestRecord> xs, bool isTrain)
+            {
+                for (int i = 0; i < xs.Count; i++)
+                {
+                    var r = xs[i];
+                    if (!TryGetExitDayKeyUtc(r, out var exitDayKey))
+                        continue;
 
-			Console.WriteLine ("[leak-probe] Sample near boundary (TRAIN → OOS):");
+                    var exitDay = exitDayKey.Value;
+                    var entryDay = r.Causal.EntryDayKeyUtc.Value;
 
-			if (trainSample.Count == 0)
-				{
-				Console.WriteLine ("[leak-probe]   (no train rows)");
-				}
-			else
-				{
-				foreach (var r in trainSample)
-					{
-					PrintRow ("T  ", r);
-					}
-				}
+                    if (exitDay < entryDay)
+                    {
+                        exitBeforeEntryCount++;
+                        if (!exitBeforeEntrySample.HasValue)
+                            exitBeforeEntrySample = r.Causal.EntryUtc.Value;
+                    }
 
-			if (oosSample.Count == 0)
-				{
-				Console.WriteLine ("[leak-probe]   (no OOS rows)");
-				}
-			else
-				{
-				foreach (var r in oosSample)
-					{
-					PrintRow ("OOS", r);
-					}
-				}
-			}
-		}
-	}
+                    if (isTrain)
+                    {
+                        if (!trainMaxExitDay.HasValue || exitDay > trainMaxExitDay.Value)
+                            trainMaxExitDay = exitDay;
+                    }
+                    else
+                    {
+                        if (!oosMinExitDay.HasValue || exitDay < oosMinExitDay.Value)
+                            oosMinExitDay = exitDay;
+                    }
+                }
+            }
+
+            TrackExitDays(train, isTrain: true);
+            TrackExitDays(oos, isTrain: false);
+
+            Console.WriteLine(
+                $"[leak-probe] trainUntil(exit-day-key) = {trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}, totalRecords = {ordered.Count}");
+
+            if (trainMaxExitDay.HasValue && trainMaxExitDay.Value > trainUntilExitDayKeyUtc.Value)
+            {
+                Console.WriteLine(
+                    $"[leak-probe] ПОДОЗРЕНИЕ: max exit-day-key в TRAIN превышает границу. " +
+                    $"maxTrainExitDayKey={trainMaxExitDay.Value:yyyy-MM-dd}, trainUntil={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
+            }
+
+            if (oosMinExitDay.HasValue && oosMinExitDay.Value <= trainUntilExitDayKeyUtc.Value)
+            {
+                Console.WriteLine(
+                    $"[leak-probe] ПОДОЗРЕНИЕ: min exit-day-key в OOS не превышает границу. " +
+                    $"minOosExitDayKey={oosMinExitDay.Value:yyyy-MM-dd}, trainUntil={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
+            }
+
+            if (exitBeforeEntryCount > 0)
+            {
+                Console.WriteLine(
+                    $"[leak-probe] ПОДОЗРЕНИЕ: найден exit-day-key раньше entry-day-key. " +
+                    $"count={exitBeforeEntryCount}, sampleEntryUtc={exitBeforeEntrySample:O}");
+            }
+
+            Console.WriteLine(
+                $"[leak-probe] TRAIN(in-sample): count={trainAcc.total}, correct={trainAcc.correct}, acc={trainAcc.acc:P2}");
+
+            if (oos.Count == 0)
+            {
+                Console.WriteLine("[leak-probe] OOS: count=0 (нет дней после границы по baseline-exit контракту)");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"[leak-probe] OOS(out-of-sample): count={oosAcc.total}, correct={oosAcc.correct}, acc={oosAcc.acc:P2}");
+            }
+
+            if (!double.IsNaN(trainAcc.acc) && !double.IsNaN(oosAcc.acc))
+            {
+                double gap = trainAcc.acc - oosAcc.acc;
+                if (trainAcc.acc >= 0.90 && oosAcc.acc <= 0.60 && gap >= 0.25)
+                {
+                    Console.WriteLine(
+                        $"[leak-probe] ПОДОЗРЕНИЕ: большой разрыв точности train/oos " +
+                        $"(train={trainAcc.acc:P2}, oos={oosAcc.acc:P2}, gap={gap:P2}).");
+                    suspiciousGap = true;
+                }
+            }
+
+            void PrintRow(string kind, BacktestRecord r)
+            {
+                var c = r.Causal;
+                var dayKey = c.EntryDayKeyUtc.Value;
+                string exitDayKeyText = TryGetExitDayKeyUtc(r, out var exitDayKey)
+                    ? exitDayKey.Value.ToString("yyyy-MM-dd")
+                    : "<excluded>";
+
+                Console.WriteLine(
+                    $"[leak-probe] {kind} {dayKey:yyyy-MM-dd} " +
+                    $"exitDayKey={exitDayKeyText} " +
+                    $"true={r.TrueLabel} pred={c.PredLabel} " +
+                    $"microUp={c.PredMicroUp} microDown={c.PredMicroDown} " +
+                    $"minMove={c.MinMove:0.000}");
+            }
+
+            var trainSample = train
+                .OrderByDescending(r => r.Causal.EntryUtc.Value)
+                .Take(boundarySampleCount)
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
+
+            var oosSample = oos
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .Take(boundarySampleCount)
+                .ToList();
+
+            Console.WriteLine("[leak-probe] Sample near boundary (TRAIN → OOS):");
+
+            if (trainSample.Count == 0)
+            {
+                Console.WriteLine("[leak-probe]   (no train rows)");
+            }
+            else
+            {
+                foreach (var r in trainSample)
+                    PrintRow("T  ", r);
+            }
+
+            if (oosSample.Count == 0)
+            {
+                Console.WriteLine("[leak-probe]   (no OOS rows)");
+            }
+            else
+            {
+                foreach (var r in oosSample)
+                    PrintRow("OOS", r);
+            }
+
+            if (suspiciousGap)
+                PrintDailyTrainOofProbe(allRows, trainUntilExitDayKeyUtc, nyTz, oofFolds);
+        }
+
+        private static void PrintDailyTrainOofProbe(
+            IReadOnlyList<LabeledCausalRow>? allRows,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz,
+            int oofFolds)
+        {
+            if (nyTz == null)
+                throw new ArgumentNullException(nameof(nyTz));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+
+            if (allRows == null || allRows.Count == 0)
+            {
+                Console.WriteLine("[leak-probe:oof] пропуск: allRows пустой, OOF не посчитан.");
+                return;
+            }
+
+            if (oofFolds < 2)
+            {
+                Console.WriteLine($"[leak-probe:oof] пропуск: фолды={oofFolds} (<2).");
+                return;
+            }
+
+            var ordered = allRows
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
+
+            var split = NyTrainSplit.SplitByBaselineExitStrict(
+                ordered: ordered,
+                entrySelector: r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz,
+                tag: "leak-probe.oof");
+
+            var trainList = split.Train.ToList();
+
+            if (trainList.Count < 120)
+            {
+                Console.WriteLine($"[leak-probe:oof] пропуск: слишком мало train-строк ({trainList.Count}).");
+                return;
+            }
+
+            int foldSize = trainList.Count / (oofFolds + 1);
+            if (foldSize < 20)
+            {
+                Console.WriteLine($"[leak-probe:oof] пропуск: размер_фолда слишком мал ({foldSize}).");
+                return;
+            }
+
+            Console.WriteLine(
+                $"[leak-probe:oof] скользящая валидация: фолды={oofFolds}, строк_обучения={trainList.Count}, размер_фолда={foldSize}");
+
+            int totalVal = 0;
+            int totalCorrect = 0;
+
+            for (int i = 0; i < oofFolds; i++)
+            {
+                int trainEnd = (i + 1) * foldSize;
+                if (trainEnd <= 0 || trainEnd >= trainList.Count)
+                    break;
+
+                int valStart = trainEnd;
+                int valEnd = Math.Min(valStart + foldSize, trainList.Count);
+                int valCount = valEnd - valStart;
+
+                if (valCount <= 0)
+                    break;
+
+                var trainFold = trainList.GetRange(0, trainEnd);
+                var valFold = trainList.GetRange(valStart, valCount);
+
+                var trainer = new ModelTrainer();
+                var bundle = trainer.TrainAll(trainFold);
+                var engine = new PredictionEngine(bundle);
+
+                int correct = 0;
+                for (int j = 0; j < valFold.Count; j++)
+                {
+                    var row = valFold[j];
+                    var pred = engine.Predict(row.Causal);
+                    if (pred.Class == row.TrueLabel)
+                        correct++;
+                }
+
+                double acc = (double)correct / valFold.Count;
+                totalVal += valFold.Count;
+                totalCorrect += correct;
+
+                var minDay = valFold[0].Causal.EntryDayKeyUtc.Value;
+                var maxDay = valFold[valFold.Count - 1].Causal.EntryDayKeyUtc.Value;
+
+                Console.WriteLine(
+                    $"[leak-probe:oof] фолд#{i + 1}: обучение={trainFold.Count}, валидация={valFold.Count}, " +
+                    $"точность={acc:P2}, период={minDay:yyyy-MM-dd}..{maxDay:yyyy-MM-dd}");
+            }
+
+            if (totalVal > 0)
+            {
+                double oofAcc = (double)totalCorrect / totalVal;
+                Console.WriteLine($"[leak-probe:oof] OOF точность = {oofAcc:P2} (валидация_итого={totalVal})");
+            }
+        }
+    }
+}
+

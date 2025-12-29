@@ -1,18 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 	{
 	/// <summary>
 	/// Тест на cross-asset утечки:
-	/// фичи DataRow за день D не должны зависеть от будущих BTC/PAXG-данных.
+	/// фичи (и TrueLabel) за день D не должны зависеть от будущих BTC/PAXG-данных.
 	///
-	/// SOL-ряд при этом НЕ мутируется, чтобы не конфликтовать с уже существующими тестами.
+	/// SOL-ряд не мутируется (ни 6h, ни 1m), чтобы:
+	/// - TrueLabel оставался стабильным;
+	/// - тест ловил именно утечку через cross-asset фичи.
 	/// </summary>
 	public sealed class RowBuilderCrossAssetLeakageTests
 		{
@@ -21,14 +22,14 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 		[Fact]
 		public void Features_DoNotChange_WhenFutureBtcAndPaxgAreMutated ()
 			{
-			const int total6h = 400;
-			var start = new DateTime (2020, 1, 1, 2, 0, 0, DateTimeKind.Utc);
+			const int total6h = 800;
+			var start = new DateTime (2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-			var solAll6h = new List<Candle6h> ();
-			var btcAll6h_A = new List<Candle6h> ();
-			var btcAll6h_B = new List<Candle6h> ();
-			var paxgAll6h_A = new List<Candle6h> ();
-			var paxgAll6h_B = new List<Candle6h> ();
+			var solAll6h = new List<Candle6h> (total6h);
+			var btcAll6h_A = new List<Candle6h> (total6h);
+			var btcAll6h_B = new List<Candle6h> (total6h);
+			var paxgAll6h_A = new List<Candle6h> (total6h);
+			var paxgAll6h_B = new List<Candle6h> (total6h);
 
 			for (int i = 0; i < total6h; i++)
 				{
@@ -41,6 +42,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				solAll6h.Add (new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = solPrice,
 					Close = solPrice,
 					High = solPrice + 1.0,
 					Low = solPrice - 1.0
@@ -49,6 +51,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				var btcA = new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = btcPrice,
 					Close = btcPrice,
 					High = btcPrice + 1.0,
 					Low = btcPrice - 1.0
@@ -56,6 +59,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				var btcB = new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = btcPrice,
 					Close = btcPrice,
 					High = btcPrice + 1.0,
 					Low = btcPrice - 1.0
@@ -64,6 +68,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				var paxgA = new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = goldPrice,
 					Close = goldPrice,
 					High = goldPrice + 1.0,
 					Low = goldPrice - 1.0
@@ -71,6 +76,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				var paxgB = new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = goldPrice,
 					Close = goldPrice,
 					High = goldPrice + 1.0,
 					Low = goldPrice - 1.0
@@ -82,8 +88,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				paxgAll6h_B.Add (paxgB);
 				}
 
-			// 1m-ряд по SOL — как в других leakage-тестах.
-			var solAll1m = new List<Candle1m> ();
+			// 1m-ряд по SOL — сплошные минуты, чтобы PathLabeler/MinMove могли работать.
+			var solAll1m = new List<Candle1m> (total6h * 6 * 60);
 			var minutesStart = start;
 			int totalMinutes = total6h * 6 * 60;
 
@@ -95,19 +101,20 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				solAll1m.Add (new Candle1m
 					{
 					OpenTimeUtc = t,
+					Open = price,
 					Close = price,
 					High = price + 0.0005,
 					Low = price - 0.0005
 					});
 				}
 
-			// Базовые FNG/DXY
+			// Макро-ряды: ровные, без пропусков.
 			var fngBase = new Dictionary<DateTime, double> ();
 			var dxyBase = new Dictionary<DateTime, double> ();
 			Dictionary<DateTime, (double Funding, double OI)>? extraDaily = null;
 
-			var firstDate = start.Date.AddDays (-120);
-			var lastDate = start.Date.AddDays (400);
+			var firstDate = start.ToCausalDateUtc ().AddDays (-120);
+			var lastDate = start.ToCausalDateUtc ().AddDays (400);
 
 			for (var d = firstDate; d <= lastDate; d = d.AddDays (1))
 				{
@@ -116,8 +123,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				dxyBase[key] = 100.0;
 				}
 
-			// A: базовый сценарий без мутаций BTC/PAXG.
-			var rowsA = RowBuilder.BuildRowsDaily (
+			// A: без мутаций BTC/PAXG.
+			var buildA = RowBuilder.BuildDailyRows (
 				solWinTrain: solAll6h,
 				btcWinTrain: btcAll6h_A,
 				paxgWinTrain: paxgAll6h_A,
@@ -128,41 +135,33 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: NyTz);
 
-			Assert.True (rowsA.Count > 50, "rowsA слишком мало для теста");
+			var rowsA = buildA.LabeledRows
+				.OrderBy (r => r.Causal.EntryUtc.Value)
+				.ToList ();
 
-			// Выбор entry-дня: середина истории, не выходной.
-			int entryIdx = Enumerable.Range (200, 50)
-				.First (i =>
-				{
-					var utc = solAll6h[i].OpenTimeUtc;
-					var ny = TimeZoneInfo.ConvertTimeFromUtc (utc, NyTz);
-					return ny.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
-				});
+			Assert.True (rowsA.Count > 50, "rowsA слишком мало для теста.");
 
-			var entryUtc = solAll6h[entryIdx].OpenTimeUtc;
+			// Берём дату из реально построенных строк, чтобы гарантировать, что RowBuilder её не пропустил.
+			var entryUtc = rowsA[rowsA.Count / 3].Causal.EntryUtc.Value;
 
 			// B: мутируем ТОЛЬКО BTC/PAXG после entryUtc (чистое будущее для дня entryUtc).
-			for (int i = 0; i < btcAll6h_B.Count; i++)
+			foreach (var c in btcAll6h_B.Where (x => x.OpenTimeUtc > entryUtc))
 				{
-				if (btcAll6h_B[i].OpenTimeUtc > entryUtc)
-					{
-					btcAll6h_B[i].Close *= 10.0;
-					btcAll6h_B[i].High = btcAll6h_B[i].Close + 100.0;
-					btcAll6h_B[i].Low = btcAll6h_B[i].Close - 100.0;
-					}
+				c.Open *= 10.0;
+				c.Close *= 10.0;
+				c.High = c.Close + 100.0;
+				c.Low = c.Close - 100.0;
 				}
 
-			for (int i = 0; i < paxgAll6h_B.Count; i++)
+			foreach (var c in paxgAll6h_B.Where (x => x.OpenTimeUtc > entryUtc))
 				{
-				if (paxgAll6h_B[i].OpenTimeUtc > entryUtc)
-					{
-					paxgAll6h_B[i].Close *= 5.0;
-					paxgAll6h_B[i].High = paxgAll6h_B[i].Close + 200.0;
-					paxgAll6h_B[i].Low = paxgAll6h_B[i].Close - 200.0;
-					}
+				c.Open *= 5.0;
+				c.Close *= 5.0;
+				c.High = c.Close + 200.0;
+				c.Low = c.Close - 200.0;
 				}
 
-			var rowsB = RowBuilder.BuildRowsDaily (
+			var buildB = RowBuilder.BuildDailyRows (
 				solWinTrain: solAll6h,
 				btcWinTrain: btcAll6h_B,
 				paxgWinTrain: paxgAll6h_B,
@@ -173,20 +172,35 @@ namespace SolSignalModel1D_Backtest.Tests.Data.DataBuilder
 				extraDaily: extraDaily,
 				nyTz: NyTz);
 
-			var rowA = rowsA.SingleOrDefault (r => r.Date == entryUtc);
-			var rowB = rowsB.SingleOrDefault (r => r.Date == entryUtc);
+			var rowsB = buildB.LabeledRows
+				.OrderBy (r => r.Causal.EntryUtc.Value)
+				.ToList ();
+
+			var rowA = rowsA.SingleOrDefault (r => r.Causal.EntryUtc.Value == entryUtc);
+			var rowB = rowsB.SingleOrDefault (r => r.Causal.EntryUtc.Value == entryUtc);
 
 			Assert.NotNull (rowA);
 			Assert.NotNull (rowB);
 
-			// Label не должен зависеть от будущего BTC/PAXG.
-			Assert.Equal (rowA!.Label, rowB!.Label);
+			// TrueLabel не должен зависеть от будущего BTC/PAXG.
+			Assert.Equal (rowA!.TrueLabel, rowB!.TrueLabel);
 
-			// Фичи — тоже.
-			Assert.Equal (rowA.Features.Length, rowB.Features.Length);
-			for (int i = 0; i < rowA.Features.Length; i++)
+			// И фичи тоже.
+			AssertFeatureVectorsEqual (rowA.Causal, rowB.Causal);
+			}
+
+		private static void AssertFeatureVectorsEqual ( CausalDataRow a, CausalDataRow b, int precisionDigits = 10 )
+			{
+			// Вектор фич должен быть каноническим и фиксированной длины.
+			// Сравнение по значениям фиксирует forward-lookups и любые зависимости от будущих рядов.
+			var va = a.FeaturesVector.Span;
+			var vb = b.FeaturesVector.Span;
+
+			Assert.Equal (va.Length, vb.Length);
+
+			for (int i = 0; i < va.Length; i++)
 				{
-				Assert.Equal (rowA.Features[i], rowB.Features[i], 10);
+				Assert.Equal (va[i], vb[i], precisionDigits);
 				}
 			}
 		}

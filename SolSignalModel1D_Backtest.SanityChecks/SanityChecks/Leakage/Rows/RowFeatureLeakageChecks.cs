@@ -1,395 +1,368 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreWindowing = SolSignalModel1D_Backtest.Core.Data.Windowing;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Rows
-	{
-	/// <summary>
-	/// Self-check на жёсткую утечку в RowBuilder:
-	/// пытается найти фичи, которые по факту дублируют future-таргеты
-	/// (SolFwd1, MaxHigh24/MinLow24/Close24, Future1mAfterExit).
-	///
-	/// При обнаружении:
-	/// - выставляет Success = false;
-	/// - пишет в Errors конкретные даты, индексы фичей и имя future-таргета.
-	/// </summary>
-	public static class RowFeatureLeakageChecks
-		{
-		/// <summary>
-		/// Любое значение по модулю ниже этого порога считаем "практически нулём"
-		/// для целей фильтрации тривиальных совпадений.
-		/// </summary>
-		private const double ZeroValueTol = 1e-4; // 0.01 %
+{
+    /// <summary>
+    /// Self-check на утечку: пытается найти фичи, которые численно совпадают
+    /// с будущими таргетами (MaxHigh24/MinLow24/Close24/первая 1m после exit и т.п.).
+    ///
+    /// Контракт:
+    /// - фичи читаем только из Causal.FeaturesVector;
+    /// - будущие таргеты берём только из omniscient части записи;
+    /// - baseline-exit считается от EntryUtc (timestamp).
+    /// </summary>
+    public static class RowFeatureLeakageChecks
+    {
+        private const double ZeroValueTol = 1e-4;
 
-		/// <summary>
-		/// Человекочитаемые имена фич по их индексам в RowBuilder.
-		/// Важно: порядок должен совпадать с формированием feats в RowBuilder.
-		/// </summary>
-		private static readonly string[] FeatureNames =
-			{
-				"SolRet30",          //  0
-				"BtcRet30",          //  1
-				"SolBtcRet30",       //  2
-				"SolRet1",           //  3
-				"SolRet3",           //  4
-				"BtcRet1",           //  5
-				"BtcRet3",           //  6
-				"FngNorm",           //  7
-				"DxyChg30",          //  8
-				"GoldChg30",         //  9
-				"BtcVs200",          // 10
-				"SolRsiCenteredNorm",// 11 (SolRsiCentered / 100)
-				"RsiSlope3Norm",     // 12 (RsiSlope3 / 100)
-				"GapBtcSol1",        // 13
-				"GapBtcSol3",        // 14
-				"IsDownRegime",      // 15 (0/1)
-				"AtrPct",            // 16
-				"DynVol",            // 17
-				"IsStressRegime",    // 18 (0/1, hardRegime==2)
-				"SolAboveEma50",     // 19
-				"SolEma50vs200",     // 20
-				"BtcEma50vs200"      // 21
-			};
+        private static readonly IReadOnlyList<string> FeatureNames = CausalDataRow.FeatureNames;
 
-		public static SelfCheckResult CheckRowFeaturesAgainstFuture ( SelfCheckContext ctx )
-			{
-			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
+        public static SelfCheckResult CheckRowFeaturesAgainstFuture(SelfCheckContext ctx)
+        {
+            if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-			var result = new SelfCheckResult
-				{
-				Success = true,
-				Summary = "[rows-leak] RowBuilder features vs future targets"
-				};
+            var result = new SelfCheckResult
+            {
+                Success = true,
+                Summary = "[rows-leak] features vs future targets"
+            };
 
-			var allRows = ctx.AllRows;
-			var records = ctx.Records;
-			var sol1m = ctx.Sol1m;
-			var nyTz = ctx.NyTz;
+            var allRows = ctx.Records;
+            var sol1m = ctx.Sol1m;
+            var nyTz = ctx.NyTz;
 
-			if (allRows == null || allRows.Count == 0)
-				{
-				return SelfCheckResult.Ok ("[rows-leak] skip: AllRows is empty.");
-				}
+            if (allRows == null || allRows.Count == 0)
+                return SelfCheckResult.Ok("[rows-leak] skip: AllRows is empty.");
 
-			var totalRows = allRows.Count;
+            List<Candle1m>? sol1mSorted = null;
+            if (sol1m != null && sol1m.Count > 0)
+            {
+                sol1mSorted = sol1m
+                    .OrderBy(c => c.OpenTimeUtc)
+                    .ToList();
+            }
 
-			// Records/1m могут быть null — в этом случае проверяем только SolFwd1.
-			Dictionary<DateTime, PredictionRecord>? recByDate = null;
-			if (records != null && records.Count > 0)
-				{
-				recByDate = records
-					.GroupBy (r => r.DateUtc)
-					.ToDictionary (g => g.Key, g => g.First ());
-				}
+            var futureTargetsByDayKey = new Dictionary<DateTime, List<(string Name, double Value)>>();
 
-			List<Candle1m>? sol1mSorted = null;
-			if (sol1m != null && sol1m.Count > 0)
-				{
-				// Для поиска первой минуты после exit упорядочиваем по времени.
-				sol1mSorted = sol1m
-					.OrderBy (c => c.OpenTimeUtc)
-					.ToList ();
-				}
+            foreach (var rec in allRows)
+            {
+                if (rec == null)
+                    throw new InvalidOperationException("[rows-leak] AllRows contains null item.");
 
-			// Собираем для каждого дня набор future-таргетов:
-			// - SolFwd1 (из DataRow);
-			// - MaxHigh24 / MinLow24 / Close24 (из PredictionRecord, если есть);
-			// - Future1mAfterExit (первая 1m после baseline-exit, если есть sol1m).
-			var futureTargetsByDate = new Dictionary<DateTime, List<(string Name, double Value)>> ();
+                var entryUtc = CausalTimeKey.EntryUtc(rec);
+                var dayKey = entryUtc.EntryDayKeyUtc.Value;
 
-			foreach (var row in allRows)
-				{
-				var date = row.Date;
+                var targets = new List<(string Name, double Value)>();
 
-				var targets = new List<(string Name, double Value)>
-				{
-					("SolFwd1", row.SolFwd1)
-				};
+                // double? → кодируем null как NaN, чтобы ниже это попало в invalidTargetValueCount.
+                targets.Add(("MaxHigh24", rec.MaxHigh24));
+                targets.Add(("MinLow24", rec.MinLow24));
+                targets.Add(("Close24", rec.Close24));
 
-				if (recByDate != null && recByDate.TryGetValue (date, out var rec))
-					{
-					targets.Add (("MaxHigh24", rec.MaxHigh24));
-					targets.Add (("MinLow24", rec.MinLow24));
-					targets.Add (("Close24", rec.Close24));
-					}
+                double close24 = rec.Close24;
 
-				if (sol1mSorted != null && nyTz != null)
-					{
-					var exitUtc = CoreWindowing.ComputeBaselineExitUtc (date, nyTz);
-					var future1m = FindFirstMinuteAfter (sol1mSorted, exitUtc);
-					if (future1m != null)
-						{
-						targets.Add (("Future1mAfterExit", future1m.Close));
-						}
-					}
+                if (double.IsFinite(rec.Entry) && rec.Entry > 0.0 && double.IsFinite(close24))
+                {
+                    double solFwd1 = close24 / rec.Entry - 1.0;
+                    targets.Add(("SolFwd1(calc:Close24/Entry-1)", solFwd1));
+                }
 
-				futureTargetsByDate[date] = targets;
-				}
+                if (sol1mSorted != null && nyTz != null)
+                {
+                    var exitUtc = CoreNyWindowing.ComputeBaselineExitUtc(entryUtc, nyTz).Value;
+                    var future1m = FindFirstMinuteAfter(sol1mSorted, exitUtc);
+                    if (future1m != null)
+                        targets.Add(("Future1mAfterExit", future1m.Close));
+                }
 
-			// Ищем почти-равенство фичей и future-таргетов.
-			// Сохраняем сразу дополнительный контекст по строке —
-			// чтобы в логах не гадать, что происходит.
-			var suspiciousMatches = new List<MatchInfo> ();
+                futureTargetsByDayKey[dayKey] = targets;
+            }
 
-			foreach (var row in allRows)
-				{
-				if (row.Features == null || row.Features.Length == 0)
-					continue;
+            var suspiciousMatches = new List<MatchInfo>(capacity: 256);
 
-				if (!futureTargetsByDate.TryGetValue (row.Date, out var targets) || targets.Count == 0)
-					continue;
+            int emptyFeatureVectorCount = 0;
+            int invalidFeatureValueCount = 0;
+            int invalidTargetValueCount = 0;
 
-				var feats = row.Features;
+            var invalidFeatureSamples = new List<string>(capacity: 8);
+            var invalidTargetSamples = new List<string>(capacity: 8);
+            var emptyVectorSamples = new List<string>(capacity: 8);
 
-				for (int fi = 0; fi < feats.Length; fi++)
-					{
-					double fVal = feats[fi];
-					if (double.IsNaN (fVal) || double.IsInfinity (fVal))
-						continue;
+            foreach (var rec in allRows)
+            {
+                if (rec == null) continue;
 
-					foreach (var (name, tVal) in targets)
-						{
-						if (double.IsNaN (tVal) || double.IsInfinity (tVal))
-							continue;
+                var dayKey = CausalTimeKey.EntryDayKeyUtc(rec).Value;
 
-						if (IsNearlyEqual (fVal, tVal))
-							{
-							suspiciousMatches.Add (new MatchInfo
-								{
-								Date = row.Date,
-								FeatureIndex = fi,
-								TargetName = name,
-								FeatureVal = fVal,
-								TargetVal = tVal,
-								Label = row.Label,
-								MinMove = row.MinMove,
-								RegimeDown = row.RegimeDown,
-								HardRegime = row.HardRegime,
-								IsMorning = row.IsMorning
-								});
-							}
-						}
-					}
-				}
+                if (!futureTargetsByDayKey.TryGetValue(dayKey, out var targets) || targets.Count == 0)
+                    continue;
 
-			if (suspiciousMatches.Count == 0)
-				{
-				result.Summary += " → no suspicious feature/target equality detected.";
-				return result;
-				}
+                var vec = rec.Causal.FeaturesVector;
+                if (vec.IsEmpty)
+                {
+                    emptyFeatureVectorCount++;
+                    if (emptyVectorSamples.Count < 5)
+                        emptyVectorSamples.Add($"[rows-leak] empty FeaturesVector: dayKey={dayKey:O}");
+                    continue;
+                }
 
-			// Базовые пороги:
-			// - минимум совпадений;
-			// - минимум доля по выборке;
-			// - минимум ненулевых совпадений.
-			const int MinMatchesPerFeatureTarget = 5;        // оставляем низким, но дальше классифицируем на noise/real
-			const double MinMatchFrac = 0.005;               // ≥0.5% выборки
-			const int MinNonZeroMatchesPerFeatureTarget = 3; // минимум ненулевых совпадений
+                var feats = vec.Span;
 
-			var groupedRaw = suspiciousMatches
-				.GroupBy (m => new { m.FeatureIndex, m.TargetName })
-				.Select (g =>
-				{
-					var all = g.ToList ();
-					var nonZero = all
-						.Where (m =>
-							Math.Abs (m.FeatureVal) > ZeroValueTol ||
-							Math.Abs (m.TargetVal) > ZeroValueTol)
-						.ToList ();
+                for (int fi = 0; fi < feats.Length; fi++)
+                {
+                    double fVal = feats[fi];
+                    if (double.IsNaN(fVal) || double.IsInfinity(fVal))
+                    {
+                        invalidFeatureValueCount++;
+                        if (invalidFeatureSamples.Count < 5)
+                        {
+                            string featName =
+                                fi >= 0 && fi < FeatureNames.Count
+                                    ? FeatureNames[fi]
+                                    : $"feat{fi}";
 
-					return new FeatureTargetGroup
-						{
-						FeatureIndex = g.Key.FeatureIndex,
-						TargetName = g.Key.TargetName,
-						AllMatches = all,
-						NonZeroMatches = nonZero
-						};
-				})
-				.Where (g =>
-					g.AllMatches.Count >= MinMatchesPerFeatureTarget &&
-					g.AllMatches.Count / (double) totalRows >= MinMatchFrac &&
-					g.NonZeroMatches.Count >= MinNonZeroMatchesPerFeatureTarget)
-				.ToList ();
+                            invalidFeatureSamples.Add(
+                                $"[rows-leak] invalid feature value: dayKey={dayKey:O}, featureIndex={fi} ({featName}), featureVal={fVal}");
+                        }
+                        continue;
+                    }
 
-			if (groupedRaw.Count == 0)
-				{
-				result.Summary += " → only rare coincidences, treating as noise.";
-				return result;
-				}
+                    foreach (var (name, tVal) in targets)
+                    {
+                        if (double.IsNaN(tVal) || double.IsInfinity(tVal))
+                        {
+                            invalidTargetValueCount++;
+                            if (invalidTargetSamples.Count < 5)
+                            {
+                                invalidTargetSamples.Add(
+                                    $"[rows-leak] invalid target value: dayKey={dayKey:O}, target={name}, targetVal={tVal}");
+                            }
+                            continue;
+                        }
 
-			var realLeaks = new List<FeatureTargetGroup> ();
-			var noiseGroups = new List<FeatureTargetGroup> ();
+                        if (IsNearlyEqual(fVal, tVal))
+                        {
+                            suspiciousMatches.Add(new MatchInfo
+                            {
+                                Date = dayKey,
+                                FeatureIndex = fi,
+                                TargetName = name,
+                                FeatureVal = fVal,
+                                TargetVal = tVal,
 
-			foreach (var g in groupedRaw)
-				{
-				bool isBinaryFeature =
-					g.AllMatches.All (m =>
-						Math.Abs (m.FeatureVal) <= 1.0 + 1e-6 &&
-						(Math.Abs (m.FeatureVal) <= ZeroValueTol ||
-						 Math.Abs (m.FeatureVal - 1.0) <= ZeroValueTol));
+                                TrueLabel = rec.TrueLabel,
+                                MinMove = rec.MinMove,
+                                RegimeDown = rec.RegimeDown,
+                                IsMorning = rec.Causal.IsMorning == true
+                            });
+                        }
+                    }
+                }
+            }
 
-				double fracZeroTarget =
-					g.AllMatches.Count (m => Math.Abs (m.TargetVal) <= ZeroValueTol)
-					/ (double) g.AllMatches.Count;
+            if (emptyFeatureVectorCount > 0 || invalidFeatureValueCount > 0 || invalidTargetValueCount > 0)
+            {
+                result.Success = false;
 
-				bool targetMostlyZero = fracZeroTarget >= 0.8;
+                if (emptyFeatureVectorCount > 0)
+                {
+                    result.Errors.Add($"[rows-leak] invalid input: empty FeaturesVector count={emptyFeatureVectorCount}.");
+                    foreach (var s in emptyVectorSamples) result.Errors.Add(s);
+                }
 
-				// Классический случай шума: бинарная фича (0/1) vs почти везде SolFwd1≈0.
-				if (isBinaryFeature && targetMostlyZero && g.TargetName == "SolFwd1")
-					{
-					noiseGroups.Add (g);
-					}
-				else
-					{
-					realLeaks.Add (g);
-					}
-				}
+                if (invalidFeatureValueCount > 0)
+                {
+                    result.Errors.Add($"[rows-leak] invalid input: NaN/Infinity in features count={invalidFeatureValueCount}.");
+                    foreach (var s in invalidFeatureSamples) result.Errors.Add(s);
+                }
 
-			// Сначала логируем «шумные» группы как предупреждения:
-			foreach (var g in noiseGroups)
-				{
-				int countTotal = g.AllMatches.Count;
-				int countNonZero = g.NonZeroMatches.Count;
-				double fracTotal = countTotal / (double) totalRows;
-				double fracNonZero = countNonZero / (double) totalRows;
+                if (invalidTargetValueCount > 0)
+                {
+                    result.Errors.Add($"[rows-leak] invalid input: NaN/Infinity in future targets count={invalidTargetValueCount}.");
+                    foreach (var s in invalidTargetSamples) result.Errors.Add(s);
+                }
+            }
 
-				string featName =
-					g.FeatureIndex >= 0 && g.FeatureIndex < FeatureNames.Length
-						? FeatureNames[g.FeatureIndex]
-						: $"feat{g.FeatureIndex}";
+            if (suspiciousMatches.Count == 0)
+            {
+                result.Summary += " → no suspicious equality detected.";
+                return result;
+            }
 
-				var header =
-					$"[rows-leak] noise group (binary/near-zero): " +
-					$"featureIndex={g.FeatureIndex} ({featName}), " +
-					$"target={g.TargetName}, matches={countTotal}, " +
-					$"frac={fracTotal:P2}, nonZero={countNonZero}, fracNonZero={fracNonZero:P2}";
+            const int MinMatchesPerFeatureTarget = 5;
+            const double MinMatchFrac = 0.005;
+            const int MinNonZeroMatchesPerFeatureTarget = 3;
 
-				result.Warnings.Add (header);
+            int totalRows = allRows.Count;
 
-				foreach (var sample in g.AllMatches.OrderBy (x => x.Date).Take (5))
-					{
-					var line =
-						$"[rows-leak:noise]   date={sample.Date:O}, " +
-						$"featureVal={sample.FeatureVal:0.########}, " +
-						$"targetVal={sample.TargetVal:0.########}, " +
-						$"label={sample.Label}, minMove={sample.MinMove:0.####}, " +
-						$"regimeDown={sample.RegimeDown}, hardRegime={sample.HardRegime}, isMorning={sample.IsMorning}";
-					result.Warnings.Add (line);
-					}
-				}
+            var groupedRaw = suspiciousMatches
+                .GroupBy(m => new { m.FeatureIndex, m.TargetName })
+                .Select(g =>
+                {
+                    var all = g.ToList();
+                    var nonZero = all
+                        .Where(m =>
+                            Math.Abs(m.FeatureVal) > ZeroValueTol ||
+                            Math.Abs(m.TargetVal) > ZeroValueTol)
+                        .ToList();
 
-			if (realLeaks.Count == 0)
-				{
-				// Есть только шумные группы (как у тебя с feat 15/18):
-				// трактуем как отсутствие жёстких утечек.
-				result.Summary += " → only binary/near-zero groups, treated as noise.";
-				result.Success = true;
-				return result;
-				}
+                    return new FeatureTargetGroup
+                    {
+                        FeatureIndex = g.Key.FeatureIndex,
+                        TargetName = g.Key.TargetName,
+                        AllMatches = all,
+                        NonZeroMatches = nonZero
+                    };
+                })
+                .Where(g =>
+                    g.AllMatches.Count >= MinMatchesPerFeatureTarget &&
+                    g.AllMatches.Count / (double)totalRows >= MinMatchFrac &&
+                    g.NonZeroMatches.Count >= MinNonZeroMatchesPerFeatureTarget)
+                .ToList();
 
-			// Если остались реальные подозрения → валим self-check
-			result.Success = false;
+            if (groupedRaw.Count == 0)
+            {
+                result.Summary += " → only rare coincidences, treating as noise.";
+                return result;
+            }
 
-			foreach (var g in realLeaks.OrderByDescending (x => x.NonZeroMatches.Count))
-				{
-				int countTotal = g.AllMatches.Count;
-				int countNonZero = g.NonZeroMatches.Count;
-				double fracTotal = countTotal / (double) totalRows;
-				double fracNonZero = countNonZero / (double) totalRows;
+            var realLeaks = new List<FeatureTargetGroup>();
+            var noiseGroups = new List<FeatureTargetGroup>();
 
-				string featName =
-					g.FeatureIndex >= 0 && g.FeatureIndex < FeatureNames.Length
-						? FeatureNames[g.FeatureIndex]
-						: $"feat{g.FeatureIndex}";
+            foreach (var g in groupedRaw)
+            {
+                bool isBinaryFeature =
+                    g.AllMatches.All(m =>
+                        Math.Abs(m.FeatureVal) <= 1.0 + 1e-6 &&
+                        (Math.Abs(m.FeatureVal) <= ZeroValueTol ||
+                         Math.Abs(m.FeatureVal - 1.0) <= ZeroValueTol));
 
-				var header =
-					$"[rows-leak] possible feature leak: featureIndex={g.FeatureIndex} ({featName}), " +
-					$"target={g.TargetName}, matches={countTotal}, " +
-					$"frac={fracTotal:P2}, nonZero={countNonZero}, fracNonZero={fracNonZero:P2}";
+                double fracZeroTarget =
+                    g.AllMatches.Count(m => Math.Abs(m.TargetVal) <= ZeroValueTol)
+                    / (double)g.AllMatches.Count;
 
-				result.Errors.Add (header);
-				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.matchesTotal"] = countTotal;
-				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.matchesNonZero"] = countNonZero;
-				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.fracTotal"] = fracTotal;
-				result.Metrics[$"rows.leak.{g.TargetName}.feat{g.FeatureIndex}.fracNonZero"] = fracNonZero;
+                bool targetMostlyZero = fracZeroTarget >= 0.8;
 
-				foreach (var sample in g.NonZeroMatches.OrderBy (x => x.Date).Take (5))
-					{
-					var line =
-						$"[rows-leak]   date={sample.Date:O}, " +
-						$"featureVal={sample.FeatureVal:0.########}, " +
-						$"targetVal={sample.TargetVal:0.########}, " +
-						$"label={sample.Label}, minMove={sample.MinMove:0.####}, " +
-						$"regimeDown={sample.RegimeDown}, hardRegime={sample.HardRegime}, isMorning={sample.IsMorning}";
-					result.Errors.Add (line);
-					}
-				}
+                if (isBinaryFeature && targetMostlyZero)
+                    noiseGroups.Add(g);
+                else
+                    realLeaks.Add(g);
+            }
 
-			return result;
-			}
+            foreach (var g in noiseGroups)
+                LogGroup(result.Warnings, totalRows, g, "[rows-leak] noise group");
 
-		/// <summary>
-		/// Поиск первой 1m-свечи строго после указанного времени.
-		/// </summary>
-		private static Candle1m? FindFirstMinuteAfter ( List<Candle1m> minutes, DateTime t )
-			{
-			for (int i = 0; i < minutes.Count; i++)
-				{
-				if (minutes[i].OpenTimeUtc > t)
-					return minutes[i];
-				}
-			return null;
-			}
+            if (realLeaks.Count == 0)
+            {
+                result.Summary += " → only binary/near-zero groups, treated as noise.";
+                return result;
+            }
 
-		/// <summary>
-		/// Проверка почти-равенства двух double значений:
-		/// сначала по абсолютному порогу, затем по относительному.
-		/// </summary>
-		private static bool IsNearlyEqual ( double x, double y )
-			{
-			if (double.IsNaN (x) || double.IsNaN (y))
-				return false;
+            result.Success = false;
+            foreach (var g in realLeaks.OrderByDescending(x => x.NonZeroMatches.Count))
+                LogGroup(result.Errors, totalRows, g, "[rows-leak] possible feature leak");
 
-			const double AbsTol = 1e-8;   // для значений около 0
-			const double RelTol = 1e-4;   // 0.01% относительная погрешность
+            result.Summary += $" → FAILED: suspicious groups={realLeaks.Count}.";
+            return result;
+        }
 
-			double diff = Math.Abs (x - y);
-			if (diff <= AbsTol)
-				return true;
+        private static void LogGroup(List<string> sink, int totalRows, FeatureTargetGroup g, string headerPrefix)
+        {
+            int countTotal = g.AllMatches.Count;
+            int countNonZero = g.NonZeroMatches.Count;
+            double fracTotal = countTotal / (double)totalRows;
+            double fracNonZero = countNonZero / (double)totalRows;
 
-			double max = Math.Max (Math.Abs (x), Math.Abs (y));
-			if (max == 0.0)
-				return diff == 0.0;
+            string featName =
+                g.FeatureIndex >= 0 && g.FeatureIndex < FeatureNames.Count
+                    ? FeatureNames[g.FeatureIndex]
+                    : $"feat{g.FeatureIndex}";
 
-			return diff / max <= RelTol;
-			}
+            var header =
+                $"{headerPrefix}: featureIndex={g.FeatureIndex} ({featName}), " +
+                $"target={g.TargetName}, matches={countTotal}, frac={fracTotal:P2}, " +
+                $"nonZero={countNonZero}, fracNonZero={fracNonZero:P2}";
 
-		/// <summary>
-		/// Одна конкретная "подозрительная" пара (фича ↔ таргет) для конкретной даты.
-		/// </summary>
-		private sealed class MatchInfo
-			{
-			public DateTime Date { get; set; }
-			public int FeatureIndex { get; set; }
-			public string TargetName { get; set; } = string.Empty;
-			public double FeatureVal { get; set; }
-			public double TargetVal { get; set; }
-			public int Label { get; set; }
-			public double MinMove { get; set; }
-			public bool RegimeDown { get; set; }
-			public int HardRegime { get; set; }
-			public bool IsMorning { get; set; }
-			}
+            sink.Add(header);
 
-		/// <summary>
-		/// Группа совпадений по конкретной паре (featureIndex, targetName).
-		/// </summary>
-		private sealed class FeatureTargetGroup
-			{
-			public int FeatureIndex { get; set; }
-			public string TargetName { get; set; } = string.Empty;
-			public List<MatchInfo> AllMatches { get; set; } = new ();
-			public List<MatchInfo> NonZeroMatches { get; set; } = new ();
-			}
-		}
-	}
+            foreach (var sample in g.NonZeroMatches.OrderBy(x => x.Date).Take(5))
+            {
+                var line =
+                    $"[rows-leak]   dayKey={sample.Date:O}, " +
+                    $"featureVal={sample.FeatureVal:0.########}, " +
+                    $"targetVal={sample.TargetVal:0.########}, " +
+                    $"trueLabel={sample.TrueLabel}, minMove={sample.MinMove:0.####}, " +
+                    $"regimeDown={sample.RegimeDown}, isMorning={sample.IsMorning}";
+                sink.Add(line);
+            }
+        }
+
+        private static Candle1m? FindFirstMinuteAfter(List<Candle1m> minutes, DateTime t)
+        {
+            int lo = 0;
+            int hi = minutes.Count - 1;
+            int ans = -1;
+
+            while (lo <= hi)
+            {
+                int mid = lo + ((hi - lo) >> 1);
+                if (minutes[mid].OpenTimeUtc > t)
+                {
+                    ans = mid;
+                    hi = mid - 1;
+                }
+                else
+                {
+                    lo = mid + 1;
+                }
+            }
+
+            return ans >= 0 ? minutes[ans] : null;
+        }
+
+        private static bool IsNearlyEqual(double x, double y)
+        {
+            if (double.IsNaN(x) || double.IsNaN(y))
+                return false;
+
+            const double AbsTol = 1e-8;
+            const double RelTol = 1e-4;
+
+            double diff = Math.Abs(x - y);
+            if (diff <= AbsTol)
+                return true;
+
+            double max = Math.Max(Math.Abs(x), Math.Abs(y));
+            if (max == 0.0)
+                return diff == 0.0;
+
+            return diff / max <= RelTol;
+        }
+
+        private sealed class MatchInfo
+        {
+            public DateTime Date { get; set; }
+            public int FeatureIndex { get; set; }
+            public string TargetName { get; set; } = string.Empty;
+            public double FeatureVal { get; set; }
+            public double TargetVal { get; set; }
+
+            public int TrueLabel { get; set; }
+            public double MinMove { get; set; }
+            public bool RegimeDown { get; set; }
+            public bool IsMorning { get; set; }
+        }
+
+        private sealed class FeatureTargetGroup
+        {
+            public int FeatureIndex { get; set; }
+            public string TargetName { get; set; } = string.Empty;
+            public List<MatchInfo> AllMatches { get; set; } = new();
+            public List<MatchInfo> NonZeroMatches { get; set; } = new();
+        }
+    }
+}
+

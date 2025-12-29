@@ -1,136 +1,149 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML.SL;
+using SolSignalModel1D_Backtest.Core.Omniscient.ML.SL;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using CoreSlOfflineBuilder = SolSignalModel1D_Backtest.Tests.Data.NyWindowing.ComputeBaselineExitUtc.SlOfflineBuilder;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest.Tests.ML.SL
-	{
-	/// <summary>
-	/// Тесты, которые проверяют, что SlDatasetBuilder не допускает утечек:
-	/// - SL-сэмплы строятся на всей истории (через SlOfflineBuilder),
-	///   но потом режутся по baseline-exit <= trainUntil.
-	/// </summary>
-	public sealed class SlDatasetBuilderLeakageTests
-		{
-		/// <summary>
-		/// Сценарий:
-		///
-		/// 1) Строим один утренний день:
-		///    - есть DataRow с IsMorning = true;
-		///    - есть 6h-свеча для entry (Close > 0);
-		///    - есть 1m-окно после entry, где уже в первой минуте
-		///      одновременно срабатывают и TP, и SL → SlOfflineBuilder
-		///      гарантированно создаст хотя бы один сэмпл.
-		///
-		/// 2) Через SlOfflineBuilder.Build убеждаемся, что raw-сэмплы есть.
-		///
-		/// 3) Вычисляем baseline-exit этого дня и ставим trainUntil строго
-		///    между entry и exit.
-		///
-		/// 4) Через SlDatasetBuilder.Build строим датасет и ожидаем:
-		///    - Samples.Count == 0, т.к. baseline-exit > trainUntil;
-		///    - MorningRows пуст или не содержит этот день.
-		///
-		/// Если кто-то уберёт фильтрацию по baseline-exit в SlDatasetBuilder,
-		/// этот тест сломается: сэмпл останется в Samples при trainUntil "внутри" baseline-окна.
-		/// </summary>
-		[Fact]
-		public void Build_DropsSamplesWhoseBaselineExitGoesBeyondTrainUntil ()
-			{
-			var nyTz = TimeZones.NewYork;
+{
+    /// <summary>
+    /// Тесты, которые проверяют, что SlDatasetBuilder не допускает утечек:
+    /// - SL-сэмплы строятся по 1m-пути,
+    /// - но в Train датасет попадают только дни, у которых baseline-exit day-key <= trainUntilExitDayKeyUtc.
+    /// </summary>
+    public sealed class SlDatasetBuilderLeakageTests
+    {
+        [Fact]
+        public void Build_DropsSamplesWhoseBaselineExitGoesBeyondTrainUntil()
+        {
+            var nyTz = TimeZones.NewYork;
 
-			// Будний день, NY-утро.
-			var entryLocalNy = new DateTime (2025, 1, 6, 8, 0, 0, DateTimeKind.Unspecified);
-			var entryUtc = TimeZoneInfo.ConvertTimeToUtc (entryLocalNy, nyTz);
+            // Будний день, NY-утро (канонично через NyWindowing).
+            var nyDay = new NyTradingDay(new DateOnly(2025, 1, 6));
+            var entryUtcDt = NyWindowing.ComputeEntryUtcFromNyDayOrThrow(nyDay, nyTz).Value;
+            var entry = new EntryUtc(entryUtcDt);
+            var nyEntry = NyWindowing.CreateNyTradingEntryUtcOrThrow(entry, nyTz);
 
-			var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
-			Assert.True (exitUtc > entryUtc);
+            var exitUtc = NyWindowing.ComputeBaselineExitUtc(entry, nyTz);
+            Assert.True(exitUtc.Value > entryUtcDt);
 
-			// Один утренний DataRow.
-			var rows = new List<DataRow>
-			{
-				new DataRow
-				{
-					Date = entryUtc,
-					IsMorning = true,
-					MinMove = 0.02,
-					Features = new double[4]
-				}
-			};
+            // 1m-окно (короткое, но достаточное для срабатывания TP/SL в первой минуте).
+            var sol1m = new List<Candle1m>();
+            double entryPrice = 100.0;
+            double tpPct = 0.01;
+            double slPct = 0.02;
 
-			// 6h-свеча для entry (ключ по Date, как в SlOfflineBuilder).
-			var sol6hDict = new Dictionary<DateTime, Candle6h>
-				{
-				[entryUtc] = new Candle6h
-					{
-					OpenTimeUtc = entryUtc,
-					Close = 100.0,
-					High = 100.0,
-					Low = 100.0
-					}
-				};
+            for (int i = 0; i < 10; i++)
+            {
+                var t = entryUtcDt.AddMinutes(i);
 
-			// 1m-окно [entry; entry+10m) с "жирными" High/Low, чтобы TP/SL точно сработали.
-			var sol1m = new List<Candle1m> ();
-			double entryPrice = 100.0;
-			double tpPct = 0.01;
-			double slPct = 0.02;
+                sol1m.Add(new Candle1m
+                {
+                    OpenTimeUtc = t,
+                    High = entryPrice * (1.0 + tpPct + 0.01),
+                    Low = entryPrice * (1.0 - slPct - 0.01),
+                    Close = entryPrice
+                });
+            }
 
-			for (int i = 0; i < 10; i++)
-				{
-				var t = entryUtc.AddMinutes (i);
+            // 1h история нужна, потому что SlFeatureBuilder строит фичи из 1h.
+            var sol1h = new List<Candle1h>();
+            var hStart = entryUtcDt.AddDays(-7);
+            var hEnd = exitUtc.Value.AddHours(2);
 
-				sol1m.Add (new Candle1m
-					{
-					OpenTimeUtc = t,
-					// Уже в первой минуте High и Low таковы, что одновременно
-					// выполняются условия TP и SL; приоритет у SL.
-					High = entryPrice * (1.0 + tpPct + 0.01),
-					Low = entryPrice * (1.0 - slPct - 0.01),
-					Close = entryPrice
-					});
-				}
+            for (var t = hStart; t < hEnd; t = t.AddHours(1))
+            {
+                sol1h.Add(new Candle1h
+                {
+                    OpenTimeUtc = t,
+                    Open = entryPrice,
+                    High = entryPrice * 1.001,
+                    Low = entryPrice * 0.999,
+                    Close = entryPrice
+                });
+            }
 
-			// 1h-свечи для фич нам не обязательны — SlFeatureBuilder нормально работает и с null.
-			IReadOnlyList<Candle1h>? sol1h = null;
+            // Один утренний BacktestRecord.
+            var rows = new List<BacktestRecord>
+            {
+                new BacktestRecord
+                {
+                    Causal = new CausalPredictionRecord
+                    {
+                        TradingEntryUtc = nyEntry,
+                        MinMove = 0.02,
+                        PredLabel = 2,
+                        PredMicroUp = false,
+                        PredMicroDown = false
+                    },
+                    Forward = new ForwardOutcomes
+                    {
+                        TrueLabel = 2,
+                        MicroTruth = OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth),
 
-			// 1) Raw SL-сэмплы напрямую через SlOfflineBuilder.
-			var rawSamples = SlOfflineBuilder.Build (
-				rows: rows,
-				sol1h: sol1h,
-				sol1m: sol1m,
-				sol6hDict: sol6hDict,
-				tpPct: tpPct,
-				slPct: slPct,
-				strongSelector: null);
+                        EntryUtc = entry,
+                        Entry = entryPrice,
+                        MaxHigh24 = entryPrice,
+                        MinLow24 = entryPrice,
+                        Close24 = entryPrice,
 
-			Assert.NotEmpty (rawSamples);
-			Assert.All (rawSamples, s => Assert.Equal (entryUtc, s.EntryUtc));
+                        MinMove = 0.02,
+                        WindowEndUtc = exitUtc.Value,
 
-			// 2) trainUntil ставим строго внутри baseline-окна → baseline-exit > trainUntil.
-			var trainUntil = entryUtc + TimeSpan.FromTicks ((exitUtc - entryUtc).Ticks / 2);
+                        DayMinutes = Array.Empty<Candle1m>()
+                    }
+                }
+            };
 
-			var ds = SlDatasetBuilder.Build (
-				rows: rows,
-				sol1h: sol1h,
-				sol1m: sol1m,
-				sol6hDict: sol6hDict,
-				trainUntil: trainUntil,
-				tpPct: tpPct,
-				slPct: slPct,
-				strongSelector: null);
+            var sol6hDict = new Dictionary<DateTime, Candle6h>
+            {
+                [entryUtcDt] = new Candle6h
+                {
+                    OpenTimeUtc = entryUtcDt,
+                    Open = entryPrice,
+                    High = entryPrice,
+                    Low = entryPrice,
+                    Close = entryPrice
+                }
+            };
 
-			// Сэмплы с таким entryUtc не должны пройти baseline-фильтр.
-			Assert.Empty (ds.Samples);
+            // Raw SL-сэмплы напрямую через SlOfflineBuilder: без фильтра по boundary они должны строиться.
+            var rawSamples = CoreSlOfflineBuilder.Build(
+                 rows: rows,
+                 sol1h: sol1h,
+                 sol1m: sol1m,
+                 sol6hDict: sol6hDict,
+                 tpPct: tpPct,
+                 slPct: slPct,
+                 strongSelector: null);
 
-			// И в MorningRows такой день тоже не должен остаться,
-			// т.к. он релевантен только сэмплам, которые отрезаны.
-			Assert.DoesNotContain (ds.MorningRows, r => r.Date == entryUtc);
-			}
-		}
-	}
+            Assert.NotEmpty(rawSamples);
+            Assert.All(rawSamples, s => Assert.Equal(entryUtcDt, s.EntryUtc));
+
+            // Граница ставится на день ДО exit-day-key => этот день должен попасть в OOS, а train-сэмплы быть пустыми.
+            var exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromUtcOrThrow(exitDayKeyUtc.Value.AddDays(-1));
+
+            var ds = SlDatasetBuilder.Build(
+                rows: rows,
+                sol1h: sol1h,
+                sol1m: sol1m,
+                sol6hDict: sol6hDict,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                tpPct: tpPct,
+                slPct: slPct,
+                strongSelector: null);
+
+            Assert.Empty(ds.Samples);
+            Assert.Empty(ds.MorningRows);
+        }
+    }
+}
+

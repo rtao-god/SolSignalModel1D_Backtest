@@ -1,4 +1,4 @@
-﻿using SolSignalModel1D_Backtest.Reports;
+using SolSignalModel1D_Backtest.Reports;
 
 namespace SolSignalModel1D_Backtest.Api.Endpoints
 	{

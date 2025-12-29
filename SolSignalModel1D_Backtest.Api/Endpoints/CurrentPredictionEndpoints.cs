@@ -1,5 +1,4 @@
-﻿using System;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 using SolSignalModel1D_Backtest.Reports;
 
 namespace SolSignalModel1D_Backtest.Api.Endpoints
@@ -39,11 +38,11 @@ namespace SolSignalModel1D_Backtest.Api.Endpoints
 				DateTime? cutoff = null;
 				if (days.HasValue && days.Value > 0)
 					{
-					cutoff = DateTime.UtcNow.Date.AddDays (-days.Value);
+					cutoff = DateTime.UtcNow.ToCausalDateUtc().AddDays (-days.Value);
 					}
 
 				var items = index
-					.Where (x => !cutoff.HasValue || x.PredictionDateUtc.Date >= cutoff.Value)
+					.Where (x => !cutoff.HasValue || x.PredictionDateUtc.ToCausalDateUtc() >= cutoff.Value)
 					.Select (x => new
 						{
 						id = x.Id,

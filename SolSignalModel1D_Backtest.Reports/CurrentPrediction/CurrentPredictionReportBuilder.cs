@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.CurrentPrediction;
-using SolSignalModel1D_Backtest.Core.Domain;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+using SolSignalModel1D_Backtest.Core.Omniscient.Analytics.CurrentPrediction;
+using SolSignalModel1D_Backtest.Core.Causal.Domain;
 using SolSignalModel1D_Backtest.Reports.Model;
 
 namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
@@ -72,7 +70,9 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			info.Items.Add (new KeyValueItem
 				{
 				Key = "Вероятность срабатывания стоп-лосса",
-				Value = $"{snapshot.SlProb:0.0} %"
+				Value = snapshot.SlProb.HasValue
+					? $"{snapshot.SlProb.Value:0.0} %"
+					: $"нет данных ({snapshot.SlProb.MissingReason})"
 				});
 
 			info.Items.Add (new KeyValueItem
@@ -301,12 +301,12 @@ namespace SolSignalModel1D_Backtest.Reports.CurrentPrediction
 			return string.IsNullOrWhiteSpace (rawTrim) ? "нет данных" : rawTrim;
 			}
 
-		private static string FormatSlDecision ( object? slDecision )
+		private static string FormatSlDecision ( OptionalValue<bool> slDecision )
 			{
-			if (slDecision == null)
-				return "нет данных";
+			if (!slDecision.HasValue)
+				return $"нет данных ({slDecision.MissingReason})";
 
-			var raw = slDecision.ToString () ?? string.Empty;
+			var raw = slDecision.Value.ToString () ?? string.Empty;
 			var lower = raw.Trim ().ToLowerInvariant ();
 
 			if (lower == "true" || lower == "1" || lower == "high")

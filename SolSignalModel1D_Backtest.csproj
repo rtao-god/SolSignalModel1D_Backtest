@@ -5,6 +5,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 	</PropertyGroup>
 	
 	<ItemGroup>
@@ -13,7 +15,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Compile Remove="SolSignalModel1D_Backtest.Core\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.Core.Causal\**\*.cs" />
+		<Compile Remove="SolSignalModel1D_Backtest.Core.Omniscient\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Api\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Reports\**\*.cs" />
 		<Compile Remove="SolSignalModel1D_Backtest.Tests\**\*.cs" />
@@ -21,9 +24,14 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
+		<ProjectReference Include="SolSignalModel1D_Backtest.Core.Causal\SolSignalModel1D_Backtest.Core.Causal.csproj" />
+		<ProjectReference Include="SolSignalModel1D_Backtest.Core.Omniscient\SolSignalModel1D_Backtest.Core.Omniscient.csproj" />
 		<ProjectReference Include="SolSignalModel1D_Backtest.Reports\SolSignalModel1D_Backtest.Reports.csproj" />
 		<ProjectReference Include="SolSignalModel1D_Backtest.SanityChecks\SolSignalModel1D_Backtest.SanityChecks.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="cache\indicators\_fills\" />
 	</ItemGroup>
 
 </Project>

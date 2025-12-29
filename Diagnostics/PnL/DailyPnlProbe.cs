@@ -1,217 +1,207 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
-namespace SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL
-	{
-	/// <summary>
-	/// Простейший PnL-пробник по PredictionRecord:
-	/// - делит записи на train/OOS по trainUntilUtc;
-	/// - строит "наивный" PnL без плеча, SL, delayed и Anti-D;
-	/// - печатает метрики отдельно для train и OOS.
-	/// Используется только для диагностики возможной утечки.
-	/// </summary>
-	public static class DailyPnlProbe
-		{
-		/// <summary>
-		/// Запускает простой PnL-анализ по дневным PredictionRecord.
-		/// Данные делятся по trainUntilUtc, направление берётся из PredLabel + микро.
-		/// </summary>
-		public static void RunSimpleProbe (
-			IReadOnlyList<PredictionRecord> records,
-			DateTime trainUntilUtc )
-			{
-			if (records == null || records.Count == 0)
-				{
-				Console.WriteLine ("[pnl-probe] records is null or empty – nothing to compute.");
-				return;
-				}
+namespace SolSignalModel1D_Backtest.Diagnostics.PnL
+{
+    public static class DailyPnlProbe
+    {
+        public static void RunSimpleProbe(
+            IReadOnlyList<BacktestRecord> records,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz)
+        {
+            if (records == null || records.Count == 0)
+            {
+                Console.WriteLine("[pnl-probe] records is null or empty – nothing to compute.");
+                return;
+            }
 
-			// Сначала сортируем по дате, чтобы эквити считалось в правильном порядке.
-			var ordered = records
-				.OrderBy (r => r.DateUtc)
-				.ToList ();
+            if (trainUntilExitDayKeyUtc.IsDefault)
+            {
+                Console.WriteLine("[pnl-probe] trainUntilExitDayKeyUtc is default – nothing to compute.");
+                return;
+            }
 
-			var train = ordered
-				.Where (r => r.DateUtc <= trainUntilUtc)
-				.ToList ();
+            if (nyTz == null)
+            {
+                Console.WriteLine("[pnl-probe] nyTz is null – nothing to compute.");
+                return;
+            }
 
-			var oos = ordered
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+            var ordered = records
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
 
-			Console.WriteLine (
-				$"[pnl-probe] trainUntilUtc = {trainUntilUtc:yyyy-MM-dd}, " +
-				$"totalRecords = {ordered.Count}, train = {train.Count}, oos = {oos.Count}");
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: nyTz);
 
-			if (train.Count == 0 || oos.Count == 0)
-				{
-				Console.WriteLine ("[pnl-probe] WARNING: one of splits (train/OOS) is empty – results may be uninformative.");
-				}
+            var train = split.Train;
+            var oos = split.Oos;
 
-			// Считаем PnL для train и OOS отдельно.
-			var trainStats = ComputeSimplePnlStats (train);
-			var oosStats = ComputeSimplePnlStats (oos);
+            Console.WriteLine(
+                $"[pnl-probe] trainUntilExitDayKey = {NyTrainSplit.ToIsoDate(trainUntilExitDayKeyUtc)}, " +
+                $"totalRecords={ordered.Count}, train={train.Count}, oos={oos.Count}, excluded={split.Excluded.Count}");
 
-			PrintStats ("[pnl-probe] TRAIN", trainStats);
-			PrintStats ("[pnl-probe] OOS  ", oosStats);
-			}
+            if (train.Count == 0 || oos.Count == 0)
+            {
+                Console.WriteLine("[pnl-probe] WARNING: one of splits (train/OOS) is empty – results may be uninformative.");
+            }
 
-		/// <summary>
-		/// Вычисляет наивный PnL по списку PredictionRecord:
-		/// - направление сделки определяется PredLabel + микро;
-		/// - доходность = (Close24 - Entry) / Entry (для long), с минусом для short;
-		/// - эквити считается как последовательное умножение (1 + ret);
-		/// - считается суммарный PnL, win-rate, max DD, среднее и std.
-		/// </summary>
-		private static SimplePnlStats ComputeSimplePnlStats ( IReadOnlyList<PredictionRecord> records )
-			{
-			if (records == null || records.Count == 0)
-				{
-				return SimplePnlStats.Empty;
-				}
+            if (split.Excluded.Count > 0)
+            {
+                Console.WriteLine("[pnl-probe] WARNING: excluded days exist (baseline-exit undefined). They are ignored.");
+            }
 
-			int trades = 0;
-			int wins = 0;
+            var trainStats = ComputeSimplePnlStats(train);
+            var oosStats = ComputeSimplePnlStats(oos);
 
-			var returns = new List<double> (records.Count);
+            PrintStats("[pnl-probe] TRAIN", trainStats);
+            PrintStats("[pnl-probe] OOS  ", oosStats);
+        }
 
-			double equity = 1.0;
-			double peakEquity = 1.0;
-			double maxDrawdown = 0.0; // отрицательное значение (процент падения от пика)
+        private static SimplePnlStats ComputeSimplePnlStats(IReadOnlyList<BacktestRecord> records)
+        {
+            if (records == null || records.Count == 0)
+            {
+                return SimplePnlStats.Empty;
+            }
 
-			foreach (var rec in records)
-				{
-				// Направление по дневной модели с учётом микро-слоя.
-				bool goLong =
-					rec.PredLabel == 2 ||
-					(rec.PredLabel == 1 && rec.PredMicroUp);
+            int trades = 0;
+            int wins = 0;
 
-				bool goShort =
-					rec.PredLabel == 0 ||
-					(rec.PredLabel == 1 && rec.PredMicroDown);
+            var returns = new List<double>(records.Count);
 
-				// Если нет торгового сигнала — день пропускается.
-				if (!goLong && !goShort)
-					{
-					continue;
-					}
+            double equity = 1.0;
+            double peakEquity = 1.0;
+            double maxDrawdown = 0.0;
 
-				if (rec.Entry <= 0.0 || rec.Close24 <= 0.0)
-					{
-					// Некорректные цены, пропускаем день, чтобы не ломать статистику.
-					Console.WriteLine (
-						$"[pnl-probe] skip {rec.DateUtc:yyyy-MM-dd}: invalid prices Entry={rec.Entry}, Close24={rec.Close24}");
-					continue;
-					}
+            foreach (var rec in records)
+            {
+                var c = rec.Causal;
+                var f = rec.Forward;
 
-				// Дневная доходность без плеча.
-				double dayRet = (rec.Close24 - rec.Entry) / rec.Entry;
+                bool goLong =
+                    c.PredLabel == 2 ||
+                    (c.PredLabel == 1 && c.PredMicroUp);
 
-				// Для short инвертируем знак.
-				if (goShort && !goLong)
-					{
-					dayRet = -dayRet;
-					}
-				else if (goLong && goShort)
-					{
-					// Теоретически не должно происходить. На всякий случай логируем и пропускаем.
-					Console.WriteLine (
-						$"[pnl-probe] ambiguous direction on {rec.DateUtc:yyyy-MM-dd}, " +
-						$"PredLabel={rec.PredLabel}, PredMicroUp={rec.PredMicroUp}, PredMicroDown={rec.PredMicroDown} – skip.");
-					continue;
-					}
+                bool goShort =
+                    c.PredLabel == 0 ||
+                    (c.PredLabel == 1 && c.PredMicroDown);
 
-				trades++;
-				returns.Add (dayRet);
+                if (!goLong && !goShort)
+                {
+                    continue;
+                }
 
-				if (dayRet > 0)
-					{
-					wins++;
-					}
+                if (f.Entry <= 0.0 || f.Close24 <= 0.0)
+                {
+                    var day = c.EntryDayKeyUtc.Value;
 
-				// Обновляем эквити и максимум.
-				equity *= (1.0 + dayRet);
+                    Console.WriteLine(
+                        $"[pnl-probe] skip {day:yyyy-MM-dd}: invalid prices Entry={f.Entry}, Close24={f.Close24}");
+                    continue;
+                }
 
-				if (equity > peakEquity)
-					{
-					peakEquity = equity;
-					}
+                double dayRet = (f.Close24 - f.Entry) / f.Entry;
 
-				double dd = equity / peakEquity - 1.0;
-				if (dd < maxDrawdown)
-					{
-					maxDrawdown = dd;
-					}
-				}
+                if (goShort && !goLong)
+                {
+                    dayRet = -dayRet;
+                }
+                else if (goLong && goShort)
+                {
+                    var day = c.EntryDayKeyUtc.Value;
 
-			if (trades == 0 || returns.Count == 0)
-				{
-				return SimplePnlStats.Empty;
-				}
+                    Console.WriteLine(
+                        $"[pnl-probe] ambiguous direction on {day:yyyy-MM-dd}, " +
+                        $"PredLabel={c.PredLabel}, PredMicroUp={c.PredMicroUp}, PredMicroDown={c.PredMicroDown} – skip.");
+                    continue;
+                }
 
-			double totalRet = equity - 1.0; // в долях
-			double winRate = (double) wins / trades;
+                trades++;
+                returns.Add(dayRet);
 
-			// Среднее и стандартное отклонение по дневным доходностям.
-			double mean = returns.Average ();
-			double variance = returns
-				.Select (r => (r - mean) * (r - mean))
-				.DefaultIfEmpty (0.0)
-				.Average ();
+                if (dayRet > 0)
+                {
+                    wins++;
+                }
 
-			double std = Math.Sqrt (variance);
+                equity *= (1.0 + dayRet);
 
-			return new SimplePnlStats (
-				Trades: trades,
-				TotalReturn: totalRet,
-				WinRate: winRate,
-				MaxDrawdown: maxDrawdown,
-				MeanReturn: mean,
-				StdReturn: std);
-			}
+                if (equity > peakEquity)
+                {
+                    peakEquity = equity;
+                }
 
-		/// <summary>
-		/// Печатает сводку по PnL в консоль.
-		/// Все проценты выводятся в человекочитаемом виде.
-		/// </summary>
-		private static void PrintStats ( string prefix, SimplePnlStats stats )
-			{
-			if (stats.Trades == 0)
-				{
-				Console.WriteLine ($"{prefix}: no trades.");
-				return;
-				}
+                double dd = equity / peakEquity - 1.0;
+                if (dd < maxDrawdown)
+                {
+                    maxDrawdown = dd;
+                }
+            }
 
-			Console.WriteLine (
-				$"{prefix}: trades={stats.Trades}, " +
-				$"totalPnL={stats.TotalReturn * 100.0:0.00} %, " +
-				$"winRate={stats.WinRate * 100.0:0.0} %, " +
-				$"maxDD={stats.MaxDrawdown * 100.0:0.0} %, " +
-				$"mean={stats.MeanReturn * 100.0:0.00} %, " +
-				$"std={stats.StdReturn * 100.0:0.00} %");
-			}
+            if (trades == 0 || returns.Count == 0)
+            {
+                return SimplePnlStats.Empty;
+            }
 
-		/// <summary>
-		/// Небольшой контейнер с метриками PnL-пробника.
-		/// Используется только внутри диагностического кода.
-		/// </summary>
-		private readonly record struct SimplePnlStats (
-			int Trades,
-			double TotalReturn,
-			double WinRate,
-			double MaxDrawdown,
-			double MeanReturn,
-			double StdReturn )
-			{
-			public static readonly SimplePnlStats Empty = new (
-				Trades: 0,
-				TotalReturn: 0.0,
-				WinRate: 0.0,
-				MaxDrawdown: 0.0,
-				MeanReturn: 0.0,
-				StdReturn: 0.0);
-			}
-		}
-	}
+            double totalRet = equity - 1.0;
+            double winRate = (double)wins / trades;
+
+            double mean = returns.Average();
+            double variance = returns
+                .Select(r => (r - mean) * (r - mean))
+                .DefaultIfEmpty(0.0)
+                .Average();
+
+            double std = Math.Sqrt(variance);
+
+            return new SimplePnlStats(
+                Trades: trades,
+                TotalReturn: totalRet,
+                WinRate: winRate,
+                MaxDrawdown: maxDrawdown,
+                MeanReturn: mean,
+                StdReturn: std);
+        }
+
+        private static void PrintStats(string prefix, SimplePnlStats stats)
+        {
+            if (stats.Trades == 0)
+            {
+                Console.WriteLine($"{prefix}: no trades.");
+                return;
+            }
+
+            Console.WriteLine(
+                $"{prefix}: trades={stats.Trades}, " +
+                $"totalPnL={stats.TotalReturn * 100.0:0.00} %, " +
+                $"winRate={stats.WinRate * 100.0:0.0} %, " +
+                $"maxDD={stats.MaxDrawdown * 100.0:0.0} %, " +
+                $"mean={stats.MeanReturn * 100.0:0.00} %, " +
+                $"std={stats.StdReturn * 100.0:0.00} %");
+        }
+
+        private readonly record struct SimplePnlStats(
+            int Trades,
+            double TotalReturn,
+            double WinRate,
+            double MaxDrawdown,
+            double MeanReturn,
+            double StdReturn)
+        {
+            public static readonly SimplePnlStats Empty = new(
+                Trades: 0,
+                TotalReturn: 0.0,
+                WinRate: 0.0,
+                MaxDrawdown: 0.0,
+                MeanReturn: 0.0,
+                StdReturn: 0.0);
+        }
+    }
+}
+

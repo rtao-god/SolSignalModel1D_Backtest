@@ -1,25 +1,17 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 	{
-	/// <summary>
-	/// Low-level тест на RowBuilder.BuildRowsDaily:
-	/// мутируем будущий хвост 6h/1m-свечей и проверяем, что
-	/// «безопасный» префикс DataRow (который целиком укладывается в trainUntil
-	/// с запасом по горизонту) остаётся неизменным.
-	/// </summary>
 	public sealed class LeakageRowsBuilderTailTests
 		{
 		[Fact]
-		public void BuildRowsDaily_IsFutureBlind_ToTailMutation ()
+		public void BuildDailyRows_IsFutureBlind_ToTailMutation ()
 			{
-			// 1. Синтетическая долгая история (240 дней достаточно для всех окон).
 			const int SyntheticDays = 240;
 
 			BuildSyntheticHistory (
@@ -32,7 +24,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				out var fngHistory,
 				out var dxyHistory);
 
-			// Клонируем для варианта B.
 			CloneHistory (
 				solWinTrainA,
 				btcWinTrainA,
@@ -45,31 +36,26 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				out var solAll6hB,
 				out var solAll1mB);
 
-			// 2. Строим базовый набор DataRow (A).
-			var rowsA = RowBuilder.BuildRowsDaily (
-					solWinTrain: solWinTrainA,
-					btcWinTrain: btcWinTrainA,
-					paxgWinTrain: paxgWinTrainA,
-					solAll6h: solAll6hA,
-					solAll1m: solAll1mA,
-					fngHistory: fngHistory,
-					dxySeries: dxyHistory,
-					extraDaily: null,
-					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Date)
+			var resA = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrainA,
+				btcWinTrain: btcWinTrainA,
+				paxgWinTrain: paxgWinTrainA,
+				solAll6h: solAll6hA,
+				solAll1m: solAll1mA,
+				fngHistory: fngHistory,
+				dxySeries: dxyHistory,
+				extraDaily: null,
+				nyTz: NyWindowing.NyTz);
+
+			var rowsA = resA.LabeledRows
+				.OrderBy (r => CausalTimeKey.EntryDayKeyUtc (r))
 				.ToList ();
 
 			Assert.NotEmpty (rowsA);
 
-			var maxRowDate = rowsA.Last ().Date;
+			var maxCausalDate = CausalTimeKey.EntryDayKeyUtc (rowsA.Last ()).Value;
+			var trainUntil = maxCausalDate.AddDays (-40);
 
-			// Берём trainUntil немного до конца ряда, чтобы был длинный хвост.
-			var trainUntil = maxRowDate.AddDays (-40);
-
-			// 3. Мутируем только хвост после trainUntil для варианта B.
-
-			// Мутируем хвост далеко после trainUntil, чтобы baseline-exit/путь train-строк
-			// точно не зацепили замутированную часть.
 			var tailStartUtc = trainUntil.AddDays (5);
 
 			MutateFutureTail (
@@ -80,55 +66,59 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				solAll1mB,
 				tailStartUtc: tailStartUtc);
 
-			var rowsB = RowBuilder.BuildRowsDaily (
-					solWinTrain: solWinTrainB,
-					btcWinTrain: btcWinTrainB,
-					paxgWinTrain: paxgWinTrainB,
-					solAll6h: solAll6hB,
-					solAll1m: solAll1mB,
-					fngHistory: fngHistory,
-					dxySeries: dxyHistory,
-					extraDaily: null,
-					nyTz: Windowing.NyTz)
-				.OrderBy (r => r.Date)
+			var resB = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrainB,
+				btcWinTrain: btcWinTrainB,
+				paxgWinTrain: paxgWinTrainB,
+				solAll6h: solAll6hB,
+				solAll1m: solAll1mB,
+				fngHistory: fngHistory,
+				dxySeries: dxyHistory,
+				extraDaily: null,
+				nyTz: NyWindowing.NyTz);
+
+			var rowsB = resB.LabeledRows
+				.OrderBy (r => CausalTimeKey.EntryDayKeyUtc (r))
 				.ToList ();
 
-			// 4. Берём только «безопасный» префикс:
-			// строки, у которых весь используемый горизонт гарантированно <= trainUntil.
-			// Запас 8 дней: baseline-exit и минутный путь короче.
 			var safeRowsA = rowsA
-				.Where (r => r.Date.AddDays (8) <= trainUntil)
+				.Where (r => CausalTimeKey.EntryDayKeyUtc (r).Value.AddDays (8) <= trainUntil)
 				.ToList ();
 
 			var safeRowsB = rowsB
-				.Where (r => r.Date.AddDays (8) <= trainUntil)
+				.Where (r => CausalTimeKey.EntryDayKeyUtc (r).Value.AddDays (8) <= trainUntil)
 				.ToList ();
 
 			Assert.NotEmpty (safeRowsA);
 			Assert.Equal (safeRowsA.Count, safeRowsB.Count);
 
-			// 5. Жёстко сравниваем основные поля «безопасного» префикса.
 			for (int i = 0; i < safeRowsA.Count; i++)
 				{
 				var a = safeRowsA[i];
 				var b = safeRowsB[i];
 
-				Assert.Equal (a.Date, b.Date);
-				Assert.Equal (a.Label, b.Label);
-				Assert.Equal (a.IsMorning, b.IsMorning);
-				Assert.Equal (a.MinMove, b.MinMove);
-				Assert.Equal (a.RegimeDown, b.RegimeDown);
+				Assert.Equal (CausalTimeKey.EntryDayKeyUtc (a), CausalTimeKey.EntryDayKeyUtc (b));
 
-				var fa = a.Features ?? Array.Empty<double> ();
-				var fb = b.Features ?? Array.Empty<double> ();
+				Assert.Equal (a.TrueLabel, b.TrueLabel);
+				Assert.Equal (a.MicroTruth.HasValue, b.MicroTruth.HasValue);
+				if (a.MicroTruth.HasValue)
+					Assert.Equal (a.MicroTruth.Value, b.MicroTruth.Value);
+				else
+					Assert.Equal (a.MicroTruth.MissingReason, b.MicroTruth.MissingReason);
+
+				Assert.Equal (a.Causal.IsMorning, b.Causal.IsMorning);
+				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);
+				Assert.Equal (a.Causal.HardRegime, b.Causal.HardRegime);
+				Assert.Equal (a.Causal.MinMove, b.Causal.MinMove);
+
+				var fa = a.Causal.FeaturesVector.Span;
+				var fb = b.Causal.FeaturesVector.Span;
 
 				Assert.Equal (fa.Length, fb.Length);
 				for (int j = 0; j < fa.Length; j++)
 					Assert.Equal (fa[j], fb[j]);
 				}
 			}
-
-		// === helpers ===
 
 		private static void BuildSyntheticHistory (
 			int days,
@@ -156,9 +146,8 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 
 			for (int d = 0; d < days; d++)
 				{
-				var day = t.Date;
+				var day = t.ToCausalDateUtc ();
 
-				// Простые детерминированные ряды FNG / DXY (double).
 				fngHistory[day] = 40.0 + (d % 20);
 				dxyHistory[day] = 90.0 + (d % 10);
 
@@ -166,38 +155,33 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 					{
 					double basePrice = 100.0 + d * 0.5 + k;
 
-					var cSol = new Candle6h
+					sol6.Add (new Candle6h
 						{
 						OpenTimeUtc = t,
 						Open = basePrice,
 						High = basePrice * 1.01,
 						Low = basePrice * 0.99,
 						Close = basePrice * 1.005
-						};
+						});
 
-					var cBtc = new Candle6h
+					btc6.Add (new Candle6h
 						{
 						OpenTimeUtc = t,
 						Open = basePrice * 10,
 						High = basePrice * 10 * 1.01,
 						Low = basePrice * 10 * 0.99,
 						Close = basePrice * 10 * 1.005
-						};
+						});
 
-					var cPaxg = new Candle6h
+					paxg6.Add (new Candle6h
 						{
 						OpenTimeUtc = t,
 						Open = basePrice * 0.2,
 						High = basePrice * 0.2 * 1.01,
 						Low = basePrice * 0.2 * 0.99,
 						Close = basePrice * 0.2 * 1.005
-						};
+						});
 
-					sol6.Add (cSol);
-					btc6.Add (cBtc);
-					paxg6.Add (cPaxg);
-
-					// 6h → 360 минут 1m.
 					var minuteStart = t;
 					for (int m = 0; m < 360; m++)
 						{
@@ -237,7 +221,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 			out List<Candle6h> solAll6hB,
 			out List<Candle1m> solAll1mB )
 			{
-			Candle6h Clone6 ( Candle6h c ) => new Candle6h
+			static Candle6h Clone6 ( Candle6h c ) => new Candle6h
 				{
 				OpenTimeUtc = c.OpenTimeUtc,
 				Open = c.Open,
@@ -246,7 +230,7 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 				Close = c.Close
 				};
 
-			Candle1m Clone1 ( Candle1m c ) => new Candle1m
+			static Candle1m Clone1 ( Candle1m c ) => new Candle1m
 				{
 				OpenTimeUtc = c.OpenTimeUtc,
 				Open = c.Open,
@@ -270,33 +254,44 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.LowLevel
 			List<Candle1m> solAll1m,
 			DateTime tailStartUtc )
 			{
-			void Mutate6 ( List<Candle6h> xs, double factor )
+			static void Mutate6 ( List<Candle6h> xs, DateTime tailStartUtcLocal, double factor )
 				{
-				foreach (var c in xs.Where (c => c.OpenTimeUtc > tailStartUtc))
+				for (int i = 0; i < xs.Count; i++)
 					{
+					var c = xs[i];
+					if (c.OpenTimeUtc <= tailStartUtcLocal) continue;
+
 					c.Open *= factor;
 					c.High *= factor;
 					c.Low *= factor;
 					c.Close *= factor;
+
+					xs[i] = c;
 					}
 				}
 
-			void Mutate1 ( List<Candle1m> xs, double factor )
+			static void Mutate1 ( List<Candle1m> xs, DateTime tailStartUtcLocal, double factor )
 				{
-				foreach (var c in xs.Where (c => c.OpenTimeUtc > tailStartUtc))
+				for (int i = 0; i < xs.Count; i++)
 					{
+					var c = xs[i];
+					if (c.OpenTimeUtc <= tailStartUtcLocal) continue;
+
 					c.Open *= factor;
 					c.High *= factor;
 					c.Low *= factor;
 					c.Close *= factor;
+
+					xs[i] = c;
 					}
 				}
 
-			Mutate6 (solWinTrain, 1.5);
-			Mutate6 (btcWinTrain, 0.7);
-			Mutate6 (paxgWinTrain, 1.2);
-			Mutate6 (solAll6h, 1.3);
-			Mutate1 (solAll1m, 0.8);
+			Mutate6 (solWinTrain, tailStartUtc, 1.5);
+			Mutate6 (btcWinTrain, tailStartUtc, 0.7);
+			Mutate6 (paxgWinTrain, tailStartUtc, 1.2);
+			Mutate6 (solAll6h, tailStartUtc, 1.3);
+			Mutate1 (solAll1m, tailStartUtc, 0.8);
 			}
 		}
 	}
+

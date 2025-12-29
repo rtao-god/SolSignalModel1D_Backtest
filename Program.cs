@@ -1,214 +1,245 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.Infra.Perf;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Diagnostics.PnL;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Infra.Perf;
+using SolSignalModel1D_Backtest.Diagnostics.PnL;
 using SolSignalModel1D_Backtest.Diagnostics;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest
-	{
-	/// <summary>
-	/// Частичный класс Program: точка входа и верхнеуровневый пайплайн.
-	/// </summary>
-	public partial class Program
-		{
-		/// <summary>
-		/// Флажок: гонять ли self-check'и при старте приложения.
-		/// При false поведение полностью совпадает с текущим.
-		/// </summary>
-		private static readonly bool RunSelfChecksOnStartup = true;
+{
+    /// <summary>
+    /// Частичный класс Program: точка входа и верхнеуровневый пайплайн.
+    /// </summary>
+    public partial class Program
+    {
+        /// <summary>
+        /// Флажок: гонять ли self-check'и при старте приложения, которые могут заблокировать основной пайплайн при падении.
+        /// </summary>
+        private static readonly bool RunSelfChecksOnStartup = true;
 
-		/// <summary>
-		/// Глобальная таймзона Нью-Йорка для всех расчётов.
-		/// </summary>
-		private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
+        /// <summary>
+        /// Глобальная таймзона Нью-Йорка для всех расчётов.
+        /// </summary>
+        private static readonly TimeZoneInfo NyTz = TimeZones.NewYork;
 
-		public static async Task Main ( string[] args )
-			{
-			// Старт общего таймера приложения как можно раньше:
-			// всё, что ниже, попадёт в "фактическое время работы" в PerfLogging.
-			PerfLogging.StartApp ();
+        public static async Task Main(string[] args)
+        {
+            if (args.Any(a => string.Equals(a, "--scan-gaps-1m", StringComparison.OrdinalIgnoreCase)))
+            {
+                await RunBinance1mGapScanAsync();
+                return;
+            }
 
-			// --- 1. Бутстрап свечей и дневных строк ---
-			// Внешний PerfLogging.MeasureAsync — для общей Σ времени,
-			// внутренний PerfBlockLogger.MeasureAsync — для старых [perf]-логов.
-			var (allRows, mornings, solAll6h, solAll1h, sol1m) =
-				await PerfLogging.MeasureAsync (
-					"(top) BootstrapRowsAndCandlesAsync",
-					() =>
-						PerfBlockLogger.MeasureAsync (
-							"(top) BootstrapRowsAndCandlesAsync",
-							() => BootstrapRowsAndCandlesAsync ()
-						)
-			);
+            if (args.Any(a => string.Equals(a, "--scan-gaps-1h", StringComparison.OrdinalIgnoreCase)))
+            {
+                await RunBinance1hGapScanAsync();
+                return;
+            }
 
+            if (args.Any(a => string.Equals(a, "--scan-gaps-6h", StringComparison.OrdinalIgnoreCase)))
+            {
+                await RunBinance6hGapScanAsync();
+                return;
+            }
 
-			// --- 2. Дневная модель: PredictionEngine + forward-метрики ---
-			var records = await PerfLogging.MeasureAsync (
-				"BuildPredictionRecordsAsync",
-				() => PerfBlockLogger.MeasureAsync (
-					"BuildPredictionRecordsAsync",
-					() => BuildPredictionRecordsAsync (allRows, mornings, solAll6h)
-				)
-			);
+            PerfLogging.StartApp();
 
-			// Честная train-accuracy по тем строкам, которые реально попали в train-датасет
-			DumpDailyAccuracyWithDatasetSplit (allRows, records, _trainUntilUtc);
+            try
+            {
+                var (allRows, mornings, solAll6h, solAll1h, sol1m) =
+                    await PerfLogging.MeasureAsync(
+                        "(top) BootstrapRowsAndCandlesAsync",
+                        () =>
+                            PerfBlockLogger.MeasureAsync(
+                                "(top) BootstrapRowsAndCandlesAsync",
+                                () => BootstrapRowsAndCandlesAsync()
+                            )
+                    );
 
-			// Консольная проверка разделения train/OOS и accuracy дневной модели на реальных данных.
-			RuntimeLeakageDebug.PrintDailyModelTrainOosProbe (records, _trainUntilUtc, boundarySampleCount: 2);
+                var records = await PerfLogging.MeasureAsync(
+                    "BuildPredictionRecordsAsync",
+                    () => PerfBlockLogger.MeasureAsync(
+                        "BuildPredictionRecordsAsync",
+                        () => BuildPredictionRecordsAsync(allRows, mornings, sol1m)
+                    )
+                );
 
-			DailyPnlProbe.RunSimpleProbe (records, _trainUntilUtc);
+                DumpDailyAccuracyWithDatasetSplit(allRows, records, _trainUntilExitDayKeyUtc);
 
-			// --- 3. SL-модель (офлайн) поверх дневных предсказаний ---
-			PerfLogging.Measure (
-				"RunSlModelOffline",
-				() => PerfBlockLogger.Measure (
-					"RunSlModelOffline",
-					() => RunSlModelOffline (allRows, records, solAll1h, sol1m, solAll6h)
-				)
-			);
+                RuntimeLeakageDebug.PrintDailyModelTrainOosProbe(
+                    records,
+                    _trainUntilExitDayKeyUtc,
+                    NyTz,
+                    boundarySampleCount: 2,
+                    allRows: allRows
+                );
 
-			// Флаг, идёт ли дальше основной пайплайн после self-check'ов.
-			var pipelineShouldContinue = true;
+                DailyPnlProbe.RunSimpleProbe(records, _trainUntilExitDayKeyUtc, NyTz);
 
-			// --- 4. Self-checks (по флажку) ---
-			if (RunSelfChecksOnStartup)
-				{
-				var selfCheckContext = new SelfCheckContext
-					{
-					AllRows = allRows,
-					Mornings = mornings,
-					Records = records,
-					SolAll6h = solAll6h,
-					SolAll1h = solAll1h,
-					Sol1m = sol1m,
-					TrainUntilUtc = _trainUntilUtc,
-					NyTz = NyTz
-					};
+                RunDailyPfi(allRows);
 
-				var selfCheckResult = await PerfLogging.MeasureAsync (
-					"SelfCheckRunner.RunAsync",
-					() => PerfBlockLogger.MeasureAsync (
-						"SelfCheckRunner.RunAsync",
-						() => SelfCheckRunner.RunAsync (selfCheckContext)
-					)
-				);
+                PerfLogging.Measure(
+                    "RunSlModelOffline",
+                    () => PerfBlockLogger.Measure(
+                        "RunSlModelOffline",
+                        () => RunSlModelOffline(allRows, records, solAll1h, sol1m, solAll6h)
+                    )
+                );
 
-				Console.WriteLine ($"[self-check] Success = {selfCheckResult.Success}");
-				if (selfCheckResult.Warnings.Count > 0)
-					{
-					Console.WriteLine ("[self-check] warnings:");
-					foreach (var w in selfCheckResult.Warnings)
-						Console.WriteLine ("  - " + w);
-					}
+                var pipelineShouldContinue = true;
 
-				if (selfCheckResult.Errors.Count > 0)
-					{
-					Console.WriteLine ("[self-check] errors:");
-					foreach (var e in selfCheckResult.Errors)
-						Console.WriteLine ("  - " + e);
-					}
+                if (RunSelfChecksOnStartup)
+                {
+                    var selfCheckContext = new SelfCheckContext
+                    {
+                        AllRows = allRows,
+                        Mornings = mornings,
+                        Records = records,
+                        SolAll6h = solAll6h,
+                        SolAll1h = solAll1h,
+                        Sol1m = sol1m,
+                        TrainUntilExitDayKeyUtc = _trainUntilExitDayKeyUtc,
+                        NyTz = NyTz
+                    };
 
-				if (!selfCheckResult.Success)
-					{
-					Console.WriteLine ("[self-check] FAIL → основная часть пайплайна не выполняется.");
-					// Поведение пайплайна то же (дальше не идём),
-					// но даём PerfLogging возможность честно завершить таймер и вывести сводку.
-					pipelineShouldContinue = false;
-					}
-				}
+                    var selfCheckResult = await PerfLogging.MeasureAsync(
+                        "SelfCheckRunner.RunAsync",
+                        () => PerfBlockLogger.MeasureAsync(
+                            "SelfCheckRunner.RunAsync",
+                            () => SelfCheckRunner.RunAsync(selfCheckContext)
+                        )
+                    );
 
-			if (pipelineShouldContinue)
-				{
-				// --- 5. Бэктест-профили ---
-				await PerfLogging.MeasureAsync (
-					"EnsureBacktestProfilesInitializedAsync",
-					() => PerfBlockLogger.MeasureAsync (
-						"EnsureBacktestProfilesInitializedAsync",
-						() => EnsureBacktestProfilesInitializedAsync ()
-					)
-				);
+                    Console.WriteLine($"[self-check] Success = {selfCheckResult.Success}");
 
-				// --- 6. Бэктест + отчёты ---
-				PerfLogging.Measure (
-					"RunBacktestAndReports",
-					() => PerfBlockLogger.Measure (
-						"RunBacktestAndReports",
-						() => RunBacktestAndReports (mornings, records, sol1m)
-					)
-				);
-				}
+                    if (selfCheckResult.Warnings.Count > 0)
+                    {
+                        Console.WriteLine("[self-check] warnings:");
+                        foreach (var w in selfCheckResult.Warnings)
+                            Console.WriteLine("  - " + w);
+                    }
 
-			// В конце всегда печатаем сводку по времени и поджимаем скролл консоли.
-			PerfLogging.StopAppAndPrintSummary ();
-			}
+                    if (selfCheckResult.Errors.Count > 0)
+                    {
+                        Console.WriteLine("[self-check] errors:");
+                        foreach (var e in selfCheckResult.Errors)
+                            Console.WriteLine("  - " + e);
+                    }
 
-		private static void DumpDailyPredHistograms ( List<PredictionRecord> records, DateTime trainUntilUtc )
-			{
-			if (records == null || records.Count == 0)
-				return;
+                    if (!selfCheckResult.Success)
+                    {
+                        Console.WriteLine("[self-check] FAIL → основная часть пайплайна не выполняется.");
+                        pipelineShouldContinue = false;
+                    }
+                }
 
-			var train = records.Where (r => r.DateUtc <= trainUntilUtc).ToList ();
-			var oos = records.Where (r => r.DateUtc > trainUntilUtc).ToList ();
+                if (pipelineShouldContinue)
+                {
+                    await PerfLogging.MeasureAsync(
+                        "EnsureBacktestProfilesInitializedAsync",
+                        () => PerfBlockLogger.MeasureAsync(
+                            "EnsureBacktestProfilesInitializedAsync",
+                            () => EnsureBacktestProfilesInitializedAsync()
+                        )
+                    );
 
-			static string Hist ( IEnumerable<int> xs )
-				{
-				return string.Join (", ",
-					xs.GroupBy (v => v)
-					  .OrderBy (g => g.Key)
-					  .Select (g => $"{g.Key}={g.Count ()}"));
-				}
+                    PerfLogging.Measure(
+                        "RunBacktestAndReports",
+                        () => PerfBlockLogger.Measure(
+                            "RunBacktestAndReports",
+                            () => RunBacktestAndReports(mornings, records, sol1m)
+                        )
+                    );
+                }
+            }
+            finally
+            {
+                PerfLogging.StopAppAndPrintSummary();
+            }
+        }
 
-			Console.WriteLine ($"[daily] train size = {train.Count}, oos size = {oos.Count}");
+        private static void DumpDailyAccuracyWithDatasetSplit(
+            List<LabeledCausalRow> allRows,
+            List<BacktestRecord> records,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc)
+        {
+            var dataset = DailyDatasetBuilder.Build(
+                allRows,
+                trainUntilExitDayKeyUtc,
+                balanceMove: false,
+                balanceDir: true,
+                balanceTargetFrac: 0.70,
+                dayKeysToExclude: null
+            );
 
-			Console.WriteLine ("[daily] train TrueLabel hist: " + Hist (train.Select (r => r.TrueLabel)));
-			Console.WriteLine ("[daily] train PredLabel hist: " + Hist (train.Select (r => r.PredLabel)));
+            var trainDates = new HashSet<DateTime>(dataset.TrainRows.Select(r => r.EntryDayKeyUtc.Value));
 
-			if (oos.Count > 0)
-				{
-				Console.WriteLine ("[daily] oos TrueLabel hist: " + Hist (oos.Select (r => r.TrueLabel)));
-				Console.WriteLine ("[daily] oos PredLabel hist: " + Hist (oos.Select (r => r.PredLabel)));
-				}
-			}
+            var trainRecords = new List<BacktestRecord>(trainDates.Count);
+            for (int i = 0; i < records.Count; i++)
+            {
+                var r = records[i];
 
-		private static void DumpDailyAccuracyWithDatasetSplit (
-			List<DataRow> allRows,
-			List<PredictionRecord> records,
-			DateTime trainUntilUtc )
-			{
-			// собираем датасет так же, как внутри ModelTrainer
-			var dataset = DailyDatasetBuilder.Build (
-				allRows: allRows,
-				trainUntil: trainUntilUtc,
-				balanceMove: false,   // можно подставить те же флаги, что и в ModelTrainer
-				balanceDir: true,
-				balanceTargetFrac: 0.70,
-				datesToExclude: null);
+                var recDayKey = r.EntryDayKeyUtc.Value;
 
-			var trainDates = new HashSet<DateTime> (
-				dataset.TrainRows.Select (r => r.Date));
+                if (trainDates.Contains(recDayKey))
+                    trainRecords.Add(r);
+            }
 
-			var trainRecords = records
-				.Where (r => trainDates.Contains (r.DateUtc))
-				.ToList ();
+            SplitByTrainUntilUtc(records, trainUntilExitDayKeyUtc, out _, out var oosRecords);
 
-			var oosRecords = records
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
+            static double Acc(IReadOnlyList<BacktestRecord> xs)
+            {
+                if (xs == null) throw new ArgumentNullException(nameof(xs));
+                if (xs.Count == 0) return 0.0;
 
-			double TrainAcc ( List<PredictionRecord> xs ) =>
-				xs.Count == 0
-					? double.NaN
-					: xs.Count (r => r.PredLabel == r.TrueLabel) / (double) xs.Count;
+                int ok = 0;
+                for (int i = 0; i < xs.Count; i++)
+                {
+                    var r = xs[i];
+                    if (r.PredLabel_Total == r.TrueLabel)
+                        ok++;
+                }
 
-			var trainAcc = TrainAcc (trainRecords);
-			var oosAcc = TrainAcc (oosRecords);
+                return (double)ok / xs.Count;
+            }
 
-			Console.WriteLine ($"[daily-acc] trainAcc(dataset-based) = {trainAcc:0.000}");
-			Console.WriteLine ($"[daily-acc] oosAcc(date-based)      = {oosAcc:0.000}");
-			}
-		}
-	}
+            var trainAcc = Acc(trainRecords);
+            var oosAcc = Acc(oosRecords);
+
+            Console.WriteLine($"[daily-acc] trainAcc(in-sample, dataset-based) = {trainAcc:0.000}");
+            Console.WriteLine($"[daily-acc] oosAcc(out-of-sample, date-based)  = {oosAcc:0.000}");
+        }
+
+        private static void SplitByTrainUntilUtc(
+            IReadOnlyList<BacktestRecord> records,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            out List<BacktestRecord> train,
+            out List<BacktestRecord> oos)
+        {
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+
+            var ordered = records
+                .OrderBy(static r => r.EntryUtc.Value) // ВАЖНО: НЕ r.Causal.EntryUtc
+                .ToList();
+
+            Console.WriteLine(
+                $"[split] запуск SplitByBaselineExitStrict: тег='train-split.records', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
+
+            var split = NyTrainSplit.SplitByBaselineExitStrict<BacktestRecord>(
+                ordered: ordered,
+                entrySelector: static r => r.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: NyTz,
+                tag: "train-split.records");
+
+            train = split.Train.ToList();
+            oos = split.Oos.ToList();
+        }
+    }
+}

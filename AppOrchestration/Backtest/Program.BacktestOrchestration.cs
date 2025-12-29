@@ -1,32 +1,22 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Backtest.Services;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Utils.Pnl;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest.Services;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Trading.Leverage;
 using SolSignalModel1D_Backtest.Reports.Backtest.Reports;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
-		/// <summary>
-		/// Количество календарных дней, за которые сохраняются отчёты истории "текущего прогноза".
-		/// </summary>
-		// 
 		private const int CurrentPredictionHistoryWindowDays = 30;
-		/// <summary>
-		/// Ленивая инициализация репозитория профилей бэктеста.
-		/// Внутри создаётся baseline-профиль, если файла ещё нет.
-		/// </summary>
+
 		private static async Task EnsureBacktestProfilesInitializedAsync ()
 			{
 			try
 				{
-				var profileRepo =
-					new JsonBacktestProfileRepository ();
-
-				// Достаточно один раз прочитать все профили — baseline создастся автоматически.
+				var profileRepo = new JsonBacktestProfileRepository ();
 				await profileRepo.GetAllAsync ();
 				}
 			catch (Exception ex)
@@ -35,77 +25,95 @@ namespace SolSignalModel1D_Backtest
 				}
 			}
 
-		/// <summary>
-		/// Полный цикл:
-		/// - сборка baseline-конфига;
-		/// - построение политик и запуск BacktestRunner;
-		/// - сохранение отчётов бэктеста.
-		/// Стратегии по дневной модели вызываются отдельно (RunStrategyScenarios), а не отсюда.
-		/// </summary>
 		private static void RunBacktestAndReports (
-			List<DataRow> mornings,
-			List<PredictionRecord> records,
-			List<Candle1m> sol1m
-		)
+			List<LabeledCausalRow> mornings,
+			List<BacktestRecord> records,
+			IReadOnlyList<Candle1m> dayMinutes )
 			{
-			// === Baseline-конфиг бэктеста (SL/TP + политики) ===
+			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
+			if (records == null) throw new ArgumentNullException (nameof (records));
+			if (dayMinutes == null) throw new ArgumentNullException (nameof (dayMinutes));
+
 			var backtestConfig = BacktestConfigFactory.CreateBaseline ();
 
-			// Политики, построенные из конфига (PolicyConfig → PolicySpec + ILeveragePolicy)
+			// PolicySpec.Policy = IOmniscientLeveragePolicy (для PnL/RollingLoop).
 			var policies = BacktestPolicyFactory.BuildPolicySpecs (backtestConfig);
 			Console.WriteLine ($"[policies] total = {policies.Count}");
 
-			// Для отчёта "текущий прогноз" нужны голые ILeveragePolicy (без MarginMode и имени).
-			var leveragePolicies = policies
-				.Where (p => p.Policy != null)
-				.Select (p => p.Policy!)
-				.Cast<ILeveragePolicy> ()
-				.ToList ();
+			// Для "current prediction" берём ТОЛЬКО каузальный интерфейс, без доступа к forward-фактам.
+			var leveragePolicies = ExtractCausalLeveragePolicies (policies);
 
-			// === Текущий прогноз + JSON-репорт ===
-			// Используются те же records и политики, что и в baseline-бэктесте.
+			const double WalletBalanceUsd = 200.0;
+
 			BacktestReportsOrchestrator.SaveCurrentPredictionReport (
 				records: records,
 				leveragePolicies: leveragePolicies,
-				walletBalanceUsd: 200.0 // при желании можно завязать на конфиг
+				walletBalanceUsd: WalletBalanceUsd
 			);
 
 			BacktestReportsOrchestrator.SaveCurrentPredictionHistoryReports (
 				records,
 				leveragePolicies,
-				walletBalanceUsd: 200.0,
+				walletBalanceUsd: WalletBalanceUsd,
 				historyWindowDays: CurrentPredictionHistoryWindowDays
-				);
-
-			// Верхнеуровневый бэктест-раннер.
-			var runner = new BacktestRunner ();
-
-			runner.Run (
-				mornings: mornings,
-				records: records,
-				candles1m: sol1m,
-				policies: policies,
-				config: backtestConfig,
-				trainUntilUtc: _trainUntilUtc
 			);
 
-			// Бэктест + сохранение отчётов.
-			BacktestReportsOrchestrator.SaveBacktestReports (
+			var runner = new BacktestRunner ();
+
+            runner.Run(
 				mornings: mornings,
 				records: records,
-				sol1m: sol1m,
+				candles1m: dayMinutes,
+				policies: policies,
+				config: backtestConfig,
+				trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc
+			);
+
+            BacktestReportsOrchestrator.SaveBacktestReports (
+				mornings: mornings,
+				records: records,
+				sol1m: dayMinutes,
 				policies: policies,
 				backtestConfig: backtestConfig,
 				nyTz: NyTz,
-				trainUntilUtc: _trainUntilUtc
+				trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc
 			);
 
-			// --- Сценарные стратегии по дневной модели ---
 			RunStrategyScenarios (
 				mornings: mornings,
 				records: records,
-				sol1m: sol1m
+				sol1m: dayMinutes.ToList ()
 			);
+			}
+
+		private static List<ICausalLeveragePolicy> ExtractCausalLeveragePolicies (
+			IReadOnlyList<RollingLoop.PolicySpec> policies )
+			{
+			if (policies == null) throw new ArgumentNullException (nameof (policies));
+
+			var list = new List<ICausalLeveragePolicy> (policies.Count);
+
+			foreach (var p in policies)
+				{
+				if (p.Policy == null) continue;
+
+				// Инвариант: любая политика, используемая в омнисциентном PnL,
+				// обязана иметь каузальный интерфейс для построения "current prediction" без утечек.
+				if (p.Policy is ICausalLeveragePolicy causal)
+					{
+					list.Add (causal);
+					continue;
+					}
+
+				throw new InvalidOperationException (
+					$"[policies] policy '{p.Name}' ({p.Policy.GetType ().FullName}) does not implement ICausalLeveragePolicy. " +
+					"CurrentPrediction должен работать строго через causal-интерфейс.");
+				}
+
+			if (list.Count == 0)
+				throw new InvalidOperationException ("[policies] no causal leverage policies after extraction.");
+
+			return list;
 			}
 		}
 	}

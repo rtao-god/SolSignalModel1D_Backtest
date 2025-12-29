@@ -1,28 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Data.Indicators;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
 using Xunit;
-using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Causal.Data.Indicators.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
 	/// <summary>
-	/// Расширенные тесты на отсутствие заглядывания вперёд у индикаторов:
-	/// - FindNearest смотрит только назад;
-	/// - DynVol не зависит от будущих свечей;
-	/// - EMA не зависит от будущих свечей;
-	/// - RsiSlope использует только прошлые RSI;
-	/// - DXY 30d change не использует будущие точки;
-	/// - FNG умеет корректно возвращать нейтральное значение.
+	/// Тесты на отсутствие lookahead в индикаторных утилитах.
+	/// Идея одна и та же: зафиксировать результат в точке "as-of", затем изменить данные строго в будущем
+	/// и убедиться, что значение в "as-of" не меняется.
 	/// </summary>
 	public sealed class IndicatorsNoLookaheadExtendedTests
 		{
 		private static Candle6h MakeCandle ( DateTime t, double close )
 			{
-			// Вспомогательный конструктор 6h-свечи:
-			// close задаётся явно, остальные поля делаются консистентными.
+			// Минимально консистентная свеча: OHLC вокруг close.
+			// В тестах важно иметь валидные High/Low для функций, которые их читают.
 			return new Candle6h
 				{
 				OpenTimeUtc = t,
@@ -40,18 +32,18 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		[Fact]
 		public void FindNearest_DoesNotUseFutureValues ()
 			{
+			// Словарь содержит "прошлое" и "будущее", а для asOf отсутствует точный ключ.
+			// Корректное поведение: брать ближайшее предыдущее значение, не заглядывая вперёд.
 			var baseTime = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 			var map = new Dictionary<DateTime, double>
-			{
-				{ baseTime, 10.0 },                 // вчера
-                { baseTime.AddDays(2), 9999.0 }     // завтра (будущее относительно asOf)
-            };
+				{
+					{ baseTime, 10.0 },                // прошлое
+					{ baseTime.AddDays (2), 9999.0 }   // будущее относительно asOf
+				};
 
-			var asOf = baseTime.AddDays (1); // даты в словаре нет
+			var asOf = baseTime.AddDays (1);
 
-			// Ожидаем, что будет использовано только предыдущее значение (baseTime),
-			// а будущее (baseTime+2) проигнорируется.
 			double before = CoreIndicators.FindNearest (
 				map,
 				atUtc: asOf,
@@ -61,8 +53,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 
 			Assert.Equal (10.0, before, 10);
 
-			// Мутируем будущее значение — если FindNearest начнёт смотреть вперёд,
-			// результат на asOf изменится и тест упадёт.
+			// Если реализация ошибочно использует будущее, изменение future-значения
+			// изменит результат в asOf и тест упадёт.
 			map[baseTime.AddDays (2)] = -12345.0;
 
 			double after = CoreIndicators.FindNearest (
@@ -82,10 +74,11 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		[Fact]
 		public void DynVol6h_DoesNotDependOnFutureSamples ()
 			{
+			// DynVol рассчитывается как средний |ret| по окну, заканчивающемуся в idx.
+			// Данные после idx не должны влиять на результат.
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 			var arr = new List<Candle6h> ();
 
-			// Строим 20 монотонных свечей.
 			for (int i = 0; i < 20; i++)
 				{
 				var t = start.AddHours (6 * i);
@@ -96,10 +89,9 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			int idx = 10;
 			int lookback = 5;
 
-			// DynVol в точке idx опирается только на прошлые окна.
 			double before = CoreIndicators.ComputeDynVol6h (arr, idx, lookback);
 
-			// Мутируем чистое будущее: свечи с индексами > idx.
+			// Искажаем только будущее (i > idx).
 			for (int i = idx + 1; i < arr.Count; i++)
 				{
 				arr[i].Close *= 100.0;
@@ -113,18 +105,19 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			}
 
 		[Fact]
-		public void DynVol6h_ReturnsZero_WhenNotEnoughHistory ()
+		public void DynVol6h_Throws_WhenNotEnoughHistory ()
 			{
+			// Строгий контракт: ComputeDynVol6h вызывается только после warm-up.
+			// На первых элементах ряда (недостаток истории) должен быть fail-fast.
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
 			var arr = new List<Candle6h>
-			{
-				MakeCandle(start, 100.0)
-			};
+				{
+				MakeCandle (start, 100.0)
+				};
 
-			// Недостаточно истории для расчёта среднего |ret| → ожидаем 0.
-			double v = CoreIndicators.ComputeDynVol6h (arr, idx: 0, lookbackWindows: 5);
-
-			Assert.Equal (0.0, v, 10);
+			Assert.Throws<InvalidOperationException> (() =>
+				CoreIndicators.ComputeDynVol6h (arr, idx: 0, lookbackWindows: 5));
 			}
 
 		// ======================
@@ -134,6 +127,8 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 		[Fact]
 		public void ComputeEma6h_DoesNotDependOnFutureSamples ()
 			{
+			// EMA в точке key зависит только от истории до этой точки.
+			// Изменение хвоста (последующих свечей) не должно менять значение EMA на key.
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 			var arr = new List<Candle6h> ();
 
@@ -147,12 +142,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			const int period = 10;
 
 			var emaBefore = CoreIndicators.ComputeEma6h (arr, period);
-			var key = arr[25].OpenTimeUtc; // точка достаточно далеко от хвоста
+			var key = arr[25].OpenTimeUtc;
 
-			Assert.True (emaBefore.ContainsKey (key), "EMA должна быть посчитана для выбранного ключа.");
+			Assert.True (emaBefore.ContainsKey (key), "EMA должна быть рассчитана для выбранной точки.");
 			double vBefore = emaBefore[key];
 
-			// Мутируем будущие свечи: индексы > 30.
+			// Искажаем только будущую часть ряда.
 			for (int i = 30; i < arr.Count; i++)
 				{
 				arr[i].Close *= 100.0;
@@ -163,114 +158,117 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			var emaAfter = CoreIndicators.ComputeEma6h (arr, period);
 			double vAfter = emaAfter[key];
 
-			// Значения EMA в точке key не должны меняться.
 			Assert.Equal (vBefore, vAfter, 10);
 			}
 
-		// ======================
-		// RSI slope
-		// ======================
+        // ======================
+        // RSI slope
+        // ======================
 
-		[Fact]
-		public void GetRsiSlope6h_UsesOnlyPastRsiValues ()
-			{
-			// Имитируем готовую карту RSI по 3 точкам:
-			// t0 (прошлое), t1 (asOf), t2 (будущее).
-			var t0 = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-			var t1 = t0.AddDays (1);
-			var t2 = t0.AddDays (2);
+        [Fact]
+        public void GetRsiSlope6h_UsesOnlyPastRsiValues()
+        {
+            var tPast = new DateTime(2024, 1, 1, 18, 0, 0, DateTimeKind.Utc);
+            var tNow = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+            var tFuture = new DateTime(2024, 1, 2, 6, 0, 0, DateTimeKind.Utc);
 
-			var rsiMap = new Dictionary<DateTime, double>
-			{
-				{ t0, 40.0 },  // прошлое
-                { t1, 60.0 },  // текущая точка
-                { t2, 1_000.0 } // будущее, которое не должно участвовать
-            };
+            var rsiMap = new Dictionary<DateTime, double>
+        {
+            { tPast, 40.0 },
+            { tNow, 60.0 },
+            { tFuture, 1_000.0 }
+        };
 
-			double slopeBefore = CoreIndicators.GetRsiSlope6h (
-				rsiMap,
-				asOfOpenUtc: t1,
-				days: 1);
+            double slopeBefore = CoreIndicators.GetRsiSlope6h(rsiMap, tNow, steps: 1);
+            Assert.InRange(slopeBefore, 19.9, 20.1);
 
-			// Ожидаемый наклон: 60 - 40 = 20.
-			Assert.InRange (slopeBefore, 19.9, 20.1);
+            rsiMap[tFuture] = -10_000.0;
 
-			// Меняем будущее значение — если GetRsiSlope6h начнёт смотреть вперёд
-			// (через FindNearest или иначе), наклон изменится.
-			rsiMap[t2] = -10_000.0;
+            double slopeAfter = CoreIndicators.GetRsiSlope6h(rsiMap, tNow, steps: 1);
+            Assert.Equal(slopeBefore, slopeAfter, 10);
+        }
 
-			double slopeAfter = CoreIndicators.GetRsiSlope6h (
-				rsiMap,
-				asOfOpenUtc: t1,
-				days: 1);
+        // ======================
+        // DXY 30d change
+        // ======================
 
-			Assert.Equal (slopeBefore, slopeAfter, 10);
-			}
-
-		// ======================
-		// DXY 30d change
-		// ======================
-
-		[Fact]
+        [Fact]
 		public void GetDxyChange30_DoesNotDependOnFutureSamples ()
 			{
+			// Для расчёта change30 нужны точки "now" и "past(=now-30d)".
+			// Любые значения после now не должны влиять на результат.
 			var dxy = new Dictionary<DateTime, double> ();
 			var start = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-			// t0 и t0+30d задают "честную" 10%-ю доходность.
 			var tPast = start;
 			var tNow = start.AddDays (30);
 			var tFuture = start.AddDays (40);
 
 			dxy[tPast] = 100.0;
 			dxy[tNow] = 110.0;
-			dxy[tFuture] = 9999.0; // будущее, которое не должно влиять
+			dxy[tFuture] = 9999.0;
 
 			double changeBefore = CoreIndicators.GetDxyChange30 (dxy, tNow);
 
 			Assert.InRange (changeBefore, 0.099, 0.101);
 
-			// Сильно мутируем будущее значение.
 			dxy[tFuture] = 1.0;
 
 			double changeAfter = CoreIndicators.GetDxyChange30 (dxy, tNow);
 
-			// Если реализация начнёт использовать будущие точки,
-			// этот тест моментально сломается.
 			Assert.Equal (changeBefore, changeAfter, 10);
 			}
 
 		// ======================
-		// FNG: нейтральные значения
+		// FNG: строгие контракты
 		// ======================
 
 		[Fact]
-		public void PickNearestFng_ReturnsNeutral_WhenNoHistory ()
+		public void PickNearestFng_DoesNotUseFutureValue ()
 			{
-			var empty = new Dictionary<DateTime, double> ();
-			var asOf = new DateTime (2024, 1, 10, 0, 0, 0, DateTimeKind.Utc);
+			var tPast = new DateTime (2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+			var tAsOf = tPast.AddDays (1);
+			var tFuture = tPast.AddDays (2);
 
-			double val = CoreIndicators.PickNearestFng (empty, asOf);
+			var fng = new Dictionary<DateTime, double>
+				{
+					{ tPast, 10.0 },
+					{ tFuture, 99.0 }
+				};
 
-			// По контракту функции без истории возвращается нейтральное значение 50.
-			Assert.Equal (50.0, val, 10);
+			double before = CoreIndicators.PickNearestFng (fng, tAsOf);
+			Assert.Equal (10.0, before, 10);
+
+			fng[tFuture] = -50.0;
+
+			double after = CoreIndicators.PickNearestFng (fng, tAsOf);
+			Assert.Equal (before, after, 10);
 			}
 
 		[Fact]
-		public void PickNearestFng_ReturnsNeutral_WhenNoRecentHistoryWithin14Days ()
+		public void PickNearestFng_Throws_WhenNoHistory ()
 			{
+			// Пустая серия FNG означает отсутствие источника данных.
+			// Строгий контракт: это невалидное состояние.
+			var empty = new Dictionary<DateTime, double> ();
+			var asOf = new DateTime (2024, 1, 10, 0, 0, 0, DateTimeKind.Utc);
+
+			Assert.Throws<InvalidOperationException> (() => CoreIndicators.PickNearestFng (empty, asOf));
+			}
+
+		[Fact]
+		public void PickNearestFng_Throws_WhenNoRecentHistoryWithin14Days ()
+			{
+			// Серия есть, но в допустимом lookback [-14d..0] нет точек.
+			// Это рассматривается как нарушение coverage-guard'ов.
 			var asOf = new DateTime (2024, 1, 15, 0, 0, 0, DateTimeKind.Utc);
 
 			var fng = new Dictionary<DateTime, double>
-			{
-                // История слишком старая: 20 дней назад.
-                { asOf.AddDays(-20), 10.0 }
-			};
+				{
+					{ asOf.AddDays (-20), 10.0 }
+				};
 
-			double val = CoreIndicators.PickNearestFng (fng, asOf);
-
-			// Источников в окне [-14d; 0] нет → функция должна вернуть 50 (нейтраль).
-			Assert.Equal (50.0, val, 10);
+			Assert.Throws<InvalidOperationException> (() => CoreIndicators.PickNearestFng (fng, asOf));
 			}
 		}
 	}

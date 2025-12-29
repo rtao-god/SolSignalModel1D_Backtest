@@ -1,47 +1,61 @@
-﻿using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Utils;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest
-	{
-	public partial class Program
-		{
-		/// <summary>
-		/// Считает PFI по дневным моделям:
-		/// - train-окно до _trainUntilUtc;
-		/// - при наличии OOS-хвоста — PFI по нему с отдельным тегом.
-		/// </summary>
-		private static void RunDailyPfi ( List<DataRow> allRows )
-			{
-			// Раньше здесь было два прохода по allRows через Where(...<=)... и Where(...>...).
-			// Теперь всё делается за один проход в хелпере, что уменьшает время на больших выборках.
-			var (dailyTrainRows, dailyOosRows) = TrainOosSplitHelper.SplitByTrainBoundary (allRows, _trainUntilUtc);
+{
+    public partial class Program
+    {
+        private static void RunDailyPfi(List<LabeledCausalRow> allRows)
+        {
+            if (allRows == null) throw new ArgumentNullException(nameof(allRows));
+            if (allRows.Count == 0)
+            {
+                Console.WriteLine("[pfi:daily] allRows is empty, skip.");
+                return;
+            }
 
-			if (dailyTrainRows.Count < 50)
-				{
-				Console.WriteLine ($"[pfi:daily] not enough train rows for PFI (count={dailyTrainRows.Count}), skip.");
-				return;
-				}
+            var ordered = allRows
+                .OrderBy(r => r.EntryUtc.Value)
+                .ToList();
 
-			var dailyTrainer = new ModelTrainer ();
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: static r => new EntryUtc(r.EntryUtc.Value),
+                trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
+                nyTz: NyTz);
 
-			// Обучение всех дневных моделей на train-окне.
-			var bundle = dailyTrainer.TrainAll (dailyTrainRows, datesToExclude: null);
+            var dailyTrainRows = split.Train is List<LabeledCausalRow> tl ? tl : split.Train.ToList();
+            var dailyOosRows = split.Oos is List<LabeledCausalRow> ol ? ol : split.Oos.ToList();
 
-			// PFI по train-сетам.
-			DailyModelDiagnostics.LogFeatureImportanceOnDailyModels (bundle, dailyTrainRows, "train");
+            if (dailyTrainRows.Count < 50)
+            {
+                Console.WriteLine($"[pfi:daily] not enough train rows for PFI (count={dailyTrainRows.Count}), skip.");
+                return;
+            }
 
-			// При наличии OOS-хвоста — отдельный PFI по нему.
-			if (dailyOosRows.Count > 0)
-				{
-				var tag = dailyOosRows.Count >= 50 ? "oos" : "oos-small";
-				DailyModelDiagnostics.LogFeatureImportanceOnDailyModels (bundle, dailyOosRows, tag);
-				}
-			else
-				{
-				Console.WriteLine ("[pfi:daily] no OOS rows after _trainUntilUtc, skip oos PFI.");
-				}
-			}
-		}
-	}
+            var dailyTrainer = new ModelTrainer();
+            var bundle = dailyTrainer.TrainAll(dailyTrainRows, dayKeysToExclude: null);
+
+            DailyModelDiagnostics.LogFeatureImportanceOnDailyModels(bundle, dailyTrainRows, "train");
+
+            if (dailyOosRows.Count > 0)
+            {
+                var tag = dailyOosRows.Count >= 50 ? "oos" : "oos-small";
+                DailyModelDiagnostics.LogFeatureImportanceOnDailyModels(bundle, dailyOosRows, tag);
+            }
+            else
+            {
+                Console.WriteLine("[pfi:daily] no OOS rows after train boundary (baseline-exit), skip oos PFI.");
+            }
+
+            if (split.Excluded.Count > 0)
+            {
+                Console.WriteLine(
+                    $"[pfi:daily] WARNING: excluded={split.Excluded.Count} rows have undefined baseline-exit and were ignored.");
+            }
+        }
+    }
+}

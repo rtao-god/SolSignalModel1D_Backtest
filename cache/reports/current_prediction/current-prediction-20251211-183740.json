@@ -1,0 +1,1109 @@
+{
+  "id": "current-prediction-20251211-183740",
+  "kind": "current_prediction",
+  "title": "\u0422\u0435\u043A\u0443\u0449\u0438\u0439 \u043F\u0440\u043E\u0433\u043D\u043E\u0437 (SOL/USDT)",
+  "generatedAtUtc": "2025-12-13T18:37:40.9853374Z",
+  "keyValueSections": [
+    {
+      "title": "\u041E\u0431\u0449\u0438\u0435 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B \u043F\u0440\u043E\u0433\u043D\u043E\u0437\u0430",
+      "items": [
+        {
+          "key": "\u0412\u0440\u0435\u043C\u044F \u0433\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u0438 \u043E\u0442\u0447\u0451\u0442\u0430 (UTC)",
+          "value": "2025-12-13 18:37 UTC"
+        },
+        {
+          "key": "\u0414\u0430\u0442\u0430 \u043F\u0440\u043E\u0433\u043D\u043E\u0437\u0430 (UTC)",
+          "value": "2025-12-11 12:00 UTC"
+        },
+        {
+          "key": "\u041E\u0441\u043D\u043E\u0432\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C (Daily)",
+          "value": "\u0411\u043E\u043A\u043E\u0432\u0438\u043A"
+        },
+        {
+          "key": "\u041C\u0438\u043A\u0440\u043E-\u043C\u043E\u0434\u0435\u043B\u044C (1m)",
+          "value": "\u043D\u0435 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u0442\u0441\u044F (\u043D\u0435 flat)"
+        },
+        {
+          "key": "\u0420\u0435\u0436\u0438\u043C \u0440\u044B\u043D\u043A\u0430",
+          "value": "\u0420\u044B\u043D\u043E\u043A \u0432 \u043D\u043E\u0440\u043C\u0430\u043B\u044C\u043D\u043E\u043C \u0440\u0435\u0436\u0438\u043C\u0435"
+        },
+        {
+          "key": "\u0412\u0435\u0440\u043E\u044F\u0442\u043D\u043E\u0441\u0442\u044C \u0441\u0440\u0430\u0431\u0430\u0442\u044B\u0432\u0430\u043D\u0438\u044F \u0441\u0442\u043E\u043F-\u043B\u043E\u0441\u0441\u0430",
+          "value": "0,2 %"
+        },
+        {
+          "key": "\u0421\u0438\u0433\u043D\u0430\u043B SL-\u043C\u043E\u0434\u0435\u043B\u0438",
+          "value": "\u041D\u043E\u0440\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0440\u0438\u0441\u043A \u043F\u043E \u0441\u0442\u043E\u043F\u0430\u043C"
+        },
+        {
+          "key": "\u0422\u0435\u043A\u0443\u0449\u0430\u044F \u0446\u0435\u043D\u0430 SOL/USDT",
+          "value": "131,4200"
+        },
+        {
+          "key": "\u041C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u043E\u0441\u043C\u044B\u0441\u043B\u0435\u043D\u043D\u044B\u0439 \u0445\u043E\u0434 \u0446\u0435\u043D\u044B",
+          "value": "0,0225 (2,3 %)"
+        },
+        {
+          "key": "\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043C\u043E\u0434\u0435\u043B\u0438",
+          "value": "day:move-down"
+        }
+      ]
+    },
+    {
+      "title": "\u0414\u0438\u0430\u043F\u0430\u0437\u043E\u043D \u0446\u0435\u043D\u044B \u0437\u0430 24 \u0447\u0430\u0441\u0430 (\u0438\u0441\u0442\u043E\u0440\u0438\u0447\u0435\u0441\u043A\u0438\u0439 baseline)",
+      "items": [
+        {
+          "key": "\u041C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u0430\u044F \u0446\u0435\u043D\u0430 \u0437\u0430 24 \u0447\u0430\u0441\u0430",
+          "value": "140,1200"
+        },
+        {
+          "key": "\u041C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u0430\u044F \u0446\u0435\u043D\u0430 \u0437\u0430 24 \u0447\u0430\u0441\u0430",
+          "value": "132,0100"
+        },
+        {
+          "key": "\u0426\u0435\u043D\u0430 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u044F \u0447\u0435\u0440\u0435\u0437 24 \u0447\u0430\u0441\u0430",
+          "value": "139,2200"
+        }
+      ]
+    }
+  ],
+  "tableSections": [
+    {
+      "title": "\u041F\u043E\u0447\u0435\u043C\u0443 \u043C\u043E\u0434\u0435\u043B\u044C \u0434\u0430\u043B\u0430 \u0442\u0430\u043A\u043E\u0439 \u043F\u0440\u043E\u0433\u043D\u043E\u0437 (top \u0444\u0430\u043A\u0442\u043E\u0440\u043E\u0432)",
+      "columns": [
+        "\u0422\u0438\u043F",
+        "\u0418\u043C\u044F",
+        "\u041E\u043F\u0438\u0441\u0430\u043D\u0438\u0435",
+        "\u0417\u043D\u0430\u0447\u0435\u043D\u0438\u0435",
+        "\u0420\u0430\u043D\u0433"
+      ],
+      "rows": [
+        [
+          "model",
+          "daily",
+          "\u0414\u043D\u0435\u0432\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C (Daily): \u043A\u043B\u0430\u0441\u0441 0 (down)",
+          "",
+          "1"
+        ],
+        [
+          "model",
+          "sl",
+          "SL-\u043C\u043E\u0434\u0435\u043B\u044C: \u0432\u0435\u0440\u043E\u044F\u0442\u043D\u043E\u0441\u0442\u044C \u0441\u0442\u043E\u043F\u0430 0,2 %, \u0440\u0435\u0448\u0435\u043D\u0438\u0435 = OK (\u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u0434\u0435\u043D\u044C)",
+          "0,2302",
+          "2"
+        ],
+        [
+          "model",
+          "regime",
+          "\u0420\u0435\u0436\u0438\u043C \u0440\u044B\u043D\u043A\u0430: NORMAL (\u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C)",
+          "",
+          "3"
+        ],
+        [
+          "metric",
+          "min_move",
+          "MinMove: 0,0225 (2,3 %)",
+          "0,0225",
+          "4"
+        ],
+        [
+          "metric",
+          "forward_24h_max_high",
+          "Baseline 24h MaxHigh: 140,1200",
+          "140,12",
+          "5"
+        ],
+        [
+          "metric",
+          "forward_24h_min_low",
+          "Baseline 24h MinLow: 132,0100",
+          "132,01",
+          "6"
+        ],
+        [
+          "metric",
+          "forward_24h_close",
+          "Baseline 24h Close: 139,2200",
+          "139,22",
+          "7"
+        ],
+        [
+          "pfi_feature",
+          "SolRet1",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolRet1\u0022: |\u0394AUC|=0,0623, \u0394AUC=0,0623, DeltaMean=-0,0313 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,5492, corr(score)=-0,9022, countPos=49, countNeg=59.",
+          "0,0623",
+          "8"
+        ],
+        [
+          "pfi_feature",
+          "SolBtcRet30",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolBtcRet30\u0022: |\u0394AUC|=0,0413, \u0394AUC=-0,0413, DeltaMean=-0,0033 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0232, corr(score)=-0,2272, countPos=49, countNeg=59.",
+          "0,0408",
+          "9"
+        ],
+        [
+          "pfi_feature",
+          "GoldChg30",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022GoldChg30\u0022: |\u0394AUC|=0,0363, \u0394AUC=-0,0363, DeltaMean=-0,0103 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,1492, corr(score)=0,0652, countPos=49, countNeg=59.",
+          "0,0356",
+          "10"
+        ],
+        [
+          "pfi_feature",
+          "GapBtcSol1",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022GapBtcSol1\u0022: |\u0394AUC|=0,0313, \u0394AUC=0,0313, DeltaMean=0,0183 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,4952, corr(score)=0,7872, countPos=49, countNeg=59.",
+          "0,0311",
+          "11"
+        ],
+        [
+          "pfi_feature",
+          "GapBtcSol3",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022GapBtcSol3\u0022: |\u0394AUC|=0,0153, \u0394AUC=0,0153, DeltaMean=0,0143 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,2352, corr(score)=0,5452, countPos=49, countNeg=59.",
+          "0,0145",
+          "12"
+        ],
+        [
+          "pfi_feature",
+          "DynVol",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022DynVol\u0022: |\u0394AUC|=0,0133, \u0394AUC=0,0133, DeltaMean=0,0013 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,0532, corr(score)=0,0162, countPos=49, countNeg=59.",
+          "0,0128",
+          "13"
+        ],
+        [
+          "pfi_feature",
+          "BtcRet30",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022BtcRet30\u0022: |\u0394AUC|=0,0123, \u0394AUC=0,0123, DeltaMean=-0,0013 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0132, corr(score)=-0,0762, countPos=49, countNeg=59.",
+          "0,0118",
+          "14"
+        ],
+        [
+          "pfi_feature",
+          "SolRsiCenteredNorm",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolRsiCenteredNorm\u0022: |\u0394AUC|=0,0113, \u0394AUC=0,0113, DeltaMean=-0,0243 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,1292, corr(score)=-0,4792, countPos=49, countNeg=59.",
+          "0,0114",
+          "15"
+        ],
+        [
+          "pfi_feature",
+          "SolAboveEma50",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolAboveEma50\u0022: |\u0394AUC|=0,0113, \u0394AUC=0,0113, DeltaMean=0,0023 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,0282, corr(score)=-0,0572, countPos=49, countNeg=59.",
+          "0,0107",
+          "16"
+        ],
+        [
+          "pfi_feature",
+          "AtrPct",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022AtrPct\u0022: |\u0394AUC|=0,0103, \u0394AUC=0,0103, DeltaMean=-0,0003 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0162, corr(score)=0,2062, countPos=49, countNeg=59.",
+          "0,01",
+          "17"
+        ],
+        [
+          "pfi_feature",
+          "RsiSlope3Norm",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022RsiSlope3Norm\u0022: |\u0394AUC|=0,0093, \u0394AUC=0,0093, DeltaMean=-0,0363 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,1462, corr(score)=-0,2912, countPos=49, countNeg=59.",
+          "0,0086",
+          "18"
+        ],
+        [
+          "pfi_feature",
+          "SolRet30",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolRet30\u0022: |\u0394AUC|=0,0053, \u0394AUC=-0,0053, DeltaMean=-0,0043 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0312, corr(score)=-0,2662, countPos=49, countNeg=59.",
+          "0,0052",
+          "19"
+        ],
+        [
+          "pfi_feature",
+          "FngNorm",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022FngNorm\u0022: |\u0394AUC|=0,0053, \u0394AUC=-0,0053, DeltaMean=0,0783 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,1502, corr(score)=-0,0502, countPos=49, countNeg=59.",
+          "0,0048",
+          "20"
+        ],
+        [
+          "pfi_feature",
+          "BtcVs200",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022BtcVs200\u0022: |\u0394AUC|=0,0043, \u0394AUC=-0,0043, DeltaMean=-0,0033 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0192, corr(score)=-0,1482, countPos=49, countNeg=59.",
+          "0,0045",
+          "21"
+        ],
+        [
+          "pfi_feature",
+          "OiMln",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022OiMln\u0022: |\u0394AUC|=0,0033, \u0394AUC=0,0033, DeltaMean=-0,0103 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0842, corr(score)=-0,4202, countPos=49, countNeg=59.",
+          "0,0028",
+          "22"
+        ],
+        [
+          "pfi_feature",
+          "DxyChg30",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022DxyChg30\u0022: |\u0394AUC|=0,0033, \u0394AUC=0,0033, DeltaMean=-0,0013 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,0682, corr(score)=0,2572, countPos=49, countNeg=59.",
+          "0,0028",
+          "23"
+        ],
+        [
+          "pfi_feature",
+          "HardRegimeFlag",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022HardRegimeFlag\u0022: |\u0394AUC|=0,0023, \u0394AUC=0,0023, DeltaMean=0,0093 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,0502, corr(score)=-0,0962, countPos=49, countNeg=59.",
+          "0,0017",
+          "24"
+        ],
+        [
+          "pfi_feature",
+          "BtcRet3",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022BtcRet3\u0022: |\u0394AUC|=0,0013, \u0394AUC=0,0013, DeltaMean=-0,0093 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,1962, corr(score)=-0,4992, countPos=49, countNeg=59.",
+          "0,0014",
+          "25"
+        ],
+        [
+          "pfi_feature",
+          "SolRet3",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolRet3\u0022: |\u0394AUC|=0,0003, \u0394AUC=-0,0003, DeltaMean=-0,0233 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,2592, corr(score)=-0,6252, countPos=49, countNeg=59.",
+          "0,0003",
+          "26"
+        ],
+        [
+          "pfi_feature",
+          "BtcRet1",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022BtcRet1\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=-0,0133 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043D\u0438\u0436\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=-0,4282, corr(score)=-0,7352, countPos=49, countNeg=59.",
+          "0,0003",
+          "27"
+        ],
+        [
+          "pfi_feature",
+          "_pad_43",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_43\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "28"
+        ],
+        [
+          "pfi_feature",
+          "_pad_44",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_44\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "29"
+        ],
+        [
+          "pfi_feature",
+          "_pad_45",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_45\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "30"
+        ],
+        [
+          "pfi_feature",
+          "_pad_46",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_46\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "31"
+        ],
+        [
+          "pfi_feature",
+          "_pad_47",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_47\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "32"
+        ],
+        [
+          "pfi_feature",
+          "_pad_48",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_48\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "33"
+        ],
+        [
+          "pfi_feature",
+          "_pad_49",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_49\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "34"
+        ],
+        [
+          "pfi_feature",
+          "_pad_50",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_50\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "35"
+        ],
+        [
+          "pfi_feature",
+          "_pad_51",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_51\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "36"
+        ],
+        [
+          "pfi_feature",
+          "_pad_53",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_53\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "37"
+        ],
+        [
+          "pfi_feature",
+          "_pad_61",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_61\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "38"
+        ],
+        [
+          "pfi_feature",
+          "_pad_54",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_54\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "39"
+        ],
+        [
+          "pfi_feature",
+          "_pad_55",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_55\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "40"
+        ],
+        [
+          "pfi_feature",
+          "_pad_56",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_56\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "41"
+        ],
+        [
+          "pfi_feature",
+          "_pad_57",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_57\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "42"
+        ],
+        [
+          "pfi_feature",
+          "_pad_58",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_58\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "43"
+        ],
+        [
+          "pfi_feature",
+          "_pad_59",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_59\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "44"
+        ],
+        [
+          "pfi_feature",
+          "_pad_42",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_42\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "45"
+        ],
+        [
+          "pfi_feature",
+          "_pad_60",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_60\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "46"
+        ],
+        [
+          "pfi_feature",
+          "_pad_52",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_52\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "47"
+        ],
+        [
+          "pfi_feature",
+          "_pad_41",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_41\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "48"
+        ],
+        [
+          "pfi_feature",
+          "_pad_31",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_31\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "49"
+        ],
+        [
+          "pfi_feature",
+          "_pad_39",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_39\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "50"
+        ],
+        [
+          "pfi_feature",
+          "RegimeDownFlag",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022RegimeDownFlag\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "51"
+        ],
+        [
+          "pfi_feature",
+          "Funding",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022Funding\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0273 (\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u0448\u0435 \u0432 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043C \u043A\u043B\u0430\u0441\u0441\u0435), corr(label)=0,0592, corr(score)=0,1802, countPos=49, countNeg=59.",
+          "0",
+          "52"
+        ],
+        [
+          "pfi_feature",
+          "SolEma50vs200",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022SolEma50vs200\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "53"
+        ],
+        [
+          "pfi_feature",
+          "BtcEma50vs200",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022BtcEma50vs200\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "54"
+        ],
+        [
+          "pfi_feature",
+          "_pad_24",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_24\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "55"
+        ],
+        [
+          "pfi_feature",
+          "_pad_25",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_25\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "56"
+        ],
+        [
+          "pfi_feature",
+          "_pad_26",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_26\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "57"
+        ],
+        [
+          "pfi_feature",
+          "_pad_27",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_27\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "58"
+        ],
+        [
+          "pfi_feature",
+          "_pad_28",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_28\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "59"
+        ],
+        [
+          "pfi_feature",
+          "_pad_29",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_29\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "60"
+        ],
+        [
+          "pfi_feature",
+          "_pad_30",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_30\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "61"
+        ],
+        [
+          "pfi_feature",
+          "_pad_62",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_62\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "62"
+        ],
+        [
+          "pfi_feature",
+          "_pad_32",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_32\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "63"
+        ],
+        [
+          "pfi_feature",
+          "_pad_33",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_33\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "64"
+        ],
+        [
+          "pfi_feature",
+          "_pad_34",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_34\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "65"
+        ],
+        [
+          "pfi_feature",
+          "_pad_35",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_35\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "66"
+        ],
+        [
+          "pfi_feature",
+          "_pad_36",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_36\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "67"
+        ],
+        [
+          "pfi_feature",
+          "_pad_37",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_37\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "68"
+        ],
+        [
+          "pfi_feature",
+          "_pad_38",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_38\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "69"
+        ],
+        [
+          "pfi_feature",
+          "_pad_40",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_40\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "70"
+        ],
+        [
+          "pfi_feature",
+          "_pad_63",
+          "[oos: dir-down] \u0444\u0438\u0447\u0430 \u0022_pad_63\u0022: |\u0394AUC|=0,0003, \u0394AUC=0,0003, DeltaMean=0,0003 (\u0441\u0440\u0435\u0434\u043D\u0438\u0435 \u043F\u043E \u043A\u043B\u0430\u0441\u0441\u0430\u043C \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442), corr(label)=0,0002, corr(score)=0,0002, countPos=49, countNeg=59.",
+          "0",
+          "71"
+        ]
+      ]
+    },
+    {
+      "title": "\u041F\u043E\u043B\u0438\u0442\u0438\u043A\u0438 \u043F\u043B\u0435\u0447\u0430 (BASE vs ANTI-D)",
+      "columns": [
+        "\u041F\u043E\u043B\u0438\u0442\u0438\u043A\u0430",
+        "\u0412\u0435\u0442\u043A\u0430",
+        "\u0420\u0438\u0441\u043A\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0434\u0435\u043D\u044C",
+        "\u0415\u0441\u0442\u044C \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435",
+        "\u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E",
+        "\u041D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435",
+        "\u041F\u043B\u0435\u0447\u043E",
+        "\u0426\u0435\u043D\u0430 \u0432\u0445\u043E\u0434\u0430",
+        "SL, %",
+        "TP, %",
+        "\u0426\u0435\u043D\u0430 SL",
+        "\u0426\u0435\u043D\u0430 TP",
+        "\u0420\u0430\u0437\u043C\u0435\u0440 \u043F\u043E\u0437\u0438\u0446\u0438\u0438, $",
+        "\u0420\u0430\u0437\u043C\u0435\u0440 \u043F\u043E\u0437\u0438\u0446\u0438\u0438, qty",
+        "\u0426\u0435\u043D\u0430 \u043B\u0438\u043A\u0432\u0438\u0434\u0430\u0446\u0438\u0438",
+        "\u0414\u0438\u0441\u0442\u0430\u043D\u0446\u0438\u044F \u0434\u043E \u043B\u0438\u043A\u0432\u0438\u0434\u0430\u0446\u0438\u0438, %"
+      ],
+      "rows": [
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "2",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "400,00",
+          "3,044",
+          "196,3446",
+          "49,4"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "2",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "2",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "400,00",
+          "3,044",
+          "196,3446",
+          "49,4"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "2",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "3",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "600,00",
+          "4,566",
+          "174,5286",
+          "32,8"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "3",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "3",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "600,00",
+          "4,566",
+          "174,5286",
+          "32,8"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "3",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "5",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "1000,00",
+          "7,609",
+          "157,0757",
+          "19,5"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "5",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "5",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "1000,00",
+          "7,609",
+          "157,0757",
+          "19,5"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "5",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "10",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "2000,00",
+          "15,218",
+          "143,9861",
+          "9,6"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "10",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "10",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "2000,00",
+          "15,218",
+          "143,9861",
+          "9,6"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "10",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "15",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "3000,00",
+          "22,828",
+          "139,6228",
+          "6,2"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "15",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "15",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "3000,00",
+          "22,828",
+          "139,6228",
+          "6,2"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "15",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "50",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "10000,00",
+          "76,092",
+          "133,5143",
+          "1,6"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "50",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "ConstPolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "50",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "10000,00",
+          "76,092",
+          "133,5143",
+          "1,6"
+        ],
+        [
+          "ConstPolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "50",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "RiskAwarePolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "5",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "1000,00",
+          "7,609",
+          "157,0757",
+          "19,5"
+        ],
+        [
+          "RiskAwarePolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "5",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "UltraSafePolicy",
+          "BASE",
+          "False",
+          "True",
+          "False",
+          "SHORT",
+          "3",
+          "131,4200",
+          "2,3",
+          "3,4",
+          "134,3832",
+          "126,9752",
+          "600,00",
+          "4,566",
+          "174,5286",
+          "32,8"
+        ],
+        [
+          "UltraSafePolicy",
+          "ANTI-D",
+          "False",
+          "True",
+          "True",
+          "-",
+          "3",
+          "131,4200",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-",
+          "-"
+        ]
+      ]
+    }
+  ],
+  "textSections": []
+}

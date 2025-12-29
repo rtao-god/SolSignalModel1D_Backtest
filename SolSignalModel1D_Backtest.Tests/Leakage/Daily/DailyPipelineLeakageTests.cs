@@ -1,385 +1,378 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Tests.Leakage.Old;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
-	{
-	/// <summary>
-	/// Пайплайновые тесты на утечки:
-	/// 1) shuffle train-лейблов → OOS-качество должно сильно просесть;
-	/// 2) randomize train-фичей → OOS-качество должно просесть до околослучайного уровня.
-	/// Используют тот же Bootstrap, что и LegacyTargetSanityTests, но с дополнительными мутациями train-части.
-	/// </summary>
-	public sealed class DailyPipelineLeakageTests
-		{
-		private sealed class DailyRunResult
-			{
-			public required DateTime TrainUntilUtc { get; init; }
-			public required List<PredictionRecord> Records { get; init; }
-			}
-
-		// =====================================================================
-		// ПУБЛИЧНЫЕ ТЕСТЫ
-		// =====================================================================
-
-		[Fact]
-		public async Task DailyModel_OosQualityDrops_WhenTrainLabelsAreShuffled ()
-			{
-			// Один Bootstrap на тест: дальше переиспользуем те же ряды
-			var (allRows, mornings, solAll6h, _, _) =
-				await LegacyTargetSanityTests.BootstrapRowsAndCandlesAsync ();
-
-			// Базовый прогон без вмешательства
-			var baseline = await RunDailyPipelineAsync (
-				allRows,
-				mornings,
-				solAll6h,
-				mutateTrain: null);
-
-			var accBaseline = ComputeOosAccuracy (baseline.Records, baseline.TrainUntilUtc);
-			Assert.False (double.IsNaN (accBaseline), "Baseline OOS accuracy is NaN.");
-
-			// Прогон с перемешанными train-лейблами на тех же данных
-			var shuffled = await RunDailyPipelineAsync (
-				allRows,
-				mornings,
-				solAll6h,
-				mutateTrain: ( rows, trainUntil ) =>
-					ShuffleTrainLabels (rows, trainUntil, seed: 123));
-
-			var accShuffled = ComputeOosAccuracy (shuffled.Records, shuffled.TrainUntilUtc);
-
-			// Требование: после шурфлинга качество должно заметно упасть.
-			// Порог можно подстроить под реальные метрики, идея такая:
-			// если accBaseline ≈ 0.6–0.7, то accShuffled ожидается близко к 0.33.
-			Assert.True (
-				accShuffled < accBaseline - 0.15,
-				$"OOS accuracy with shuffled labels did not drop enough. baseline={accBaseline:0.000}, shuffled={accShuffled:0.000}");
-			}
-
-		[Fact]
-		public async Task DailyModel_OosQualityDrops_WhenTrainFeaturesAreRandomized ()
-			{
-			// Один общий Bootstrap для baseline и random-run
-			var (allRows, mornings, solAll6h, _, _) =
-				await LegacyTargetSanityTests.BootstrapRowsAndCandlesAsync ();
-
-			// Базовый прогон
-			var baseline = await RunDailyPipelineAsync (
-				allRows,
-				mornings,
-				solAll6h,
-				mutateTrain: null);
-
-			var accBaseline = ComputeOosAccuracy (baseline.Records, baseline.TrainUntilUtc);
-			Assert.False (double.IsNaN (accBaseline), "Baseline OOS accuracy is NaN.");
-
-			// Прогон с рандомизированными фичами в train-части на тех же данных
-			var randomized = await RunDailyPipelineAsync (
-				allRows,
-				mornings,
-				solAll6h,
-				mutateTrain: ( rows, trainUntil ) =>
-					RandomizeTrainFeatures (rows, trainUntil, seed: 42));
-
-			var accRandom = ComputeOosAccuracy (randomized.Records, randomized.TrainUntilUtc);
-
-			// Требование: качество на рандом-фичах должно быть явно хуже базового
-			// и находиться в области «почти случайно».
-			Assert.True (
-				accRandom < accBaseline - 0.15 && accRandom < 0.5,
-				$"OOS accuracy with randomized features is suspiciously high. baseline={accBaseline:0.000}, randomized={accRandom:0.000}");
-			}
-
-		// =====================================================================
-		// ОБЩИЙ ПАЙПЛАЙН: Train + Forward
-		// =====================================================================
-
-		/// <summary>
-		/// Мини-пайплайн дневной модели, повторяющий прод:
-		/// - trainUntil = maxDate - 120d (с fallback на train=вся история при малом датасете),
-		/// - ModelTrainer.TrainAll,
-		/// - PredictionEngine,
-		/// - forward до baseline-exit по 6h.
-		/// В точке mutateTrain можно мутировать train-часть (лейблы/фичи) перед TrainAll.
-		/// </summary>
-		private static async Task<DailyRunResult> RunDailyPipelineAsync (
-			List<DataRow> allRows,
-			List<DataRow> mornings,
-			List<Candle6h> solAll6h,
-			Action<List<DataRow>, DateTime>? mutateTrain )
-			{
-			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
-			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
-			if (solAll6h == null) throw new ArgumentNullException (nameof (solAll6h));
-
-			PredictionEngine.DebugAllowDisabledModels = true;
-
-			var ordered = allRows
-				.OrderBy (r => r.Date)
-				.ToList ();
-
-			if (ordered.Count == 0)
-				throw new InvalidOperationException ("RunDailyPipelineAsync: пустой allRows.");
-
-			var maxDate = ordered[^1].Date;
-
-			const int HoldoutDays = 120;
-			var trainUntil = maxDate.AddDays (-HoldoutDays);
-
-			var trainRows = ordered
-				.Where (r => r.Date <= trainUntil)
-				.ToList ();
-
-			if (trainRows.Count < 100)
-				{
-				// Мало данных — учимся на всей истории, как в проде.
-				trainRows = ordered;
-				trainUntil = ordered[^1].Date;
-				}
-
-			// В этой точке уже известна финальная граница trainUntil.
-			// Даём тесту возможность мутировать train-часть (лейблы/фичи).
-			mutateTrain?.Invoke (allRows, trainUntil);
-
-			// После мутации переподбираем trainRows (на случай, если что-то изменилось).
-			trainRows = allRows
-				.Where (r => r.Date <= trainUntil)
-				.OrderBy (r => r.Date)
-				.ToList ();
-
-			var trainer = new ModelTrainer
-				{
-				DisableMoveModel = false,
-				DisableDirNormalModel = false,
-				DisableDirDownModel = true,
-				DisableMicroFlatModel = false
-				};
-
-			var bundle = trainer.TrainAll (trainRows);
-
-			if (bundle.MlCtx == null)
-				throw new InvalidOperationException (
-					"ModelTrainer вернул ModelBundle с MlCtx == null.");
-
-			var engine = new PredictionEngine (bundle);
-
-			var records = await BuildPredictionRecordsAsyncForTests (
-				mornings,
-				solAll6h,
-				engine);
-
-			return new DailyRunResult
-				{
-				TrainUntilUtc = trainUntil,
-				Records = records
-				};
-			}
-
-		/// <summary>
-		/// Forward-часть: строит PredictionRecord'ы для всех mornings
-		/// через PredictionEngine и 6h-свечи до baseline-exit.
-		/// Это копия логики из LegacyTargetSanityTests.
-		/// </summary>
-		private static async Task<List<PredictionRecord>> BuildPredictionRecordsAsyncForTests (
-			IReadOnlyList<DataRow> mornings,
-			IReadOnlyList<Candle6h> solAll6h,
-			PredictionEngine engine )
-			{
-			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
-			if (solAll6h == null) throw new ArgumentNullException (nameof (solAll6h));
-			if (engine == null) throw new ArgumentNullException (nameof (engine));
-
-			var sorted6h = solAll6h is List<Candle6h> list6h
-				? list6h
-				: solAll6h.ToList ();
-
-			if (sorted6h.Count == 0)
-				throw new InvalidOperationException (
-					"[forward-pipeline] Пустая серия 6h для SOL.");
-
-			var indexByOpenTime = new Dictionary<DateTime, int> (sorted6h.Count);
-			for (int i = sorted6h.Count - 1; i >= 0; i--)
-				indexByOpenTime[sorted6h[i].OpenTimeUtc] = i;
-
-			var nyTz = Windowing.NyTz;
-			var list = new List<PredictionRecord> (mornings.Count);
-
-			foreach (var r in mornings)
-				{
-				var pr = engine.Predict (r);
-
-				var entryUtc = r.Date;
-				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, nyTz);
-
-				if (!indexByOpenTime.TryGetValue (entryUtc, out var entryIdx))
-					{
-					throw new InvalidOperationException (
-						$"[forward-pipeline] entry candle {entryUtc:O} not found in 6h series.");
-					}
-
-				var exitIdx = -1;
-				for (int i = entryIdx; i < sorted6h.Count; i++)
-					{
-					var start = sorted6h[i].OpenTimeUtc;
-					var end = i + 1 < sorted6h.Count
-						? sorted6h[i + 1].OpenTimeUtc
-						: start.AddHours (6);
-
-					if (exitUtc >= start && exitUtc < end)
-						{
-						exitIdx = i;
-						break;
-						}
-					}
-
-				if (exitIdx < 0)
-					{
-					throw new InvalidOperationException (
-						$"[forward-pipeline] no 6h candle covering baseline exit {exitUtc:O} (entry {entryUtc:O}).");
-					}
-
-				if (exitIdx <= entryIdx)
-					{
-					throw new InvalidOperationException (
-						$"[forward-pipeline] exitIdx {exitIdx} <= entryIdx {entryIdx} для entry {entryUtc:O}.");
-					}
-
-				var entryPrice = sorted6h[entryIdx].Close;
-
-				double maxHigh = double.MinValue;
-				double minLow = double.MaxValue;
-
-				for (int j = entryIdx + 1; j <= exitIdx; j++)
-					{
-					var c = sorted6h[j];
-					if (c.High > maxHigh) maxHigh = c.High;
-					if (c.Low < minLow) minLow = c.Low;
-					}
-
-				if (maxHigh == double.MinValue || minLow == double.MaxValue)
-					{
-					throw new InvalidOperationException (
-						$"[forward-pipeline] no candles between entry {entryUtc:O} and exit {exitUtc:O}.");
-					}
-
-				var fwdClose = sorted6h[exitIdx].Close;
-
-				list.Add (new PredictionRecord
-					{
-					DateUtc = r.Date,
-					TrueLabel = r.Label,
-					PredLabel = pr.Class,
-
-					PredMicroUp = pr.Micro.ConsiderUp,
-					PredMicroDown = pr.Micro.ConsiderDown,
-					FactMicroUp = r.FactMicroUp,
-					FactMicroDown = r.FactMicroDown,
-
-					Entry = entryPrice,
-					MaxHigh24 = maxHigh,
-					MinLow24 = minLow,
-					Close24 = fwdClose,
-
-					RegimeDown = r.RegimeDown,
-					Reason = pr.Reason,
-					MinMove = r.MinMove,
-
-					DelayedSource = string.Empty,
-					DelayedEntryAsked = false,
-					DelayedEntryUsed = false,
-					DelayedEntryExecuted = false,
-					DelayedEntryPrice = 0.0,
-					DelayedIntradayResult = 0,
-					DelayedIntradayTpPct = 0.0,
-					DelayedIntradaySlPct = 0.0,
-					TargetLevelClass = 0,
-					DelayedWhyNot = null,
-					DelayedEntryExecutedAtUtc = null,
-					SlProb = 0.0,
-					SlHighDecision = false
-					});
-				}
-
-			return await Task.FromResult (list);
-			}
-
-		private static double ComputeOosAccuracy (
-			List<PredictionRecord> records,
-			DateTime trainUntilUtc )
-			{
-			var oos = records
-				.Where (r => r.DateUtc > trainUntilUtc)
-				.ToList ();
-
-			if (oos.Count == 0)
-				return double.NaN;
-
-			var correct = oos.Count (r => r.PredLabel == r.TrueLabel);
-			return correct / (double) oos.Count;
-			}
-
-		// =====================================================================
-		// МУТАТОРЫ TRAIN-ЧАСТИ
-		// =====================================================================
-
-		private static void ShuffleTrainLabels (
-			List<DataRow> rows,
-			DateTime trainUntilUtc,
-			int seed )
-			{
-			var train = rows
-				.Where (r => r.Date <= trainUntilUtc)
-				.OrderBy (r => r.Date)
-				.ToList ();
-
-			if (train.Count == 0)
-				throw new InvalidOperationException (
-					"[shuffle-labels] train-set is empty.");
-
-			var labels = train
-				.Select (r => r.Label)
-				.ToArray ();
-
-			var rng = new Random (seed);
-			for (int i = labels.Length - 1; i > 0; i--)
-				{
-				int j = rng.Next (i + 1);
-				(labels[i], labels[j]) = (labels[j], labels[i]);
-				}
-
-			for (int i = 0; i < train.Count; i++)
-				train[i].Label = labels[i];
-			}
-
-		private static void RandomizeTrainFeatures (
-			List<DataRow> rows,
-			DateTime trainUntilUtc,
-			int seed )
-			{
-			var rng = new Random (seed);
-
-			foreach (var r in rows)
-				{
-				if (r.Date > trainUntilUtc)
-					continue;
-
-				var feats = r.Features;
-				if (feats == null || feats.Length == 0)
-					continue;
-
-				for (int i = 0; i < feats.Length; i++)
-					feats[i] = rng.NextDouble () * 2.0 - 1.0; // равномерно [-1;1]
-				}
-			}
-		}
-	}
+{
+    /// <summary>
+    /// Интеграционный тест: разрушение train-сигнала должно ломать качество на OOS.
+    /// </summary>
+    public sealed class DailyPipelineLeakageTests
+    {
+        private sealed class DailyRunResult
+        {
+            public required TrainUntilExitDayKeyUtc TrainUntilExitDayKeyUtc { get; init; }
+            public required List<(DateTime DateUtc, int TrueLabel, int PredLabel)> OosPreds { get; init; }
+            public required double BaselineOosAccuracy { get; init; }
+        }
+
+        [Fact]
+        public async Task DailyModel_OosQualityDrops_WhenTrainLabelsAreShuffled()
+        {
+            var allRows = BuildSyntheticRows(
+                startUtc: new DateTime(2022, 01, 01, 13, 0, 0, DateTimeKind.Utc),
+                days: 720,
+                seed: 123);
+
+            var baseline = await RunDailyPipelineAsync(allRows, mutateTrain: null);
+
+            Assert.False(double.IsNaN(baseline.BaselineOosAccuracy), "Baseline OOS accuracy is NaN.");
+            Assert.True(baseline.BaselineOosAccuracy > 0.45, $"Baseline OOS accuracy too low: {baseline.BaselineOosAccuracy:0.000}");
+
+            var shuffled = await RunDailyPipelineAsync(
+                allRows,
+                mutateTrain: (rows, trainUntil) => rows = ShuffleTrainLabels(rows, trainUntil, seed: 777));
+
+            var accShuffled = ComputeAccuracy(shuffled.OosPreds);
+
+            Assert.True(
+                accShuffled < baseline.BaselineOosAccuracy - 0.15,
+                $"OOS accuracy with shuffled labels did not drop enough. baseline={baseline.BaselineOosAccuracy:0.000}, shuffled={accShuffled:0.000}");
+        }
+
+        [Fact]
+        public async Task DailyModel_OosQualityDrops_WhenTrainFeaturesAreRandomized()
+        {
+            var allRows = BuildSyntheticRows(
+                startUtc: new DateTime(2022, 01, 01, 13, 0, 0, DateTimeKind.Utc),
+                days: 720,
+                seed: 42);
+
+            var baseline = await RunDailyPipelineAsync(allRows, mutateTrain: null);
+
+            Assert.False(double.IsNaN(baseline.BaselineOosAccuracy), "Baseline OOS accuracy is NaN.");
+            Assert.True(baseline.BaselineOosAccuracy > 0.45, $"Baseline OOS accuracy too low: {baseline.BaselineOosAccuracy:0.000}");
+
+            var randomized = await RunDailyPipelineAsync(
+                allRows,
+                mutateTrain: (rows, trainUntil) => rows = RandomizeTrainFeatures(rows, trainUntil, seed: 999));
+
+            var accRandom = ComputeAccuracy(randomized.OosPreds);
+
+            Assert.True(
+                accRandom < baseline.BaselineOosAccuracy - 0.15 && accRandom < 0.50,
+                $"OOS accuracy with randomized features is suspiciously high. baseline={baseline.BaselineOosAccuracy:0.000}, randomized={accRandom:0.000}");
+        }
+
+        private static async Task<DailyRunResult> RunDailyPipelineAsync(
+            List<LabeledCausalRow> allRows,
+            Func<List<LabeledCausalRow>, TrainUntilExitDayKeyUtc, List<LabeledCausalRow>>? mutateTrain)
+        {
+            if (allRows == null) throw new ArgumentNullException(nameof(allRows));
+            if (allRows.Count == 0) throw new InvalidOperationException("RunDailyPipelineAsync: empty allRows.");
+
+            var ordered = allRows.OrderBy(DayKeyUtc).ToList();
+            var maxEntryUtc = ordered[^1].EntryUtc.Value;
+
+            const int HoldoutDays = 120;
+            var trainUntilEntryUtc = maxEntryUtc.AddDays(-HoldoutDays);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                NyWindowing.ComputeExitDayKeyUtc(
+                    new EntryUtc(trainUntilEntryUtc),
+                    NyWindowing.NyTz));
+
+            static NyTrainSplit.EntryClass Classify(LabeledCausalRow r, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc)
+            {
+                return NyTrainSplit.ClassifyByBaselineExit(
+                    entryUtc: r.Causal.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyWindowing.NyTz,
+                    baselineExitDayKeyUtc: out _);
+            }
+
+            var trainRows = ordered
+                .Where(r => Classify(r, trainUntilExitDayKeyUtc) == NyTrainSplit.EntryClass.Train)
+                .ToList();
+
+            if (trainRows.Count < 100)
+            {
+                throw new InvalidOperationException(
+                    $"[DailyPipelineLeakageTests] not enough train rows for leakage test: train={trainRows.Count}. " +
+                    "Test setup must guarantee sufficient train/OOS split.");
+            }
+
+            if (mutateTrain != null)
+            {
+                ordered = mutateTrain(ordered, trainUntilExitDayKeyUtc).OrderBy(DayKeyUtc).ToList();
+                trainRows = ordered
+                    .Where(r => Classify(r, trainUntilExitDayKeyUtc) == NyTrainSplit.EntryClass.Train)
+                    .ToList();
+            }
+
+            var trainer = new ModelTrainer
+            {
+                DisableMoveModel = false,
+                DisableDirNormalModel = false,
+                DisableDirDownModel = true,
+                DisableMicroFlatModel = false
+            };
+
+            var bundle = trainer.TrainAll(trainRows);
+            var engine = new PredictionEngine(bundle);
+
+            var oos = new List<(DateTime, int, int)>();
+
+            foreach (var r in ordered)
+            {
+                if (Classify(r, trainUntilExitDayKeyUtc) != NyTrainSplit.EntryClass.Oos)
+                    continue;
+
+                var p = engine.PredictCausal(r.Causal);
+                oos.Add((DayKeyUtc(r), r.TrueLabel, p.PredLabel));
+            }
+
+            var acc = ComputeAccuracy(oos);
+
+            return await Task.FromResult(new DailyRunResult
+            {
+                TrainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc,
+                OosPreds = oos,
+                BaselineOosAccuracy = acc
+            });
+        }
+
+        private static double ComputeAccuracy(List<(DateTime DateUtc, int TrueLabel, int PredLabel)> preds)
+        {
+            int total = preds.Count;
+            if (total == 0) return double.NaN;
+
+            int ok = 0;
+            foreach (var x in preds)
+            {
+                if (x.PredLabel == x.TrueLabel) ok++;
+            }
+
+            return ok / (double)total;
+        }
+
+        private static List<LabeledCausalRow> ShuffleTrainLabels(List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc, int seed)
+        {
+            var trainIdx = new List<int>();
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: rows[i].Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _) == NyTrainSplit.EntryClass.Train)
+                    trainIdx.Add(i);
+            }
+
+            if (trainIdx.Count == 0)
+                throw new InvalidOperationException("[shuffle-labels] train-set is empty.");
+
+            var labels = trainIdx.Select(idx => rows[idx].TrueLabel).ToArray();
+
+            var rng = new Random(seed);
+            for (int i = labels.Length - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (labels[i], labels[j]) = (labels[j], labels[i]);
+            }
+
+            var res = new List<LabeledCausalRow>(rows.Count);
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+
+                if (NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: r.Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _) != NyTrainSplit.EntryClass.Train)
+                {
+                    res.Add(r);
+                    continue;
+                }
+
+                int pos = trainIdx.IndexOf(i);
+                int newLabel = labels[pos];
+
+                var microTruth = newLabel == 1
+                    ? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
+                res.Add(new LabeledCausalRow(
+                    causal: r.Causal,
+                    trueLabel: newLabel,
+                    microTruth: microTruth));
+            }
+
+            return res;
+        }
+
+        private static List<LabeledCausalRow> RandomizeTrainFeatures(List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc, int seed)
+        {
+            var rng = new Random(seed);
+
+            var res = new List<LabeledCausalRow>(rows.Count);
+
+            foreach (var r in rows)
+            {
+                if (NyTrainSplit.ClassifyByBaselineExit(
+                        entryUtc: r.Causal.EntryUtc,
+                        trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                        nyTz: NyWindowing.NyTz,
+                        baselineExitDayKeyUtc: out _) != NyTrainSplit.EntryClass.Train)
+                {
+                    res.Add(r);
+                    continue;
+                }
+
+                var c = r.Causal;
+
+                double NextRand() => rng.NextDouble() * 2.0 - 1.0;
+
+                var randomized = new CausalDataRow(
+                    entryUtc: c.TradingEntryUtc,
+                    regimeDown: c.RegimeDown,
+                    isMorning: c.IsMorning,
+                    hardRegime: c.HardRegime,
+                    minMove: c.MinMove,
+
+                    solRet30: NextRand(),
+                    btcRet30: NextRand(),
+                    solBtcRet30: NextRand(),
+
+                    solRet1: NextRand(),
+                    solRet3: NextRand(),
+                    btcRet1: NextRand(),
+                    btcRet3: NextRand(),
+
+                    fngNorm: NextRand(),
+                    dxyChg30: NextRand(),
+                    goldChg30: NextRand(),
+
+                    btcVs200: NextRand(),
+
+                    solRsiCenteredScaled: NextRand(),
+                    rsiSlope3Scaled: NextRand(),
+
+                    gapBtcSol1: NextRand(),
+                    gapBtcSol3: NextRand(),
+
+                    atrPct: Math.Abs(NextRand()) * 0.05 + 0.001,
+                    dynVol: Math.Abs(NextRand()) * 2.0 + 0.1,
+
+                    solAboveEma50: NextRand(),
+                    solEma50vs200: NextRand() * 0.05,
+                    btcEma50vs200: NextRand() * 0.05);
+
+                res.Add(new LabeledCausalRow(
+                    causal: randomized,
+                    trueLabel: r.TrueLabel,
+                    microTruth: r.MicroTruth));
+            }
+
+            return res;
+        }
+
+        private static List<LabeledCausalRow> BuildSyntheticRows(DateTime startUtc, int days, int seed)
+        {
+            if (startUtc.Kind != DateTimeKind.Utc)
+                throw new InvalidOperationException("startUtc must be UTC.");
+
+            var rng = new Random(seed);
+
+            var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc(
+                startNyLocalDate: NyTestDates.NyLocal(startUtc.Year, startUtc.Month, startUtc.Day, 0, 0),
+                count: days,
+                hour: 8);
+
+            var rows = new List<LabeledCausalRow>(datesUtc.Count);
+
+            for (int i = 0; i < datesUtc.Count; i++)
+            {
+                var entryUtcRaw = datesUtc[i];
+
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(entryUtcRaw), NyWindowing.NyTz, out var entryUtc))
+                    throw new InvalidOperationException($"[DailyPipelineLeakageTests] NyTradingEntryUtc expected, got {entryUtcRaw:O}");
+
+                double solRet1 = (rng.NextDouble() - 0.5) * 0.10;
+
+                int label =
+                    solRet1 > 0.01 ? 2 :
+                    solRet1 < -0.01 ? 0 :
+                    1;
+
+                bool regimeDown = (label == 0);
+
+                bool factMicroUp = false;
+                bool factMicroDown = false;
+
+                if (label == 1)
+                {
+                    factMicroUp = rng.NextDouble() < 0.5;
+                    factMicroDown = !factMicroUp;
+                }
+
+                var microTruth = label == 1
+                    ? (factMicroUp
+                        ? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+                        : OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down))
+                    : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
+                var causal = new CausalDataRow(
+                    entryUtc: entryUtc,
+                    regimeDown: regimeDown,
+                    isMorning: true,
+                    hardRegime: 1,
+                    minMove: 0.02,
+
+                    solRet30: solRet1 * 0.2,
+                    btcRet30: 0.0,
+                    solBtcRet30: 0.0,
+
+                    solRet1: solRet1,
+                    solRet3: solRet1 * 0.7,
+                    btcRet1: solRet1 * 0.1,
+                    btcRet3: solRet1 * 0.05,
+
+                    fngNorm: 0.0,
+                    dxyChg30: 0.0,
+                    goldChg30: 0.0,
+
+                    btcVs200: 0.0,
+
+                    solRsiCenteredScaled: 0.0,
+                    rsiSlope3Scaled: 0.0,
+
+                    gapBtcSol1: 0.0,
+                    gapBtcSol3: 0.0,
+
+                    atrPct: 0.02 + rng.NextDouble() * 0.02,
+                    dynVol: 0.5 + rng.NextDouble() * 1.0,
+
+                    solAboveEma50: 1.0,
+                    solEma50vs200: 0.01,
+                    btcEma50vs200: 0.01);
+
+                rows.Add(new LabeledCausalRow(
+                    causal: causal,
+                    trueLabel: label,
+                    microTruth: microTruth));
+            }
+
+            return rows.OrderBy(DayKeyUtc).ToList();
+        }
+
+        private static DateTime DayKeyUtc(LabeledCausalRow r) => r.Causal.EntryDayKeyUtc.Value;
+    }
+}

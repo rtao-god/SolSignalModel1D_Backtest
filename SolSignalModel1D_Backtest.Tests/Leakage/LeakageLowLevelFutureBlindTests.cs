@@ -1,31 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Analytics.Labeling;
-using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.Infra;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Infra;
 using Xunit;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.DataBuilder;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage
 	{
 	/// <summary>
 	/// Низкоуровневые тесты на "future-blindness" DataBuilder/Labeler.
 	/// Идея: мутируем хвост свечей после момента T и проверяем,
-	/// что строки DataRow "до T" (с учётом baseline-окна) не изменились.
+	/// что строки, построенные ДО "защищённой" границы, не изменились.
+	///
+	/// Важно:
+	/// - таргет (TrueLabel) по определению использует forward-окно baseline;
+	/// - поэтому "защищённая граница" должна быть ДО mutateAfterUtc с запасом по горизонту.
 	/// </summary>
 	public sealed class LeakageLowLevelFutureBlindTests
 		{
-		/// <summary>
-		/// DataBuilder_Features_DoNotDepend_OnFutureCandles:
-		/// фичи в DataRow для безопасных дат не зависят от хвоста 6h/1m после T.
-		/// </summary>
 		[Fact]
 		public void DataBuilder_Features_DoNotDepend_OnFutureCandles ()
 			{
-			// 1) Строим синтетические ряды 6h/1m + FNG/DXY и DataRow из них.
 			var nyTz = TimeZones.NewYork;
 
 			var (
@@ -38,28 +34,29 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				dxySeries
 			) = BuildSyntheticSeries (nyTz);
 
-			var rowsOriginal = RowBuilder.BuildRowsDaily (
-				solWinTrain,
-				btcWinTrain,
-				paxgWinTrain,
-				solAll6h,
-				solAll1m,
-				fngHistory,
-				dxySeries,
+			var buildOriginal = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrain,
+				btcWinTrain: btcWinTrain,
+				paxgWinTrain: paxgWinTrain,
+				solAll6h: solAll6h,
+				solAll1m: solAll1m,
+				fngHistory: fngHistory,
+				dxySeries: dxySeries,
 				extraDaily: null,
 				nyTz: nyTz);
 
+			var rowsOriginal = buildOriginal.LabeledRows
+				.OrderBy (r => r.EntryUtc.Value)
+				.ToList ();
+
 			Assert.NotEmpty (rowsOriginal);
 
-			// 2) Определяем глобальную границу хвоста:
-			//   - mutateAfterUtc — откуда начинаем мутировать хвост;
-			//   - protectedBoundaryUtc — до каких дат baseline-окно
-			//     гарантированно не задевает мутированный хвост.
-			var lastRowDate = rowsOriginal.Last ().Date;
-			var mutateAfterUtc = lastRowDate.AddDays (-1);   // хвост совсем в конце
-			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3); // запас на Fri→Mon
+			// EntryUtc берём явно из causal-части, без record-extension (устраняем ambiguous).
+			var lastRowEntryUtc = rowsOriginal.Last ().Causal.EntryUtc.Value;
 
-			// 3) Строим независимую копию свечей и жёстко мутируем хвост.
+			var mutateAfterUtc = lastRowEntryUtc.AddDays (-1);
+			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3);
+
 			var solWinTrainMut = CloneCandles6h (solWinTrain);
 			var btcWinTrainMut = CloneCandles6h (btcWinTrain);
 			var paxgWinTrainMut = CloneCandles6h (paxgWinTrain);
@@ -72,30 +69,31 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			MutateTail6h (solAll6hMut, mutateAfterUtc);
 			MutateTail1m (solAll1mMut, mutateAfterUtc);
 
-			var rowsMutated = RowBuilder.BuildRowsDaily (
-				solWinTrainMut,
-				btcWinTrainMut,
-				paxgWinTrainMut,
-				solAll6hMut,
-				solAll1mMut,
-				fngHistory,
-				dxySeries,
+			var buildMutated = RowBuilder.BuildDailyRows (
+				solWinTrain: solWinTrainMut,
+				btcWinTrain: btcWinTrainMut,
+				paxgWinTrain: paxgWinTrainMut,
+				solAll6h: solAll6hMut,
+				solAll1m: solAll1mMut,
+				fngHistory: fngHistory,
+				dxySeries: dxySeries,
 				extraDaily: null,
 				nyTz: nyTz);
 
+			var rowsMutated = buildMutated.LabeledRows
+				.OrderBy (r => r.EntryUtc.Value)
+				.ToList ();
+
 			Assert.NotEmpty (rowsMutated);
 
-			// 4) Берём только "безопасные" строки:
-			// их baseline-окно гарантированно полностью до mutateAfterUtc,
-			// значит любые изменения после mutateAfterUtc не должны их трогать.
 			var safeOriginal = rowsOriginal
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (safeOriginal);
@@ -106,33 +104,27 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = safeOriginal[i];
 				var b = safeMutated[i];
 
-				// Структура набора строк не должна меняться.
-				Assert.Equal (a.Date, b.Date);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
+				Assert.Equal (a.Causal.EntryUtc.Value, b.Causal.EntryUtc.Value);
 
-				// Размерность фич такая же.
-				Assert.Equal (a.Features.Length, b.Features.Length);
+				var fa = a.Causal.FeaturesVector.Span;
+				var fb = b.Causal.FeaturesVector.Span;
 
-				// Все фичи должны совпадать (future-blind).
-				for (int j = 0; j < a.Features.Length; j++)
+				Assert.Equal (fa.Length, fb.Length);
+
+				for (int j = 0; j < fa.Length; j++)
 					{
-					AssertAlmostEqual (a.Features[j], b.Features[j], 1e-9,
-						$"Feature[{j}] differs for Date={a.Date:O}");
+					AssertAlmostEqual (fa[j], fb[j], 1e-9,
+						$"FeatureVector[{j}] differs for EntryUtc={a.Causal.EntryUtc.Value:O}");
 					}
 
-				// Дополнительно проверяем несколько "сырьевых" полей,
-				// которые не входят во вектор фич, но тоже должны быть future-blind.
-				AssertAlmostEqual (a.SolRet30, b.SolRet30, 1e-9, "SolRet30 mismatch");
-				AssertAlmostEqual (a.BtcRet30, b.BtcRet30, 1e-9, "BtcRet30 mismatch");
-				AssertAlmostEqual (a.AtrPct, b.AtrPct, 1e-9, "AtrPct mismatch");
-				AssertAlmostEqual (a.DynVol, b.DynVol, 1e-9, "DynVol mismatch");
+				AssertAlmostEqual (a.Causal.SolRet30, b.Causal.SolRet30, 1e-9, "SolRet30 mismatch");
+				AssertAlmostEqual (a.Causal.BtcRet30, b.Causal.BtcRet30, 1e-9, "BtcRet30 mismatch");
+				AssertAlmostEqual (a.Causal.AtrPct, b.Causal.AtrPct, 1e-9, "AtrPct mismatch");
+				AssertAlmostEqual (a.Causal.DynVol, b.Causal.DynVol, 1e-9, "DynVol mismatch");
 				}
 			}
 
-		/// <summary>
-		/// Labeler_Targets_DoNotDepend_OnFutureCandles:
-		/// таргеты (Label / SolFwd1 / path-based / micro) для безопасных дат
-		/// не зависят от хвоста 6h/1m после T.
-		/// </summary>
 		[Fact]
 		public void Labeler_Targets_DoNotDepend_OnFutureCandles ()
 			{
@@ -148,21 +140,24 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				dxySeries
 			) = BuildSyntheticSeries (nyTz);
 
-			var rowsOriginal = RowBuilder.BuildRowsDaily (
-				solWinTrain,
-				btcWinTrain,
-				paxgWinTrain,
-				solAll6h,
-				solAll1m,
-				fngHistory,
-				dxySeries,
+			var rowsOriginal = RowBuilder.BuildDailyRows (
+					solWinTrain,
+					btcWinTrain,
+					paxgWinTrain,
+					solAll6h,
+					solAll1m,
+					fngHistory,
+					dxySeries,
 				extraDaily: null,
-				nyTz: nyTz);
+				nyTz: nyTz)
+				.LabeledRows
+				.OrderBy (r => r.EntryUtc.Value)
+				.ToList ();
 
 			Assert.NotEmpty (rowsOriginal);
 
-			var lastRowDate = rowsOriginal.Last ().Date;
-			var mutateAfterUtc = lastRowDate.AddDays (-1);
+			var lastRowEntryUtc = rowsOriginal.Last ().Causal.EntryUtc.Value;
+			var mutateAfterUtc = lastRowEntryUtc.AddDays (-1);
 			var protectedBoundaryUtc = mutateAfterUtc.AddDays (-3);
 
 			var solWinTrainMut = CloneCandles6h (solWinTrain);
@@ -177,27 +172,30 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			MutateTail6h (solAll6hMut, mutateAfterUtc);
 			MutateTail1m (solAll1mMut, mutateAfterUtc);
 
-			var rowsMutated = RowBuilder.BuildRowsDaily (
-				solWinTrainMut,
-				btcWinTrainMut,
-				paxgWinTrainMut,
-				solAll6hMut,
-				solAll1mMut,
-				fngHistory,
-				dxySeries,
-				extraDaily: null,
-				nyTz: nyTz);
+			var rowsMutated = RowBuilder.BuildDailyRows (
+					solWinTrain: solWinTrainMut,
+					btcWinTrain: btcWinTrainMut,
+					paxgWinTrain: paxgWinTrainMut,
+					solAll6h: solAll6hMut,
+					solAll1m: solAll1mMut,
+					fngHistory: fngHistory,
+					dxySeries: dxySeries,
+					extraDaily: null,
+					nyTz: nyTz)
+				.LabeledRows
+				.OrderBy (r => r.EntryUtc.Value)
+				.ToList ();
 
 			Assert.NotEmpty (rowsMutated);
 
 			var safeOriginal = rowsOriginal
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			var safeMutated = rowsMutated
-				.Where (r => r.Date <= protectedBoundaryUtc)
-				.OrderBy (r => r.Date)
+				.Where (r => r.Causal.EntryUtc.Value <= protectedBoundaryUtc)
+				.OrderBy (r => r.EntryUtc.Value)
 				.ToList ();
 
 			Assert.NotEmpty (safeOriginal);
@@ -208,65 +206,44 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var a = safeOriginal[i];
 				var b = safeMutated[i];
 
-				Assert.Equal (a.Date, b.Date);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
 
-				// Основной path-based таргет.
-				Assert.Equal (a.Label, b.Label);
+				Assert.Equal (a.TrueLabel, b.TrueLabel);
+				Assert.Equal (a.MicroTruth.HasValue, b.MicroTruth.HasValue);
+				if (a.MicroTruth.HasValue)
+					Assert.Equal (a.MicroTruth.Value, b.MicroTruth.Value);
+				else
+					Assert.Equal (a.MicroTruth.MissingReason, b.MicroTruth.MissingReason);
 
-				// Micro-facts (по pathUp/pathDown внутри baseline-окна).
-				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
-				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
-
-				// Таргет по close на baseline-горизонте.
-				AssertAlmostEqual (a.SolFwd1, b.SolFwd1, 1e-9, "SolFwd1 mismatch");
-
-				// Path-first метрики.
-				Assert.Equal (a.PathFirstPassDir, b.PathFirstPassDir);
-				Assert.Equal (a.PathFirstPassTimeUtc, b.PathFirstPassTimeUtc);
-				AssertAlmostEqual (a.PathReachedUpPct, b.PathReachedUpPct, 1e-9, "PathReachedUpPct mismatch");
-				AssertAlmostEqual (a.PathReachedDownPct, b.PathReachedDownPct, 1e-9, "PathReachedDownPct mismatch");
-
-				// MinMove тоже должен быть future-blind (строится каузально по истории rows).
-				AssertAlmostEqual (a.MinMove, b.MinMove, 1e-9, "MinMove mismatch");
+				AssertAlmostEqual (a.Causal.MinMove, b.Causal.MinMove, 1e-9, "MinMove mismatch");
 				}
 			}
 
-		// ====================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ======================
-
-		/// <summary>
-		/// Строит синтетические 6h/1m свечи и ряды FNG/DXY так,
-		/// чтобы RowBuilder мог спокойно посчитать все индикаторы (RSI/ATR/200SMA).
-		/// Сгенерированные ряды достаточно длинные (260 6h-баров ~ 65 дней),
-		/// чтобы прошли все проверки "недостаточно истории".
-		/// </summary>
 		private static (
 			List<Candle6h> solWinTrain,
 			List<Candle6h> btcWinTrain,
 			List<Candle6h> paxgWinTrain,
 			List<Candle6h> solAll6h,
-			List<Candle6h> solAll1hDummy, // не используется, оставлен для совместимости сигнатуры
+			List<Candle6h> solAll1hDummy,
 			List<Candle1m> solAll1m,
 			Dictionary<DateTime, double> fngHistory,
 			Dictionary<DateTime, double> dxySeries
 		) BuildSyntheticSeriesWith1h ( TimeZoneInfo nyTz )
 			{
-			const int total6h = 260; // > 200 для SMA, с запасом для 30-дневных ретурнов
+			const int total6h = 260;
 
 			var solWinTrain = new List<Candle6h> (total6h);
 			var btcWinTrain = new List<Candle6h> (total6h);
 			var paxgWinTrain = new List<Candle6h> (total6h);
 			var solAll6h = new List<Candle6h> (total6h);
 
-			// Стартуем с понедельника 08:00 NY локального времени,
-			// чтобы baseline-окна были "нормальными" и без специальных краёв.
-			var startLocal = new DateTime (2021, 1, 4, 8, 0, 0, DateTimeKind.Unspecified);
+			var startLocal = new DateTime (2021, 1, 4, 7, 0, 0, DateTimeKind.Unspecified);
 
 			for (int i = 0; i < total6h; i++)
 				{
 				var openLocal = startLocal.AddHours (6 * i);
 				var openUtc = TimeZoneInfo.ConvertTimeToUtc (openLocal, nyTz);
 
-				// Простая линейная динамика, главное — положительные цены.
 				double solPrice = 100.0 + 0.1 * i;
 				double btcPrice = 200.0 + 0.2 * i;
 				double goldPrice = 50.0 + 0.05 * i;
@@ -308,13 +285,12 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 					});
 				}
 
-			// 1m-свечи: покрываем весь диапазон от первого входа до
-			// baseline-выхода для последней 6h-свечи (с запасом).
 			var firstMinuteLocal = startLocal;
+
 			var lastOpenLocal = startLocal.AddHours (6 * (total6h - 1));
 			var lastOpenUtc = TimeZoneInfo.ConvertTimeToUtc (lastOpenLocal, nyTz);
 
-			var lastExitUtc = Windowing.ComputeBaselineExitUtc (lastOpenUtc, nyTz);
+			var lastExitUtc = NyWindowing.ComputeBaselineExitUtc (new EntryUtc (lastOpenUtc), nyTz).Value;
 			var lastExitLocal = TimeZoneInfo.ConvertTimeFromUtc (lastExitUtc, nyTz);
 
 			var totalMinutes = (int) Math.Ceiling ((lastExitLocal - firstMinuteLocal).TotalMinutes) + 60;
@@ -328,7 +304,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				var minuteLocal = firstMinuteLocal.AddMinutes (i);
 				var minuteUtc = TimeZoneInfo.ConvertTimeToUtc (minuteLocal, nyTz);
 
-				// Небольшой плавный тренд, чтобы PathLabeler мог что-то разметить.
 				double price = 100.0 + 0.0005 * i;
 
 				solAll1m.Add (new Candle1m
@@ -341,32 +316,26 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 					});
 				}
 
-			// FNG/DXY на каждый календарный день диапазона.
+			var firstMinuteUtc = TimeZoneInfo.ConvertTimeToUtc (firstMinuteLocal, nyTz);
+			var day = firstMinuteUtc.ToCausalDateUtc ();
+			var lastDay = lastExitUtc.ToCausalDateUtc ();
+
 			var fngHistory = new Dictionary<DateTime, double> ();
 			var dxySeries = new Dictionary<DateTime, double> ();
 
-			var day = firstMinuteLocal.Date;
-			var lastDay = lastExitLocal.Date;
-
 			while (day <= lastDay)
 				{
-				var key = new DateTime (day.Year, day.Month, day.Day);
-				fngHistory[key] = 50; // нейтральное значение, главное — непрерывность
-				dxySeries[key] = 0.0; // плоский ряд, чтобы 30-дневный change был ~0
-				day = day.AddDays (1);
+				fngHistory[day] = 50.0;
+                // Контракт DXY: значение "now" должно быть > 0.
+                dxySeries[day] = 100.0;
+                day = day.AddDays (1);
 				}
 
-			// 1h нам не нужен для RowBuilder, но возвращаем dummy-список, если вдруг
-			// пригодится в дальнейшем расширении теста.
 			var solAll1hDummy = new List<Candle6h> ();
 
 			return (solWinTrain, btcWinTrain, paxgWinTrain, solAll6h, solAll1hDummy, solAll1m, fngHistory, dxySeries);
 			}
 
-		/// <summary>
-		/// Обёртка над BuildSyntheticSeriesWith1h без dummy 1h-списка,
-		/// чтобы меньше шуметь в сигнатурах тестов.
-		/// </summary>
 		private static (
 			List<Candle6h> solWinTrain,
 			List<Candle6h> btcWinTrain,
@@ -391,10 +360,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			return (solWinTrain, btcWinTrain, paxgWinTrain, solAll6h, solAll1m, fngHistory, dxySeries);
 			}
 
-		/// <summary>
-		/// Клонирует список 6h-свечей. Нужен, чтобы "оригинал" и "мутант"
-		/// были совершенно независимы в памяти.
-		/// </summary>
 		private static List<Candle6h> CloneCandles6h ( List<Candle6h> source )
 			{
 			var res = new List<Candle6h> (source.Count);
@@ -412,9 +377,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			return res;
 			}
 
-		/// <summary>
-		/// Клонирует список 1m-свечей.
-		/// </summary>
 		private static List<Candle1m> CloneCandles1m ( List<Candle1m> source )
 			{
 			var res = new List<Candle1m> (source.Count);
@@ -432,11 +394,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			return res;
 			}
 
-		/// <summary>
-		/// Жёстко мутирует хвост 6h-свечей: всё, что строго ПОСЛЕ mutateAfterUtc,
-		/// умножается на 10. Если DataBuilder/Labeler смотрят в будущее,
-		/// это гарантированно "подсветит" утечку.
-		/// </summary>
 		private static void MutateTail6h ( List<Candle6h> candles, DateTime mutateAfterUtc )
 			{
 			for (int i = 0; i < candles.Count; i++)
@@ -453,9 +410,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				}
 			}
 
-		/// <summary>
-		/// Жёстко мутирует хвост 1m-свечей.
-		/// </summary>
 		private static void MutateTail1m ( List<Candle1m> candles, DateTime mutateAfterUtc )
 			{
 			for (int i = 0; i < candles.Count; i++)
@@ -472,9 +426,6 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 				}
 			}
 
-		/// <summary>
-		/// Сравнение double с допуском, с понятным сообщением об ошибке.
-		/// </summary>
 		private static void AssertAlmostEqual ( double expected, double actual, double tol, string message )
 			{
 			if (double.IsNaN (expected) && double.IsNaN (actual))
@@ -485,3 +436,4 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage
 			}
 		}
 	}
+

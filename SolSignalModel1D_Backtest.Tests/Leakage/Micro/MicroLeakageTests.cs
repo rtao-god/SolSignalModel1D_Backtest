@@ -1,77 +1,136 @@
-﻿using System;
-using System.Collections.Generic;
 using Microsoft.ML;
-using Xunit;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
+using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
 	{
-	/// <summary>
-	/// Sanity-тесты для микро-модели:
-	/// проверяем порог по количеству размеченных микро-дней.
-	/// </summary>
-	public class MicroLeakageTests
+	public sealed class MicroLeakageTests
 		{
 		[Fact]
 		public void BuildMicroFlatModel_ReturnsNull_WhenTooFewMicroDays ()
 			{
-			// Arrange: 10 микро-дней (< 30), фичи минимальные, но валидные.
-			var rows = new List<DataRow> ();
-			for (int i = 0; i < 10; i++)
-				{
-				rows.Add (new DataRow
-					{
-					Date = new DateTime (2025, 1, 1).AddDays (i),
-					Features = new[] { 0.1, 0.2, 0.3 },
-					FactMicroUp = i % 2 == 0,
-					FactMicroDown = i % 2 == 1
-					});
-				}
+			var rows = BuildNyWeekdayRows (
+				startUtc: new DateTime (2025, 1, 2, 12, 0, 0, DateTimeKind.Utc),
+				totalDays: 120,
+				microDays: 10);
 
 			var ml = new MLContext (seed: 42);
 
-			// Act
 			var model = MicroFlatTrainer.BuildMicroFlatModel (ml, rows);
 
-			// Assert: при слишком маленькой выборке модель не должна обучаться.
 			Assert.Null (model);
 			}
 
 		[Fact]
 		public void BuildMicroFlatModel_ReturnsModel_WhenEnoughMicroDays ()
 			{
-			// Arrange: 40 микро-дней (>= 30), фичи чуть-чуть различаются по дням.
-			var rows = new List<DataRow> ();
-			for (int i = 0; i < 40; i++)
-				{
-				var baseDate = new DateTime (2025, 1, 1);
-
-				rows.Add (new DataRow
-					{
-					Date = baseDate.AddDays (i),
-
-					// Делаем фичи слегка зависящими от i,
-					// чтобы не было полностью константного датасета.
-					Features = new[]
-					{
-					0.1 + i * 0.001,
-					0.2 + i * 0.001,
-					0.3 + i * 0.001
-					},
-
-					FactMicroUp = i % 2 == 0,
-					FactMicroDown = i % 2 == 1
-					});
-				}
+			var rows = BuildNyWeekdayRows (
+				startUtc: new DateTime (2025, 1, 2, 12, 0, 0, DateTimeKind.Utc),
+				totalDays: 200,
+				microDays: 60);
 
 			var ml = new MLContext (seed: 42);
 
-			// Act
 			var model = MicroFlatTrainer.BuildMicroFlatModel (ml, rows);
 
-			// Assert: при нормальном числе микро-дней модель должна обучиться.
 			Assert.NotNull (model);
+			}
+
+		private static List<LabeledCausalRow> BuildNyWeekdayRows ( DateTime startUtc, int totalDays, int microDays )
+			{
+			if (startUtc.Kind != DateTimeKind.Utc)
+				throw new ArgumentException ("startUtc must be UTC.", nameof (startUtc));
+			if (totalDays <= 0) throw new ArgumentOutOfRangeException (nameof (totalDays));
+			if (microDays < 0 || microDays > totalDays) throw new ArgumentOutOfRangeException (nameof (microDays));
+
+			var nyTz = NyWindowing.NyTz;
+
+			var res = new List<LabeledCausalRow> (totalDays);
+
+			var dt = startUtc;
+			int idx = 0;
+			int microMade = 0;
+
+			while (res.Count < totalDays)
+				{
+				var ny = TimeZoneInfo.ConvertTimeFromUtc (dt, nyTz);
+				if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+					{
+					dt = dt.AddDays (1);
+					continue;
+					}
+
+				bool isMicro = microMade < microDays;
+				bool microUp = isMicro && (microMade % 2 == 0);
+				bool microDown = isMicro && !microUp;
+
+				if (isMicro) microMade++;
+
+				res.Add (MakeRow (dt, idx, isMicro, microUp, microDown));
+				dt = dt.AddDays (1);
+				idx++;
+				}
+
+			return res;
+			}
+
+		private static LabeledCausalRow MakeRow ( DateTime dateUtc, int idx, bool isMicro, bool microUp, bool microDown )
+			{
+			if (microUp && microDown)
+				throw new InvalidOperationException ("microUp and microDown cannot be true одновременно.");
+
+			double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
+
+			var entryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow (new EntryUtc (dateUtc), NyWindowing.NyTz);
+
+			var causal = new CausalDataRow (
+				entryUtc: entryUtc,
+				regimeDown: false,
+				isMorning: true,
+				hardRegime: 0,
+				minMove: 0.03,
+
+				solRet30: dir,
+				btcRet30: 0.01 * (idx + 1),
+				solBtcRet30: 0.001 * (idx + 1),
+
+				solRet1: 0.002 * (idx + 1),
+				solRet3: 0.003 * (idx + 1),
+				btcRet1: 0.004 * (idx + 1),
+				btcRet3: 0.005 * (idx + 1),
+
+				fngNorm: 0.10,
+				dxyChg30: -0.02,
+				goldChg30: 0.01,
+
+				btcVs200: 0.2,
+
+				solRsiCenteredScaled: 0.3,
+				rsiSlope3Scaled: 0.4,
+
+				gapBtcSol1: 0.01,
+				gapBtcSol3: 0.02,
+
+				atrPct: 0.05,
+				dynVol: 0.06,
+
+				solAboveEma50: 1.0,
+				solEma50vs200: 0.1,
+				btcEma50vs200: 0.2);
+
+			var microTruth = isMicro
+				? OptionalValue<MicroTruthDirection>.Present (microUp ? MicroTruthDirection.Up : MicroTruthDirection.Down)
+				: OptionalValue<MicroTruthDirection>.Missing (MissingReasonCodes.NonFlatTruth);
+
+			return new LabeledCausalRow (
+				causal: causal,
+				trueLabel: isMicro ? 1 : 2,
+				microTruth: microTruth);
 			}
 		}
 	}
+

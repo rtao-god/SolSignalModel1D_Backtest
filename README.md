@@ -188,7 +188,7 @@
 ```text
 Core/
   Data/           # загрузка свечей (6h, 1h), F&G, DXY, extra.json
-  DataBuilder/    # RowBuilder и сборка дневных строк (DataRow)
+  DataBuilder/    # RowBuilder и сборка дневных строк (BacktestRecord)
   ML/             # ModelTrainer, ModelBundle, PredictionEngine, ML DTO
   Analytics/      # ClassificationMetrics, TradingMetrics
   Trading/        # HourlyTradeEvaluator и почасовая логика TP/SL

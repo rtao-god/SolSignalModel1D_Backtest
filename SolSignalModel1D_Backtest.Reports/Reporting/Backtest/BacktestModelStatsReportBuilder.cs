@@ -1,8 +1,7 @@
-﻿using SolSignalModel1D_Backtest.Core.Analytics.Backtest.ModelStats;
-using SolSignalModel1D_Backtest.Core.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.ModelStats;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Backtest.Snapshots.ModelStats;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Reports.Model;
-using System;
-using System.Collections.Generic;
 
 namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 	{
@@ -101,17 +100,28 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				Value = snapshot.ToDateUtc.ToString ("O")
 				});
 
-			metaSection.Items.Add (new KeyValueItem
+			if (snapshot.Sl.HasValue)
 				{
-				Key = "SlSignalDays",
-				Value = snapshot.Sl.Confusion.TotalSignalDays.ToString ()
-				});
+				metaSection.Items.Add (new KeyValueItem
+					{
+					Key = "SlSignalDays",
+					Value = snapshot.Sl.Value.Confusion.TotalSignalDays.ToString ()
+					});
 
-			metaSection.Items.Add (new KeyValueItem
+				metaSection.Items.Add (new KeyValueItem
+					{
+					Key = "SlOutcomeDays",
+					Value = snapshot.Sl.Value.Confusion.TotalOutcomeDays.ToString ()
+					});
+				}
+			else
 				{
-				Key = "SlOutcomeDays",
-				Value = snapshot.Sl.Confusion.TotalOutcomeDays.ToString ()
-				});
+				metaSection.Items.Add (new KeyValueItem
+					{
+					Key = "SlStatsMissingReason",
+					Value = snapshot.Sl.MissingReason ?? "Missing"
+					});
+				}
 
 			doc.KeyValueSections.Add (metaSection);
 
@@ -127,75 +137,80 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			return doc;
 			}
 
-		// ====== META: multi-snapshot ======
+        // ====== META: multi-snapshot ======
+        private static KeyValueSection? BuildMultiMetaSection(BacktestModelStatsMultiSnapshot multi)
+        {
+            if (multi.Meta == null)
+                return null;
 
-		private static KeyValueSection? BuildMultiMetaSection ( BacktestModelStatsMultiSnapshot multi )
-			{
-			if (multi.Meta == null)
-				return null;
+            var meta = multi.Meta;
 
-			var meta = multi.Meta;
+            var section = new KeyValueSection
+            {
+                Title = "Параметры модельных статистик (multi-segment)"
+            };
 
-			var section = new KeyValueSection
-				{
-				Title = "Параметры модельных статистик (multi-segment)"
-				};
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "RunKind",
+                Value = meta.RunKind.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "RunKind",
-				Value = meta.RunKind.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "HasOos",
+                Value = meta.HasOos.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "HasOos",
-				Value = meta.HasOos.ToString ()
-				});
+            if (!meta.TrainUntilExitDayKeyUtc.IsDefault)
+            {
+                section.Items.Add(new KeyValueItem
+                {
+                    Key = "TrainUntilExitDayKeyUtc",
+                    Value = meta.TrainUntilExitDayKeyUtc.Value.ToString("O")
+                });
 
-			if (meta.TrainUntilUtc.HasValue)
-				{
-				section.Items.Add (new KeyValueItem
-					{
-					Key = "TrainUntilUtc",
-					Value = meta.TrainUntilUtc.Value.ToString ("O")
-					});
-				}
+                section.Items.Add(new KeyValueItem
+                {
+                    Key = "TrainUntilIsoDate",
+                    Value = meta.TrainUntilIsoDate
+                });
+            }
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "TrainRecordsCount",
-				Value = meta.TrainRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "TrainRecordsCount",
+                Value = meta.TrainRecordsCount.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "OosRecordsCount",
-				Value = meta.OosRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "OosRecordsCount",
+                Value = meta.OosRecordsCount.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "TotalRecordsCount",
-				Value = meta.TotalRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "TotalRecordsCount",
+                Value = meta.TotalRecordsCount.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "RecentDays",
-				Value = meta.RecentDays.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "RecentDays",
+                Value = meta.RecentDays.ToString()
+            });
 
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "RecentRecordsCount",
-				Value = meta.RecentRecordsCount.ToString ()
-				});
+            section.Items.Add(new KeyValueItem
+            {
+                Key = "RecentRecordsCount",
+                Value = meta.RecentRecordsCount.ToString()
+            });
 
-			return section;
-			}
+            return section;
+        }
 
-		private static KeyValueSection BuildSegmentMetaSection (
+        private static KeyValueSection BuildSegmentMetaSection (
 			BacktestModelStatsSegmentSnapshot segment,
 			string segmentTitlePrefix )
 			{
@@ -208,12 +223,6 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 				{
 				Key = "SegmentKind",
 				Value = segment.Kind.ToString ()
-				});
-
-			section.Items.Add (new KeyValueItem
-				{
-				Key = "Label",
-				Value = segment.Label ?? string.Empty
 				});
 
 			section.Items.Add (new KeyValueItem
@@ -539,13 +548,32 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 
 		private static void AddSlSections (
 			ReportDocument doc,
-			SlStats sl,
+			OptionalValue<SlStats> sl,
 			string? titlePrefix )
 			{
 			if (doc == null) throw new ArgumentNullException (nameof (doc));
-			if (sl == null) throw new ArgumentNullException (nameof (sl));
+			if (!sl.HasValue)
+				{
+				var title = titlePrefix == null
+					? "SL-model"
+					: $"{titlePrefix}SL-model";
 
-			var slConf = sl.Confusion;
+				var section = new KeyValueSection
+					{
+					Title = title
+					};
+
+				section.Items.Add (new KeyValueItem
+					{
+					Key = "MissingReason",
+					Value = sl.MissingReason ?? "Missing"
+					});
+
+				doc.KeyValueSections.Add (section);
+				return;
+				}
+
+			var slConf = sl.Value.Confusion;
 
 			var confTitle = titlePrefix == null
 				? "SL-model confusion (runtime, path-based)"
@@ -586,7 +614,7 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 
 			doc.TableSections.Add (slConfSection);
 
-			var slMetrics = sl.Metrics;
+			var slMetrics = sl.Value.Metrics;
 
 			var metricsTitle = titlePrefix == null
 				? "SL-model metrics (runtime)"
@@ -642,7 +670,7 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 			doc.TableSections.Add (slMetricsSection);
 
 			// Threshold sweep: simple / technical (если есть данные)
-			if (sl.Thresholds.Count > 0)
+			if (sl.Value.Thresholds.Count > 0)
 				{
 				var thrSimpleTitle = titlePrefix == null
 					? "SL threshold sweep (упрощённо)"
@@ -654,13 +682,13 @@ namespace SolSignalModel1D_Backtest.Reports.Reporting.Backtest
 
 				var thrSimple = MetricTableBuilder.BuildTable (
 					BacktestModelStatsTableDefinitions.SlThresholdSweep,
-					sl.Thresholds,
+					sl.Value.Thresholds,
 					TableDetailLevel.Simple,
 					explicitTitle: thrSimpleTitle);
 
 				var thrTechnical = MetricTableBuilder.BuildTable (
 					BacktestModelStatsTableDefinitions.SlThresholdSweep,
-					sl.Thresholds,
+					sl.Value.Thresholds,
 					TableDetailLevel.Technical,
 					explicitTitle: thrTechnicalTitle);
 

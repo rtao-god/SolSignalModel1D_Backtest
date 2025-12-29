@@ -1,7 +1,6 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using System.Collections.Generic;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
 	{
@@ -9,11 +8,10 @@ namespace SolSignalModel1D_Backtest
 		{
 		/// <summary>
 		/// Заполняет delayed-A слой по минуткам для уже посчитанных records.
-		/// Константы dipFrac/tpPct/slPct оставлены в том же виде, чтобы не менять поведение.
 		/// </summary>
 		private static void PopulateDelayedAForRecords (
-			List<PredictionRecord> records,
-			List<DataRow> allRows,
+			List<BacktestRecord> records,
+			List<LabeledCausalRow> allRows,
 			List<Candle1h> sol1h,
 			List<Candle6h> solAll6h,
 			List<Candle1m> sol1m
@@ -22,6 +20,7 @@ namespace SolSignalModel1D_Backtest
 			PopulateDelayedA (
 				records: records,
 				allRows: allRows,
+				trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
 				sol1h: sol1h,
 				solAll6h: solAll6h,
 				sol1m: sol1m,

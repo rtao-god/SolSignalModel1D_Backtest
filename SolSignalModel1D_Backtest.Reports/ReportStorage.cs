@@ -1,10 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SolSignalModel1D_Backtest.Core.Causal.Utils.Time;
 using SolSignalModel1D_Backtest.Reports.Model;
+using CoreInfra = SolSignalModel1D_Backtest.Core.Causal.Infra;
 
 namespace SolSignalModel1D_Backtest.Reports
 	{
@@ -24,7 +22,7 @@ namespace SolSignalModel1D_Backtest.Reports
 		public ReportStorage ()
 			{
 			_rootDir = Path.Combine (
-				Core.Infra.PathConfig.CacheRoot,
+				CoreInfra.PathConfig.CacheRoot,
 				"reports");
 
 			Directory.CreateDirectory (_rootDir);
@@ -156,19 +154,19 @@ namespace SolSignalModel1D_Backtest.Reports
 
 		/// <summary>
 		/// Загружает current_prediction-отчёт по дате прогноза (UTC).
-		/// Берётся последний по Id отчёт, у которого PredictionDateUtc.Date совпадает с датой.
+		/// Берётся последний по Id отчёт, у которого PredictionDateUtc.ToCausalDateUtc() совпадает с датой.
 		/// Если отчёт не найден — возвращает null.
 		/// </summary>
 		public ReportDocument? LoadCurrentPredictionByDate ( DateTime predictionDateUtc )
 			{
-			var targetDate = predictionDateUtc.Date;
+			var targetDate = predictionDateUtc.ToCausalDateUtc();
 
 			var index = ListCurrentPredictionReports ();
 			if (index.Count == 0)
 				return null;
 
 			var item = index
-				.Where (x => x.PredictionDateUtc.Date == targetDate)
+				.Where (x => x.PredictionDateUtc.ToCausalDateUtc() == targetDate)
 				.OrderByDescending (x => x.Id, StringComparer.OrdinalIgnoreCase)
 				.FirstOrDefault ();
 

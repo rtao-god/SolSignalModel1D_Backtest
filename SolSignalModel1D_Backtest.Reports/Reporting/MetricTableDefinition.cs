@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Reports.Reporting
+namespace SolSignalModel1D_Backtest.Reports.Reporting
 	{
 	/// <summary>
 	/// Описание таблицы метрик для типа строки TRow.

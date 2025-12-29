@@ -8,7 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SolSignalModel1D_Backtest.Core\SolSignalModel1D_Backtest.Core.csproj" />
+    <ProjectReference Include="..\SolSignalModel1D_Backtest.Core.Causal\SolSignalModel1D_Backtest.Core.Causal.csproj" />
+    <ProjectReference Include="..\SolSignalModel1D_Backtest.Core.Omniscient\SolSignalModel1D_Backtest.Core.Omniscient.csproj" />
   </ItemGroup>
 
 </Project>

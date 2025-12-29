@@ -1,24 +1,17 @@
-﻿using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Utils;
 
 namespace SolSignalModel1D_Backtest
 	{
 	public partial class Program
 		{
-		/// <summary>
-		/// Высокоуровневый бутстрап:
-		/// - гоняет полный BootstrapDataAsync (HttpClient, свечи, индикаторы, дневные строки);
-		/// - достаёт allRows/mornings и нужные ряды по SOL;
-		/// - логирует число утренних точек и валидирует, что оно > 0.
-		/// На выходе отдаёт только то, что реально нужно моделям/бэктесту.
-		/// </summary>
-		private static async Task<(List<DataRow> AllRows,
-				List<DataRow> Mornings,
+		private static async Task<(List<LabeledCausalRow> AllRows,
+				List<LabeledCausalRow> Mornings,
 				List<Candle6h> SolAll6h,
 				List<Candle1h> SolAll1h,
 				List<Candle1m> Sol1m)> BootstrapRowsAndCandlesAsync ()
 			{
-			// Внутри: HttpClient, обновление свечей, индикаторы, построение дневных строк.
 			var bootstrap = await BootstrapDataAsync ();
 
 			var solAll6h = bootstrap.SolAll6h;
@@ -29,7 +22,15 @@ namespace SolSignalModel1D_Backtest
 			var allRows = rowsBundle.AllRows;
 			var mornings = rowsBundle.Mornings;
 
-			Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
+			SeriesGuards.EnsureStrictlyAscendingUtc (solAll6h, c => c.OpenTimeUtc, "bootstrap.solAll6h");
+			SeriesGuards.EnsureStrictlyAscendingUtc (solAll1h, c => c.OpenTimeUtc, "bootstrap.solAll1h");
+			SeriesGuards.EnsureStrictlyAscendingUtc (sol1m, c => c.OpenTimeUtc, "bootstrap.sol1m");
+
+            // Для дневных строк ключ — их каузальная дата/время.
+            SeriesGuards.EnsureStrictlyAscendingUtc(allRows, r => r.Causal.EntryUtc.Value, "bootstrap.allRows");
+            SeriesGuards.EnsureStrictlyAscendingUtc(mornings, r => r.Causal.EntryUtc.Value, "bootstrap.mornings");
+
+            Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
 			if (mornings.Count == 0)
 				throw new InvalidOperationException ("[rows] После фильтров нет утренних точек.");
 

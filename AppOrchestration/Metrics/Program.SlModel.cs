@@ -1,37 +1,54 @@
-﻿using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Utils;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
 
 namespace SolSignalModel1D_Backtest
-	{
-	public partial class Program
-		{
-		/// <summary>
-		/// Обучает и применяет SL-модель в offline-режиме.
-		/// Отделяет выборку обучения по _trainUntilUtc и делегирует доменной функции TrainAndApplySlModelOffline.
-		/// </summary>
-		private static void RunSlModelOffline (
-			List<DataRow> allRows,
-			List<PredictionRecord> records,
-			List<Candle1h> sol1h,
-			List<Candle1m> sol1m,
-			List<Candle6h> solAll6h
-		)
-			{
-			// Централизованное разбиение на train/OOS, чтобы везде использовать
-			// один и тот же критерий Date <= _trainUntilUtc.
-			var (slTrainRows, _) = TrainOosSplitHelper.SplitByTrainBoundary (allRows, _trainUntilUtc);
+{
+    public partial class Program
+    {
+        private static void RunSlModelOffline(
+            List<LabeledCausalRow> allRows,
+            List<BacktestRecord> records,
+            List<Candle1h> sol1h,
+            List<Candle1m> sol1m,
+            List<Candle6h> solAll6h)
+        {
+            if (records == null) throw new ArgumentNullException(nameof(records));
+            if (records.Count == 0)
+                throw new InvalidOperationException("[sl-offline] records is empty.");
 
-			// Основная логика SL-модели остаётся в отдельном методе, сюда вынесен только «проводящий» код.
-			// На вход TrainAndApplySlModelOffline передаётся уже train-сабсет.
-			TrainAndApplySlModelOffline (
-				allRows: slTrainRows,
-				records: records,
-				sol1h: sol1h,
-				sol1m: sol1m,
-				solAll6h: solAll6h
-			);
-			}
-		}
-	}
+            var orderedRecords = records
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
+
+            var trainUntilExitDayKeyUtc = _trainUntilExitDayKeyUtc;
+
+            Console.WriteLine(
+                $"[sl] запуск SplitByBaselineExitStrict: тег='sl.records', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
+
+            var split = NyTrainSplit.SplitByBaselineExitStrict(
+                ordered: orderedRecords,
+                entrySelector: static r => r.Causal.EntryUtc,
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: NyTz,
+                tag: "sl.records");
+
+            if (split.Train.Count < 50)
+            {
+                throw new InvalidOperationException(
+                    $"[sl-offline] SL train subset too small (count={split.Train.Count}). " +
+                    $"trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}.");
+            }
+
+            TrainAndApplySlModelOffline(
+                trainRecords: split.Train,
+                records: records,
+                sol1h: sol1h,
+                sol1m: sol1m,
+                solAll6h: solAll6h
+            );
+        }
+    }
+}
+

@@ -1,209 +1,294 @@
-﻿using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.ML;
-using SolSignalModel1D_Backtest.Core.ML.Micro;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Micro;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Micro
-	{
-	/// <summary>
-	/// Тесты утечки на уровне обучения микро-модели.
-	/// Предполагается, что MicroDatasetBuilder уже гарантирует future-blind.
-	/// Здесь проверяем инвариант: прогнозы на микро-днях не меняются
-	/// при изменении хвоста после trainUntil.
-	/// </summary>
-	public class LeakageMicroModelTrainingTests
-		{
-		private sealed class BinaryOutput
-			{
-			public bool PredictedLabel { get; set; }
-			public float Score { get; set; }
-			public float Probability { get; set; }
-			}
+{
+    public sealed class LeakageMicroModelTrainingTests
+    {
+        [Fact]
+        public void MicroDataset_IsFutureBlind_ToOosTailMutation_ByTrainBoundary()
+        {
+            var nyTz = NyWindowing.NyTz;
 
-		[Fact]
-		public void MicroModel_Training_IsFutureBlind_ToTailMutation ()
-			{
-			// 1. Синтетические DataRow с разметкой FactMicroUp / FactMicroDown.
-			var allRows = BuildSyntheticRows (250);
+            var datesUtc = BuildNyWeekdayEntriesUtc(
+                startUtc: new DateTime(2024, 1, 2, 12, 0, 0, DateTimeKind.Utc),
+                count: 260,
+                nyTz: nyTz);
 
-			var maxDate = allRows.Last ().Date;
-			var trainUntil = maxDate.AddDays (-40);
+            var allRows = BuildSyntheticRows(datesUtc, nyTz);
 
-			var rowsA = CloneRows (allRows);
-			var rowsB = CloneRows (allRows);
+            var pivotEntry = new EntryUtc(datesUtc[^40]);
+            var pivotExit = NyWindowing.ComputeBaselineExitUtc(pivotEntry, nyTz);
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit.Value.AddMinutes(1));
 
-			MutateFutureTail (rowsB, trainUntil);
+            var rowsA = CloneRows(allRows);
+            var rowsB = CloneRows(allRows);
 
-			// 2. Датасеты микро-слоя A/B.
-			var dsA = MicroDatasetBuilder.Build (rowsA, trainUntil);
-			var dsB = MicroDatasetBuilder.Build (rowsB, trainUntil);
+            MutateOosTail(rowsB, trainUntilExitDayKeyUtc, nyTz);
 
-			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
-			AssertRowsEqual (dsA.MicroRows, dsB.MicroRows);
+            var dsA = MicroDatasetBuilder.Build(rowsA, trainUntilExitDayKeyUtc);
+            var dsB = MicroDatasetBuilder.Build(rowsB, trainUntilExitDayKeyUtc);
 
-			if (dsA.MicroRows.Count < 50)
-				{
-				// защитный guard: при слишком маленьком датасете MicroFlatTrainer по
-				// контракту может просто вернуть null. Тогда лучше явно упасть,
-				// чем иметь "тихий" тест, ничего не проверяющий.
-				throw new InvalidOperationException (
-					$"LeakageMicroModelTrainingTests: synthetic micro dataset too small ({dsA.MicroRows.Count}).");
-				}
+            AssertRowsEqual(dsA.TrainRows, dsB.TrainRows);
+            AssertRowsEqual(dsA.MicroRows, dsB.MicroRows);
 
-			var mlA = new MLContext (seed: 42);
-			var modelA = MicroFlatTrainer.BuildMicroFlatModel (mlA, dsA.TrainRows);
-			Assert.NotNull (modelA);
+            Assert.DoesNotContain(dsA.TrainRows, r =>
+            {
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(r.EntryUtc.Value, nyTz);
+                return ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+            });
+        }
 
-			var mlB = new MLContext (seed: 42);
-			var modelB = MicroFlatTrainer.BuildMicroFlatModel (mlB, dsB.TrainRows);
-			Assert.NotNull (modelB);
+        private static List<DateTime> BuildNyWeekdayEntriesUtc(DateTime startUtc, int count, TimeZoneInfo nyTz)
+        {
+            if (startUtc.Kind != DateTimeKind.Utc)
+                throw new ArgumentException("startUtc must be UTC.", nameof(startUtc));
+            if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), count, "count must be > 0.");
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-			var predsA = GetMicroPredictions (mlA, modelA!, dsA.MicroRows);
-			var predsB = GetMicroPredictions (mlB, modelB!, dsB.MicroRows);
+            var res = new List<DateTime>(count);
+            var dt = startUtc;
 
-			AssertBinaryOutputsEqual (predsA, predsB);
-			}
+            while (res.Count < count)
+            {
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(dt, nyTz);
+                if (ny.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+                    res.Add(dt);
 
-		// === helpers ===
+                dt = dt.AddDays(1);
+            }
 
-		private static List<DataRow> BuildSyntheticRows ( int count )
-			{
-			var rows = new List<DataRow> (count);
-			var start = new DateTime (2022, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+            return res;
+        }
 
-			for (var i = 0; i < count; i++)
-				{
-				var date = start.AddDays (i);
+        private static List<LabeledCausalRow> BuildSyntheticRows(IReadOnlyList<DateTime> datesUtc, TimeZoneInfo nyTz)
+        {
+            var rows = new List<LabeledCausalRow>(datesUtc.Count);
 
-				var isMicro = (i % 3 == 0);
-				var up = isMicro && (i % 6 == 0);
+            for (int i = 0; i < datesUtc.Count; i++)
+            {
+                bool isMicro = (i % 3 == 0);
+                bool microUp = isMicro && (i % 6 == 0);
+                bool microDown = isMicro && !microUp;
 
-				var features = new[]
-				{
-					i / (double) count,
-					Math.Sin(i * 0.03),
-					Math.Cos(i * 0.05),
-					isMicro ? 1.0 : 0.0
-				};
+                int trueLabel = isMicro ? 1 : 2;
 
-				var row = new DataRow
-					{
-					Date = date,
-					Features = features,
-					FactMicroUp = up,
-					FactMicroDown = isMicro && !up
-					};
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(datesUtc[i]), nyTz, out var nyEntry))
+                    throw new InvalidOperationException($"[test] expected NY trading entry, got weekend? t={datesUtc[i]:O}");
 
-				rows.Add (row);
-				}
+                rows.Add(MakeRow(
+                    entryUtc: nyEntry,
+                    idx: i,
+                    trueLabel: trueLabel,
+                    isMicro: isMicro,
+                    microUp: microUp,
+                    microDown: microDown,
+                    mutated: false));
+            }
 
-			return rows.OrderBy (r => r.Date).ToList ();
-			}
+            return rows;
+        }
 
-		private static List<DataRow> CloneRows ( List<DataRow> src )
-			{
-			var res = new List<DataRow> (src.Count);
+        private static List<LabeledCausalRow> CloneRows(List<LabeledCausalRow> src)
+        {
+            var res = new List<LabeledCausalRow>(src.Count);
 
-			foreach (var r in src)
-				{
-				res.Add (new DataRow
-					{
-					Date = r.Date,
-					Features = r.Features?.ToArray () ?? Array.Empty<double> (),
-					FactMicroUp = r.FactMicroUp,
-					FactMicroDown = r.FactMicroDown
-					});
-				}
+            for (int i = 0; i < src.Count; i++)
+            {
+                var r = src[i];
+                res.Add(new LabeledCausalRow(
+                    causal: CloneCausal(r.Causal),
+                    trueLabel: r.TrueLabel,
+                    microTruth: r.MicroTruth));
+            }
 
-			return res;
-			}
+            return res;
+        }
 
-		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntil )
-			{
-			foreach (var r in rows.Where (r => r.Date > trainUntil))
-				{
-				// Инвертируем микро-факт и рушим фичи.
-				var wasUp = r.FactMicroUp;
-				var wasDown = r.FactMicroDown;
+        private static void MutateOosTail(List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc, TimeZoneInfo nyTz)
+        {
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
 
-				r.FactMicroUp = !wasUp;
-				r.FactMicroDown = !wasDown;
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var exitUtc))
+                    continue;
 
-				if (r.Features is { Length: > 0 })
-					{
-					for (var i = 0; i < r.Features.Length; i++)
-						{
-						r.Features[i] = 9999.0 + i;
-						}
-					}
-				}
-			}
+                var exitDayKey = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value);
+                if (exitDayKey.Value <= trainUntilExitDayKeyUtc.Value)
+                    continue;
 
-		private static void AssertRowsEqual ( List<DataRow> xs, List<DataRow> ys )
-			{
-			Assert.Equal (xs.Count, ys.Count);
+                bool newUp;
+                bool newDown;
 
-			for (var i = 0; i < xs.Count; i++)
-				{
-				var a = xs[i];
-				var b = ys[i];
+                bool hasMicro = r.MicroTruth.HasValue;
+                bool microUp = hasMicro && r.MicroTruth.Value == MicroTruthDirection.Up;
+                bool microDown = hasMicro && r.MicroTruth.Value == MicroTruthDirection.Down;
 
-				Assert.Equal (a.Date, b.Date);
-				Assert.Equal (a.FactMicroUp, b.FactMicroUp);
-				Assert.Equal (a.FactMicroDown, b.FactMicroDown);
+                if (!hasMicro)
+                {
+                    newUp = (i % 2 == 0);
+                    newDown = !newUp;
+                }
+                else
+                {
+                    newUp = !microUp;
+                    newDown = !microDown;
+                }
 
-				var fa = a.Features ?? Array.Empty<double> ();
-				var fb = b.Features ?? Array.Empty<double> ();
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(r.EntryUtc.Value), nyTz, out var nyEntry))
+                    throw new InvalidOperationException($"[test] entry unexpectedly not NY-trading. t={r.EntryUtc.Value:O}");
 
-				Assert.Equal (fa.Length, fb.Length);
-				for (var j = 0; j < fa.Length; j++)
-					{
-					Assert.Equal (fa[j], fb[j]);
-					}
-				}
-			}
+                rows[i] = MakeRow(
+                    entryUtc: nyEntry,
+                    idx: i,
+                    trueLabel: r.TrueLabel,
+                    isMicro: newUp || newDown,
+                    microUp: newUp,
+                    microDown: newDown,
+                    mutated: true);
+            }
+        }
 
-		private static List<BinaryOutput> GetMicroPredictions (
-			MLContext ml,
-			ITransformer model,
-			List<DataRow> rows )
-			{
-			if (rows.Count == 0)
-				return new List<BinaryOutput> ();
+        private static void AssertRowsEqual(IReadOnlyList<LabeledCausalRow> xs, IReadOnlyList<LabeledCausalRow> ys)
+        {
+            Assert.Equal(xs.Count, ys.Count);
 
-			var data = ml.Data.LoadFromEnumerable (
-				rows.Select (r => new MlSampleBinary
-					{
-					Label = r.FactMicroUp,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
-					}));
+            for (int i = 0; i < xs.Count; i++)
+            {
+                var a = xs[i];
+                var b = ys[i];
 
-			var scored = model.Transform (data);
+                Assert.Equal(a.EntryUtc.Value, b.EntryUtc.Value);
+                Assert.Equal(a.TrueLabel, b.TrueLabel);
+                Assert.Equal(a.MicroTruth.HasValue, b.MicroTruth.HasValue);
+                if (a.MicroTruth.HasValue)
+                    Assert.Equal(a.MicroTruth.Value, b.MicroTruth.Value);
+                else
+                    Assert.Equal(a.MicroTruth.MissingReason, b.MicroTruth.MissingReason);
 
-			return ml.Data
-				.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false)
-				.ToList ();
-			}
+                var va = a.Causal.FeaturesVector.ToArray();
+                var vb = b.Causal.FeaturesVector.ToArray();
 
-		private static void AssertBinaryOutputsEqual (
-			List<BinaryOutput> a,
-			List<BinaryOutput> b,
-			double tol = 1e-6 )
-			{
-			Assert.Equal (a.Count, b.Count);
+                Assert.Equal(va.Length, vb.Length);
+                for (int j = 0; j < va.Length; j++)
+                    Assert.Equal(va[j], vb[j]);
+            }
+        }
 
-			for (var i = 0; i < a.Count; i++)
-				{
-				Assert.Equal (a[i].PredictedLabel, b[i].PredictedLabel);
-				Assert.InRange (Math.Abs (a[i].Score - b[i].Score), 0.0, tol);
-				Assert.InRange (Math.Abs (a[i].Probability - b[i].Probability), 0.0, tol);
-				}
-			}
-		}
-	}
+        private static CausalDataRow CloneCausal(CausalDataRow c)
+        {
+            var nyEntry = NyWindowing.CreateNyTradingEntryUtcOrThrow(c.EntryUtc, NyWindowing.NyTz);
+
+            return new CausalDataRow(
+                entryUtc: nyEntry,
+                regimeDown: c.RegimeDown,
+                isMorning: c.IsMorning,
+                hardRegime: c.HardRegime,
+                minMove: c.MinMove,
+
+                solRet30: c.SolRet30,
+                btcRet30: c.BtcRet30,
+                solBtcRet30: c.SolBtcRet30,
+
+                solRet1: c.SolRet1,
+                solRet3: c.SolRet3,
+                btcRet1: c.BtcRet1,
+                btcRet3: c.BtcRet3,
+
+                fngNorm: c.FngNorm,
+                dxyChg30: c.DxyChg30,
+                goldChg30: c.GoldChg30,
+
+                btcVs200: c.BtcVs200,
+
+                solRsiCenteredScaled: c.SolRsiCenteredScaled,
+                rsiSlope3Scaled: c.RsiSlope3Scaled,
+
+                gapBtcSol1: c.GapBtcSol1,
+                gapBtcSol3: c.GapBtcSol3,
+
+                atrPct: c.AtrPct,
+                dynVol: c.DynVol,
+
+                solAboveEma50: c.SolAboveEma50,
+                solEma50vs200: c.SolEma50vs200,
+                btcEma50vs200: c.BtcEma50vs200);
+        }
+
+        private static LabeledCausalRow MakeRow(
+            NyTradingEntryUtc entryUtc,
+            int idx,
+            int trueLabel,
+            bool isMicro,
+            bool microUp,
+            bool microDown,
+            bool mutated)
+        {
+            if (entryUtc.IsDefault)
+                throw new ArgumentException("entryUtc must be initialized.", nameof(entryUtc));
+            if (microUp && microDown)
+                throw new InvalidOperationException("microUp and microDown cannot be true одновременно.");
+            if (!isMicro && (microUp || microDown))
+                throw new InvalidOperationException("Non-micro day cannot have microUp/microDown flags.");
+
+            double dir = microUp ? 2.0 : (microDown ? -2.0 : 0.0);
+            double m = mutated ? 9999.0 : 1.0;
+
+            var causal = new CausalDataRow(
+                entryUtc: entryUtc,
+                regimeDown: false,
+                isMorning: true,
+                hardRegime: 0,
+                minMove: 0.03,
+
+                solRet30: dir * m,
+                btcRet30: 0.01 * (idx + 1) * m,
+                solBtcRet30: 0.001 * (idx + 1) * m,
+
+                solRet1: 0.002 * (idx + 1) * m,
+                solRet3: 0.003 * (idx + 1) * m,
+                btcRet1: 0.004 * (idx + 1) * m,
+                btcRet3: 0.005 * (idx + 1) * m,
+
+                fngNorm: 0.10 * m,
+                dxyChg30: -0.02 * m,
+                goldChg30: 0.01 * m,
+
+                btcVs200: 0.2 * m,
+
+                solRsiCenteredScaled: 0.3 * m,
+                rsiSlope3Scaled: 0.4 * m,
+
+                gapBtcSol1: 0.01 * m,
+                gapBtcSol3: 0.02 * m,
+
+                atrPct: 0.05 * m,
+                dynVol: 0.06 * m,
+
+                solAboveEma50: 1.0 * m,
+                solEma50vs200: 0.1 * m,
+                btcEma50vs200: 0.2 * m);
+
+            return new LabeledCausalRow(
+                causal: causal,
+                trueLabel: trueLabel,
+                microTruth: BuildMicroTruth(trueLabel, microUp, microDown));
+        }
+
+        private static OptionalValue<MicroTruthDirection> BuildMicroTruth(int trueLabel, bool microUp, bool microDown)
+        {
+            if (trueLabel != 1)
+                return OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
+            if (microUp == microDown)
+                return OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral);
+
+            return OptionalValue<MicroTruthDirection>.Present(microUp ? MicroTruthDirection.Up : MicroTruthDirection.Down);
+        }
+    }
+}

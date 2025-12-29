@@ -1,155 +1,220 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
 using SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Daily;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
-	{
-	/// <summary>
-	/// Тесты для DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle:
-	/// - сценарий без проблем;
-	/// - сценарий с подозрительно высокой точностью на OOS;
-	/// - сценарий без OOS-части.
-	/// </summary>
-	public sealed class DailyLeakageChecksTests
-		{
-		[Fact]
-		public void CheckDailyTrainVsOosAndShuffle_ReturnsSuccess_OnReasonableMetrics ()
-			{
-			// Здесь строится выборка с умеренной точностью (~60%)
-			// как на train, так и на OOS. Ошибок быть не должно.
+{
+    public sealed class DailyLeakageChecksTests
+    {
+        private static BacktestRecord MakeRecord(NyTradingEntryUtc nyEntryUtc, int trueLabel, int predLabel)
+        {
+            static (double Up, double Flat, double Down) MakeTriProbs(int cls)
+            {
+                const double Hi = 0.90;
+                const double Lo = 0.05;
 
-			var records = new List<PredictionRecord> ();
+                return cls switch
+                {
+                    2 => (Hi, Lo, Lo),
+                    1 => (Lo, Hi, Lo),
+                    0 => (Lo, Lo, Hi),
+                    _ => throw new ArgumentOutOfRangeException(nameof(cls), cls, "PredLabel must be in [0..2].")
+                };
+            }
 
-			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
+            if (nyEntryUtc.IsDefault)
+                throw new ArgumentException("nyEntryUtc must be initialized.", nameof(nyEntryUtc));
+            if (trueLabel < 0 || trueLabel > 2)
+                throw new ArgumentOutOfRangeException(nameof(trueLabel), trueLabel, "TrueLabel must be in [0..2].");
 
-			for (int i = 0; i < 200; i++)
-				{
-				int trueLabel = i % 3;
+            var entryUtc = nyEntryUtc.AsEntryUtc();
 
-				// Простейшая схема: 60% попаданий, 40% мимо.
-				// Через i % 10 < 6 задаётся примерно 6 из 10 совпадений.
-				int predLabel = (i % 10 < 6)
-					? trueLabel
-					: (trueLabel + 1) % 3;
+            var (pUp, pFlat, pDown) = MakeTriProbs(predLabel);
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = start.AddDays (i),
-					TrueLabel = trueLabel,
-					PredLabel = predLabel
-					});
-				}
+            var causal = new CausalPredictionRecord
+            {
+                TradingEntryUtc = nyEntryUtc,
+                FeaturesVector = ReadOnlyMemory<double>.Empty,
 
-			// Первые 150 дней считаем train, остальные 50 — OOS.
-			var trainUntilUtc = start.AddDays (149);
+                PredLabel = predLabel,
+                PredLabel_Day = predLabel,
+                PredLabel_DayMicro = predLabel,
+                PredLabel_Total = predLabel,
 
-			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
-				records,
-				trainUntilUtc);
+                ProbUp_Day = pUp,
+                ProbFlat_Day = pFlat,
+                ProbDown_Day = pDown,
 
-			Assert.NotNull (result);
-			Assert.True (result.Success);
+                ProbUp_DayMicro = pUp,
+                ProbFlat_DayMicro = pFlat,
+                ProbDown_DayMicro = pDown,
 
-			// В этом сценарии не должно быть жёстких ошибок.
-			Assert.Empty (result.Errors);
+                ProbUp_Total = pUp,
+                ProbFlat_Total = pFlat,
+                ProbDown_Total = pDown,
 
-			// Дополнительно проверяем, что метрики вообще есть.
-			Assert.False (double.IsNaN (result.Metrics["daily.acc_all"]));
-			Assert.False (double.IsNaN (result.Metrics["daily.acc_train"]));
-			Assert.False (double.IsNaN (result.Metrics["daily.acc_oos"]));
-			}
+                Conf_Day = Math.Max(pUp, Math.Max(pFlat, pDown)),
+                Conf_Micro = 0.0,
 
-		[Fact]
-		public void CheckDailyTrainVsOosAndShuffle_FlagsLeak_WhenOosAccuracySuspiciouslyHigh ()
-			{
-			// Сценарий: train нормальный, OOS почти идеальный.
-			// Должна появиться ошибка про подозрительно высокую точность на OOS.
+                MicroPredicted = false,
+                PredMicroUp = false,
+                PredMicroDown = false,
 
-			var records = new List<PredictionRecord> ();
-			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
+                RegimeDown = false,
+                Reason = "test",
+                MinMove = 0.01,
 
-			for (int i = 0; i < 200; i++)
-				{
-				int trueLabel = i % 3;
+                SlProb = OptionalScore.Missing(MissingReasonCodes.NotEvaluated),
+                SlHighDecision = OptionalValue<bool>.Missing(MissingReasonCodes.NotEvaluated),
+                Conf_SlLong = null,
+                Conf_SlShort = null,
 
-				int predLabel;
-				if (i < 100)
-					{
-					// Train: те же 60% попаданий, как в предыдущем тесте.
-					predLabel = (i % 10 < 6)
-						? trueLabel
-						: (trueLabel + 1) % 3;
-					}
-				else
-					{
-					// OOS: почти идеальная модель (100% попаданий).
-					predLabel = trueLabel;
-					}
+                DelayedSource = null,
+                DelayedEntryAsked = false,
+                DelayedEntryUsed = false,
+                DelayedWhyNot = null,
+                DelayedIntradayTpPct = null,
+                DelayedIntradaySlPct = null,
+                TargetLevelClass = null
+            };
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = start.AddDays (i),
-					TrueLabel = trueLabel,
-					PredLabel = predLabel
-					});
-				}
+            var exitUtc = NyWindowing.ComputeBaselineExitUtc(entryUtc, NyWindowing.NyTz).Value;
 
-			var trainUntilUtc = start.AddDays (99);
+            var microTruth = trueLabel == 1
+                ? OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.MicroNeutral)
+                : OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
 
-			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
-				records,
-				trainUntilUtc);
+            var forward = new ForwardOutcomes
+            {
+                EntryUtc = entryUtc,
+                WindowEndUtc = exitUtc,
 
-			Assert.NotNull (result);
+                TrueLabel = trueLabel,
+                MicroTruth = microTruth,
 
-			// В этом сценарии Success должен быть false из-за ошибки по OOS.
-			Assert.False (result.Success);
+                Entry = 100.0,
+                MaxHigh24 = 110.0,
+                MinLow24 = 90.0,
+                Close24 = 100.0,
 
-			Assert.Contains (
-				result.Errors,
-				e => e.Contains ("OOS accuracy", StringComparison.OrdinalIgnoreCase)
-				|| e.Contains ("OOS accuracy", StringComparison.Ordinal));
-			}
+                MinMove = 0.01,
+                DayMinutes = Array.Empty<Candle1m>()
+            };
 
-		[Fact]
-		public void CheckDailyTrainVsOosAndShuffle_Warns_WhenNoOosPart ()
-			{
-			// Сценарий: все дни попадают в train-часть, OOS нет.
-			// Должно быть предупреждение про пустую OOS-часть.
+            return new BacktestRecord
+            {
+                Causal = causal,
+                Forward = forward
+            };
+        }
 
-			var records = new List<PredictionRecord> ();
-			var start = new DateTime (2024, 01, 01, 8, 0, 0, DateTimeKind.Utc);
+        [Fact]
+        public void CheckDailyTrainVsOosAndShuffle_ReturnsSuccess_OnReasonableMetrics()
+        {
+            var records = new List<BacktestRecord>();
+            var start = new DateTime(2024, 01, 01, 12, 0, 0, DateTimeKind.Utc);
 
-			for (int i = 0; i < 50; i++)
-				{
-				int label = i % 3;
+            for (int i = 0; records.Count < 250; i++)
+            {
+                var t = start.AddDays(i);
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(t), NyWindowing.NyTz, out var entryUtc))
+                    continue;
 
-				records.Add (new PredictionRecord
-					{
-					DateUtc = start.AddDays (i),
-					TrueLabel = label,
-					PredLabel = label
-					});
-				}
+                int trueLabel = records.Count % 3;
+                int predLabel = (records.Count % 10 < 6) ? trueLabel : (trueLabel + 1) % 3;
 
-			// trainUntil ставим после последнего дня — OOS не будет.
-			var trainUntilUtc = start.AddDays (1000);
+                records.Add(MakeRecord(entryUtc, trueLabel, predLabel));
+            }
 
-			var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle (
-				records,
-				trainUntilUtc);
+            var pivotExit = NyWindowing.ComputeBaselineExitUtc(records[179].Causal.EntryUtc, NyWindowing.NyTz).Value;
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(ExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit));
 
-			Assert.NotNull (result);
-			Assert.True (result.Success);
+            var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(records, trainUntil, NyWindowing.NyTz);
 
-			// Должен быть warning про пустую OOS-часть.
-			Assert.Contains (
-				result.Warnings,
-				w => w.Contains ("OOS-часть пуста", StringComparison.OrdinalIgnoreCase)
-				|| w.Contains ("OOS-часть пуста", StringComparison.Ordinal));
-			}
-		}
-	}
+            Assert.NotNull(result);
+            Assert.True(result.Success);
+            Assert.Empty(result.Errors);
+
+            Assert.False(double.IsNaN(result.Metrics["daily.acc_all"]));
+            Assert.False(double.IsNaN(result.Metrics["daily.acc_train"]));
+            Assert.False(double.IsNaN(result.Metrics["daily.acc_oos"]));
+        }
+
+        [Fact]
+        public void CheckDailyTrainVsOosAndShuffle_FlagsLeak_WhenOosAccuracySuspiciouslyHigh()
+        {
+            var records = new List<BacktestRecord>();
+            var start = new DateTime(2024, 01, 01, 12, 0, 0, DateTimeKind.Utc);
+
+            const int totalDays = 420;
+            const int cut = 200;
+
+            for (int i = 0; records.Count < totalDays; i++)
+            {
+                var t = start.AddDays(i);
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(t), NyWindowing.NyTz, out var entryUtc))
+                    continue;
+
+                int idx = records.Count;
+                int trueLabel = idx % 3;
+
+                int predLabel = (idx < cut)
+                    ? ((idx % 10 < 6) ? trueLabel : (trueLabel + 1) % 3)
+                    : trueLabel;
+
+                records.Add(MakeRecord(entryUtc, trueLabel, predLabel));
+            }
+
+            var pivotExit = NyWindowing.ComputeBaselineExitUtc(records[cut - 1].Causal.EntryUtc, NyWindowing.NyTz).Value;
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(ExitDayKeyUtc.FromBaselineExitUtcOrThrow(pivotExit));
+
+            var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(records, trainUntil, NyWindowing.NyTz);
+
+            Assert.NotNull(result);
+            Assert.False(result.Success);
+
+            Assert.Contains(
+                result.Errors,
+                e => e.Contains("OOS accuracy", StringComparison.OrdinalIgnoreCase)
+                     || e.Contains("OOS accuracy", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public void CheckDailyTrainVsOosAndShuffle_Warns_WhenNoOosPart()
+        {
+            var records = new List<BacktestRecord>();
+            var start = new DateTime(2024, 01, 01, 12, 0, 0, DateTimeKind.Utc);
+
+            for (int i = 0; records.Count < 80; i++)
+            {
+                var t = start.AddDays(i);
+                if (!NyWindowing.TryCreateNyTradingEntryUtc(new EntryUtc(t), NyWindowing.NyTz, out var entryUtc))
+                    continue;
+
+                int label = records.Count % 3;
+                int predLabel = (records.Count % 10 < 6) ? label : (label + 1) % 3;
+                records.Add(MakeRecord(entryUtc, label, predLabel));
+            }
+
+            var trainUntil = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc(
+                ExitDayKeyUtc.FromUtcMomentOrThrow(start.AddDays(1000)));
+
+            var result = DailyLeakageChecks.CheckDailyTrainVsOosAndShuffle(records, trainUntil, NyWindowing.NyTz);
+
+            Assert.NotNull(result);
+            Assert.True(result.Success);
+
+            Assert.Contains(
+                result.Warnings,
+                w => w.Contains("OOS-часть пуста", StringComparison.OrdinalIgnoreCase)
+                     || w.Contains("OOS-часть пуста", StringComparison.Ordinal));
+        }
+    }
+}

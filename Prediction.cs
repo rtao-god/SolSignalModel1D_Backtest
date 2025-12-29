@@ -1,332 +1,285 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Data;
 
 namespace SolSignalModel1D_Backtest
-	{
-	public partial class Program
-		{
-		/// <summary>
-		/// Глобальная граница train-периода для дневной модели.
-		/// Всё, что ≤ этой даты, используется только для обучения.
-		/// Всё, что > этой даты, считается OOS (для логов/аналитики).
-		/// </summary>
-		private static DateTime _trainUntilUtc;
+{
+    public partial class Program
+    {
+        private static BaselineExitUtc _trainUntilBaselineExitUtc;
+        private static TrainUntilExitDayKeyUtc _trainUntilExitDayKeyUtc;
 
-		/// <summary>
-		/// Создаёт PredictionEngine:
-		/// - выбирает обучающую часть истории (train) по дате;
-		/// - тренирует дневной move+dir и микро-слой через ModelTrainer;
-		/// - запоминает границу train-периода в _trainUntilUtc.
-		/// </summary>
-		private static PredictionEngine CreatePredictionEngineOrFallback ( List<DataRow> allRows )
-			{
-			PredictionEngine.DebugAllowDisabledModels = false;
+        private static EntryUtc ToEntryUtc(EntryUtc entry) => entry;
+        private static EntryUtc ToEntryUtc(NyTradingEntryUtc entry) => entry.AsEntryUtc();
 
-			if (allRows == null) throw new ArgumentNullException (nameof (allRows));
-			if (allRows.Count == 0)
-				throw new InvalidOperationException ("[engine] Пустой список DataRow для обучения моделей");
+        private static PredictionEngine CreatePredictionEngineOrFallback(
+            List<LabeledCausalRow> allRows
+        )
+        {
+            PredictionEngine.DebugAllowDisabledModels = false;
 
-			var ordered = allRows
-				.OrderBy (r => r.Date)
-				.ToList ();
+            if (allRows == null) throw new ArgumentNullException(nameof(allRows));
+            if (allRows.Count == 0)
+                throw new InvalidOperationException("[engine] Пустой список LabeledCausalRow для обучения моделей");
 
-			var minDate = ordered.First ().Date;
-			var maxDate = ordered.Last ().Date;
+            var ordered = allRows
+                .OrderBy(r => r.Causal.EntryUtc.Value)
+                .ToList();
 
-			// Простой временной hold-out: последние N дней не участвуют в обучении,
-			// чтобы модели не видели самые свежие дни, по которым считаются forward-метрики.
-			const int HoldoutDays = 120;
-			var trainUntil = maxDate.AddDays (-HoldoutDays);
+            var minEntryUtc = ordered.First().Causal.EntryUtc.Value;
+            var maxEntryUtc = ordered.Last().Causal.EntryUtc.Value;
 
-			var trainRows = ordered
-				.Where (r => r.Date <= trainUntil)
-				.ToList ();
+            const int HoldoutDays = 120;
 
-			// --- Диагностика распределения таргетов на train ---
-			var labelHist = trainRows
-				.GroupBy (r => r.Label)
-				.OrderBy (g => g.Key)
-				.Select (g => $"{g.Key}={g.Count ()}")
-				.ToArray ();
+            var trainUntilUtc = DeriveTrainUntilUtcFromHoldout(
+                rows: ordered,
+                holdoutDays: HoldoutDays,
+                nyTz: NyTz);
 
-			Console.WriteLine ("[engine] train label hist: " + string.Join (", ", labelHist));
+            var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow(trainUntilUtc);
 
-			if (labelHist.Length <= 1)
-				{
-				Console.WriteLine (
-					"[engine] WARNING: train labels are degenerate (<=1 class). " +
-					"Daily model will inevitably be constant.");
-				}
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: ordered,
+                entrySelector: r => ToEntryUtc(r.Causal.EntryUtc),
+                trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                nyTz: NyTz);
 
-			if (trainRows.Count < 100)
-				{
-				// Если данных мало — лучше обучиться на всём, чем падать.
-				Console.WriteLine (
-					$"[engine] trainRows too small ({trainRows.Count}), " +
-					"используем всю историю без hold-out (метрики будут train-like)");
+            var trainRows = split.Train;
+            ValidateTrainBoundaryOrThrow(trainRows, trainUntilExitDayKeyUtc, NyTz);
 
-				trainRows = ordered;
-				// по сути, train == вся история → OOS нет
-				_trainUntilUtc = ordered.Last ().Date;
-				}
-			else
-				{
-				_trainUntilUtc = trainUntil;
+            if (split.Excluded.Count > 0)
+            {
+                Console.WriteLine(
+                    $"[engine] WARNING: excluded={split.Excluded.Count} rows because baseline-exit is undefined by contract.");
+            }
 
-				Console.WriteLine (
-					$"[engine] training on rows <= {trainUntil:yyyy-MM-dd} " +
-					$"({trainRows.Count} из {ordered.Count}, диапазон [{minDate:yyyy-MM-dd}; {trainUntil:yyyy-MM-dd}])");
-				}
+            var labelHist = trainRows
+                .GroupBy(r => r.TrueLabel)
+                .OrderBy(g => g.Key)
+                .Select(g => $"{g.Key}={g.Count()}")
+                .ToArray();
 
-			var trainer = new ModelTrainer
-				{
-				DisableMoveModel = false,           // отключаем move
-				DisableDirNormalModel = false,
-				DisableDirDownModel = false,
-				DisableMicroFlatModel = false
-				};
-			var bundle = trainer.TrainAll (trainRows);
+            Console.WriteLine("[engine] train label hist: " + string.Join(", ", labelHist));
 
-			if (bundle.MlCtx == null)
-				throw new InvalidOperationException ("[engine] ModelTrainer вернул ModelBundle с MlCtx == null");
+            if (labelHist.Length <= 1)
+                Console.WriteLine("[engine] WARNING: train labels are degenerate (<=1 class).");
 
-			/*if (bundle.MoveModel == null)
-				throw new InvalidOperationException ("[engine] ModelBundle.MoveModel == null после обучения");*/
+            const int MinTrainRows = 100;
 
-			//if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
-			//	throw new InvalidOperationException (
-			//		"[engine] Оба направления (DirModelNormal/DirModelDown) == null после обучения");
+            if (trainRows.Count < MinTrainRows)
+            {
+                throw new InvalidOperationException(
+                    "[engine] Not enough train rows for causal training. " +
+                    $"train={trainRows.Count}, min={MinTrainRows}, " +
+                    $"trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}, " +
+                    $"entryRange=[{minEntryUtc:yyyy-MM-dd}; {maxEntryUtc:yyyy-MM-dd}]. " +
+                    "Refusing to train on full history to avoid future leakage.");
+            }
 
-			Console.WriteLine (
-				"[engine] ModelBundle trained: move+dir " +
-				(bundle.MicroFlatModel != null ? "+ micro" : "(без микро-слоя, микро будет выключен)"));
+            var finalTrainRows = trainRows;
 
-			return new PredictionEngine (bundle);
-			}
+            _trainUntilBaselineExitUtc = new BaselineExitUtc(new UtcInstant(trainUntilUtc));
+            _trainUntilExitDayKeyUtc = trainUntilExitDayKeyUtc;
 
-		/// <summary>
-		/// Строит PredictionRecord'ы для ВСЕХ mornings (train + OOS).
-		/// Граница _trainUntilUtc:
-		/// - по-прежнему задаёт разделение train/OOS;
-		/// - используется в логах и последующей аналитике,
-		///   но не режет список для стратегий/бэктеста.
-		/// </summary>
-		private static async Task<List<PredictionRecord>> LoadPredictionRecordsAsync (
-			IReadOnlyList<DataRow> mornings,
-			IReadOnlyList<Candle6h> solAll6h,
-			PredictionEngine engine )
-			{
-			if (mornings == null) throw new ArgumentNullException (nameof (mornings));
-			if (solAll6h == null) throw new ArgumentNullException (nameof (solAll6h));
-			if (engine == null) throw new ArgumentNullException (nameof (engine));
+            Console.WriteLine(
+                $"[engine] training on rows with baseline-exit day <= {_trainUntilExitDayKeyUtc.Value:yyyy-MM-dd} " +
+                $"(train={split.Train.Count}, oos={split.Oos.Count}, total={ordered.Count}, entryRange=[{minEntryUtc:yyyy-MM-dd}; {maxEntryUtc:yyyy-MM-dd}])");
 
-			if (_trainUntilUtc == default)
-				{
-				throw new InvalidOperationException (
-					"[forward] _trainUntilUtc не установлен. " +
-					"Сначала должен быть вызван CreatePredictionEngineOrFallback.");
-				}
+            var trainer = new ModelTrainer
+            {
+                DisableMoveModel = false,
+                DisableDirNormalModel = false,
+                DisableDirDownModel = false,
+                DisableMicroFlatModel = false
+            };
 
-			// Подготавливаем отсортированный список 6h-свечей для forward-метрик.
-			var sorted6h = solAll6h is List<Candle6h> list6h ? list6h : solAll6h.ToList ();
-			if (sorted6h.Count == 0)
-				throw new InvalidOperationException ("[forward] Пустая серия 6h для SOL");
+            var bundle = trainer.TrainAll(finalTrainRows);
 
-			// Предподготавливаем индекс свечей по времени открытия.
-			// Строим словарь в обратном порядке, чтобы при дублях времени
-			// использовался минимальный индекс (совпадает с FindIndex).
-			var indexByOpenTime = new Dictionary<DateTime, int> (sorted6h.Count);
-			for (int i = sorted6h.Count - 1; i >= 0; i--)
-				{
-				var openTime = sorted6h[i].OpenTimeUtc;
-				indexByOpenTime[openTime] = i;
-				}
+            if (bundle.MlCtx == null)
+                throw new InvalidOperationException("[engine] ModelTrainer вернул ModelBundle с MlCtx == null");
 
-			// Все mornings по времени.
-			var orderedMornings = mornings as List<DataRow> ?? mornings.ToList ();
+            Console.WriteLine(
+                "[engine] ModelBundle trained: move+dir " +
+                (bundle.MicroFlatModel != null ? "+ micro" : "(без микро-слоя)"));
 
-			var oosCount = orderedMornings.Count (r => r.Date > _trainUntilUtc);
-			Console.WriteLine (
-				$"[forward] mornings total = {orderedMornings.Count}, " +
-				$"OOS (Date > trainUntil={_trainUntilUtc:yyyy-MM-dd}) = {oosCount}");
+            return new PredictionEngine(bundle);
+        }
 
-			if (oosCount == 0)
-				{
-				Console.WriteLine (
-					$"[forward] предупреждение: нет out-of-sample mornings " +
-					$"(все дни <= trainUntil={_trainUntilUtc:O}). " +
-					"Стратегические метрики будут train-like.");
-				}
+        private static async Task<List<BacktestRecord>> LoadPredictionRecordsAsync(
+            IReadOnlyList<LabeledCausalRow> mornings,
+            IReadOnlyList<Candle1m> sol1m,
+            PredictionEngine engine)
+        {
+            if (mornings == null) throw new ArgumentNullException(nameof(mornings));
+            if (sol1m == null) throw new ArgumentNullException(nameof(sol1m));
+            if (engine == null) throw new ArgumentNullException(nameof(engine));
 
-			// Локальный argmax для PredLabel_Day / PredLabel_DayMicro / PredLabel_Total.
-			static int ArgmaxLabel ( double pUp, double pFlat, double pDown )
-				{
-				if (pUp >= pFlat && pUp >= pDown) return 2;
-				if (pDown >= pFlat && pDown >= pUp) return 0;
-				return 1;
-				}
+            if (_trainUntilBaselineExitUtc.IsDefault)
+                throw new InvalidOperationException("[forward] _trainUntilBaselineExitUtc не установлен.");
 
-			var list = new List<PredictionRecord> (orderedMornings.Count);
+            if (_trainUntilExitDayKeyUtc.IsDefault)
+                throw new InvalidOperationException("[forward] _trainUntilExitDayKeyUtc не установлен.");
 
-			foreach (var r in orderedMornings)
-				{
-				// Предсказание через PredictionEngine (дневная модель + микро).
-				var pr = engine.Predict (r);
-				var cls = pr.Class;
-				var microUp = pr.Micro.ConsiderUp;
-				var microDn = pr.Micro.ConsiderDown;
-				var reason = pr.Reason;
+            var orderedMornings = mornings as List<LabeledCausalRow> ?? mornings.ToList();
 
-				// Вычисляем показатели по forward-окну (до базового выхода t_exit).
-				var entryUtc = r.Date;
+            var split = NyTrainSplit.SplitByBaselineExit(
+                ordered: orderedMornings,
+                entrySelector: r => ToEntryUtc(r.Causal.EntryUtc),
+                trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
+                nyTz: NyTz);
 
-				// Общий NyTz (определён в другом partial Program), чтобы baseline-окно
-				// совпадало с PnL/SL/Delayed.
-				var exitUtc = Windowing.ComputeBaselineExitUtc (entryUtc, NyTz);
+            Console.WriteLine(
+                $"[forward] mornings total={orderedMornings.Count}, train={split.Train.Count}, oos={split.Oos.Count}, excluded={split.Excluded.Count}, " +
+                $"trainUntilExitDayKeyUtc={_trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
 
-				if (!indexByOpenTime.TryGetValue (entryUtc, out var entryIdx))
-					{
-					throw new InvalidOperationException (
-						$"[forward] entry candle {entryUtc:O} not found in 6h series");
-					}
+            var causalRecords = new List<CausalPredictionRecord>(orderedMornings.Count);
 
-				var exitIdx = -1;
-				for (int i = entryIdx; i < sorted6h.Count; i++)
-					{
-					var start = sorted6h[i].OpenTimeUtc;
-					var end = (i + 1 < sorted6h.Count)
-						? sorted6h[i + 1].OpenTimeUtc
-						: start.AddHours (6);
+            for (int k = 0; k < orderedMornings.Count; k++)
+            {
+                var r = orderedMornings[k];
+                var entryUtc = r.Causal.EntryUtc.Value;
 
-					if (exitUtc >= start && exitUtc < end)
-						{
-						exitIdx = i;
-						break;
-						}
-					}
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(entryUtc), NyTz, out _))
+                {
+                    throw new InvalidOperationException(
+                        $"[forward] baseline-exit undefined for morning entry {entryUtc:O}.");
+                }
 
-				if (exitIdx < 0)
-					{
-					throw new InvalidOperationException (
-						$"[forward] no 6h candle covering baseline exit {exitUtc:O} (entry {entryUtc:O})");
-					}
+                causalRecords.Add(engine.PredictCausal(r.Causal));
+            }
 
-				if (exitIdx <= entryIdx)
-					{
-					throw new InvalidOperationException (
-						$"[forward] exitIdx {exitIdx} <= entryIdx {entryIdx} для entry {entryUtc:O}");
-					}
+            var built = ForwardOutcomesBuilder.Build(
+                causalRecords: causalRecords,
+                truthRows: orderedMornings,
+                allMinutes: sol1m);
 
-				var entryPrice = sorted6h[entryIdx].Close;
+            return await Task.FromResult(built as List<BacktestRecord> ?? built.ToList());
+        }
 
-				double maxHigh = double.MinValue;
-				double minLow = double.MaxValue;
+        private static DateTime DeriveTrainUntilUtcFromHoldout(
+            IReadOnlyList<LabeledCausalRow> rows,
+            int holdoutDays,
+            TimeZoneInfo nyTz)
+        {
+            if (rows == null) throw new ArgumentNullException(nameof(rows));
+            if (rows.Count == 0) throw new ArgumentException("rows must be non-empty.", nameof(rows));
+            if (holdoutDays < 0) throw new ArgumentOutOfRangeException(nameof(holdoutDays));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-				for (int j = entryIdx + 1; j <= exitIdx; j++)
-					{
-					var c = sorted6h[j];
+            var maxExitUtc = DeriveMaxBaselineExitUtc(rows, nyTz);
+            var maxExitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(maxExitUtc).Value;
+            var candidateExitDayKeyUtc = maxExitDayKeyUtc.AddDays(-holdoutDays);
 
-					if (c.High > maxHigh) maxHigh = c.High;
-					if (c.Low < minLow) minLow = c.Low;
-					}
+            for (int i = 0; i < 14; i++)
+            {
+                var candidateNoonUtc = candidateExitDayKeyUtc.AddHours(12);
+                var candidateNoonEntry = new EntryUtc(candidateNoonUtc);
+                if (!NyWindowing.TryGetNyTradingDay(candidateNoonEntry, nyTz, out var nyDay))
+                {
+                    candidateExitDayKeyUtc = candidateExitDayKeyUtc.AddDays(-1);
+                    continue;
+                }
 
-				if (maxHigh == double.MinValue || minLow == double.MaxValue)
-					{
-					throw new InvalidOperationException (
-						$"[forward] no candles between entry {entryUtc:O} and exit {exitUtc:O}");
-					}
+                var morningEntryUtc = NyWindowing.ComputeEntryUtcFromNyDayOrThrow(nyDay, nyTz).Value;
+                var exitUtc = morningEntryUtc.AddMinutes(-2);
 
-				var fwdClose = sorted6h[exitIdx].Close;
+                if (exitUtc > maxExitUtc)
+                {
+                    throw new InvalidOperationException(
+                        $"[engine] derived trainUntilUtc exceeds max baseline-exit. trainUntilUtc={exitUtc:O}, maxExitUtc={maxExitUtc:O}, holdoutDays={holdoutDays}.");
+                }
 
-				// Вероятности из PredictionEngine.
-				var day = pr.Day;
-				var dayWithMicro = pr.DayWithMicro;
+                return exitUtc;
+            }
 
-				var predLabelDay = ArgmaxLabel (day.PUp, day.PFlat, day.PDown);
-				var predLabelDayMicro = ArgmaxLabel (dayWithMicro.PUp, dayWithMicro.PFlat, dayWithMicro.PDown);
+            throw new InvalidOperationException(
+                $"[engine] failed to derive trainUntilUtc from holdout in baseline-exit domain. holdoutDays={holdoutDays}, maxExitDayKeyUtc={maxExitDayKeyUtc:yyyy-MM-dd}.");
+        }
 
-				// На этом этапе Total = Day+Micro. SL-оверлей (RunSlModelOffline) при необходимости обновит эти поля.
-				double probUpTotal = dayWithMicro.PUp;
-				double probFlatTotal = dayWithMicro.PFlat;
-				double probDownTotal = dayWithMicro.PDown;
-				int predLabelTotal = predLabelDayMicro;
+        private static DateTime DeriveMaxBaselineExitUtc(IReadOnlyList<LabeledCausalRow> rows, TimeZoneInfo nyTz)
+        {
+            if (rows == null) throw new ArgumentNullException(nameof(rows));
+            if (rows.Count == 0) throw new ArgumentException("rows must be non-empty.", nameof(rows));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-				list.Add (new PredictionRecord
-					{
-					DateUtc = r.Date,
+            bool hasAny = false;
+            DateTime maxExit = default;
 
-					// факт + "старый" PredLabel (как и раньше)
-					TrueLabel = r.Label,
-					PredLabel = cls,
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var entryUtc = rows[i].Causal.EntryUtc.Value;
+                var ny = TimeZoneInfo.ConvertTimeFromUtc(entryUtc, nyTz);
 
-					// Day-слой
-					PredLabel_Day = predLabelDay,
-					ProbUp_Day = day.PUp,
-					ProbFlat_Day = day.PFlat,
-					ProbDown_Day = day.PDown,
-					Conf_Day = day.Confidence,
+                if (ny.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+                    continue;
 
-					// Day+Micro
-					PredLabel_DayMicro = predLabelDayMicro,
-					ProbUp_DayMicro = dayWithMicro.PUp,
-					ProbFlat_DayMicro = dayWithMicro.PFlat,
-					ProbDown_DayMicro = dayWithMicro.PDown,
-					Conf_Micro = dayWithMicro.Confidence,
+                var exitUtc = NyWindowing.ComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz).Value;
 
-					// Total (пока = Day+Micro; SL-оверлей обновит при наличии)
-					PredLabel_Total = predLabelTotal,
-					ProbUp_Total = probUpTotal,
-					ProbFlat_Total = probFlatTotal,
-					ProbDown_Total = probDownTotal,
+                if (!hasAny || exitUtc > maxExit)
+                {
+                    maxExit = exitUtc;
+                    hasAny = true;
+                }
+            }
 
-					// микро-факт / прогноз
-					PredMicroUp = microUp,
-					PredMicroDown = microDn,
-					FactMicroUp = r.FactMicroUp,
-					FactMicroDown = r.FactMicroDown,
+            if (!hasAny)
+                throw new InvalidOperationException("[engine] failed to derive max baseline-exit: no working-day entries found.");
 
-					// цены дня
-					Entry = entryPrice,
-					MaxHigh24 = maxHigh,
-					MinLow24 = minLow,
-					Close24 = fwdClose,
+            return maxExit;
+        }
 
-					// контекст
-					RegimeDown = r.RegimeDown,
-					Reason = reason,
-					MinMove = r.MinMove,
+        private static void ValidateTrainBoundaryOrThrow(
+            IReadOnlyList<LabeledCausalRow> trainRows,
+            TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc,
+            TimeZoneInfo nyTz)
+        {
+            if (trainRows == null) throw new ArgumentNullException(nameof(trainRows));
+            if (trainUntilExitDayKeyUtc.IsDefault)
+                throw new ArgumentException("trainUntilExitDayKeyUtc must be initialized (non-default).", nameof(trainUntilExitDayKeyUtc));
+            if (nyTz == null) throw new ArgumentNullException(nameof(nyTz));
 
-					// delayed A/B
-					DelayedSource = string.Empty,
-					DelayedEntryAsked = false,
-					DelayedEntryUsed = false,
-					DelayedEntryExecuted = false,
-					DelayedEntryPrice = 0.0,
-					DelayedIntradayResult = 0,
-					DelayedIntradayTpPct = 0.0,
-					DelayedIntradaySlPct = 0.0,
-					TargetLevelClass = 0,
-					DelayedWhyNot = null,
-					DelayedEntryExecutedAtUtc = null,
+            var violations = new List<(DateTime EntryUtc, DateTime ExitDayKeyUtc)>();
 
-					// SL (оффлайн/онлайн) пока не заполнен; будет обновлён в RunSlModelOffline/DayExecutor
-					SlProb = 0.0,
-					SlHighDecision = false,
-					Conf_SlLong = 0.0,
-					Conf_SlShort = 0.0,
+            for (int i = 0; i < trainRows.Count; i++)
+            {
+                var r = trainRows[i];
+                var entryUtc = r.Causal.EntryUtc.Value;
 
-					// Anti-D
-					AntiDirectionApplied = false
-					});
-				}
+                if (!NyWindowing.TryComputeBaselineExitUtc(new EntryUtc(entryUtc), nyTz, out var exitUtc))
+                {
+                    throw new InvalidOperationException(
+                        $"[engine] baseline-exit undefined for train row. entryUtc={entryUtc:O}, dayKey={r.EntryDayKeyUtc.Value:yyyy-MM-dd}.");
+                }
 
-			return await Task.FromResult (list);
-			}
-		}
-	}
+                var exitDayKeyUtc = ExitDayKeyUtc.FromBaselineExitUtcOrThrow(exitUtc.Value).Value;
+                if (exitDayKeyUtc > trainUntilExitDayKeyUtc.Value)
+                    violations.Add((entryUtc, exitDayKeyUtc));
+            }
+
+            if (violations.Count == 0)
+                return;
+
+            var top = violations
+                .OrderByDescending(v => v.ExitDayKeyUtc)
+                .Take(10)
+                .Select(v => $"{v.EntryUtc:O} -> exitDayKey={v.ExitDayKeyUtc:yyyy-MM-dd}")
+                .ToArray();
+
+            Console.WriteLine(
+                $"[engine] ПОДОЗРЕНИЕ: train включает записи за границей baseline-exit. " +
+                $"count={violations.Count}, trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}, " +
+                $"sample=[{string.Join(", ", top)}]");
+
+            throw new InvalidOperationException(
+                $"[engine] train boundary violated. " +
+                $"count={violations.Count}, trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}.");
+        }
+    }
+}
+

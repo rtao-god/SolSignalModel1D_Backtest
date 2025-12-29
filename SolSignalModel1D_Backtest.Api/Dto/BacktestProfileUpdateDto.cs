@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Api.Dto
+namespace SolSignalModel1D_Backtest.Api.Dto
 	{
 	/// <summary>
 	/// DTO для частичного обновления профиля бэктеста.

@@ -1,0 +1,58 @@
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+
+namespace SolSignalModel1D_Backtest.Tests.TestUtils
+	{
+	internal static class NyTestDates
+		{
+		internal static readonly TimeZoneInfo NyTz = NyWindowing.NyTz;
+
+		internal static DateTime NyLocal ( int year, int month, int day, int hour, int minute = 0 )
+			{
+			return new DateTime (year, month, day, hour, minute, 0, DateTimeKind.Unspecified);
+			}
+
+		internal static DateTime ToUtc ( DateTime nyLocalUnspecified )
+			{
+			// В тестах принципиально фиксируем:
+			// - локальное NY-время задаётся как Unspecified,
+			// - в UTC конвертируем строго через TimeZoneInfo, чтобы DST учитывался корректно.
+			return TimeZoneInfo.ConvertTimeToUtc (nyLocalUnspecified, NyTz);
+			}
+
+		internal static List<DateTime> BuildNyWeekdaySeriesUtc (
+			DateTime startNyLocalDate,
+			int count,
+			int hour,
+			int minute = 0 )
+			{
+			// Генератор “торговых” entry: только будни в NY.
+			// EntryUtc вычисляем канонично через NyWindowing, чтобы 07:00/08:00 соблюдалось по DST.
+			_ = hour;
+			_ = minute;
+
+			var res = new List<DateTime> (count);
+
+			var d = new DateTime (
+				startNyLocalDate.Year,
+				startNyLocalDate.Month,
+				startNyLocalDate.Day,
+				0, 0, 0,
+				DateTimeKind.Unspecified);
+
+			while (res.Count < count)
+				{
+				if (d.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday)
+					{
+					var nyDay = new NyTradingDay (DateOnly.FromDateTime (d));
+					var entryUtc = NyWindowing.ComputeEntryUtcFromNyDayOrThrow (nyDay, NyTz);
+					res.Add (entryUtc.Value);
+					}
+
+				d = d.AddDays (1);
+				}
+
+			return res;
+			}
+		}
+	}
+

@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
 using Xunit;
-using SolSignalModel1D_Backtest.Core.Data.Candles.Timeframe;
-using CoreIndicators = SolSignalModel1D_Backtest.Core.Data.Indicators.Indicators;
+using SolSignalModel1D_Backtest.Core.Causal.Data.Candles.Timeframe;
+using CoreIndicators = SolSignalModel1D_Backtest.Core.Causal.Data.Indicators.Indicators;
 
 namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 	{
@@ -19,6 +17,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			return new Candle6h
 				{
 				OpenTimeUtc = t,
+				Open = close,
 				Close = close,
 				High = close + 1.0,
 				Low = close - 1.0,
@@ -67,6 +66,7 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 				arr.Add (new Candle6h
 					{
 					OpenTimeUtc = t,
+					Open = close,
 					Close = close,
 					High = close + 2.0,
 					Low = close - 2.0
@@ -81,12 +81,12 @@ namespace SolSignalModel1D_Backtest.Tests.Data.Indicators
 			Assert.True (atrBefore.ContainsKey (key), "ATR должен быть посчитан для ключа 7-й свечи.");
 			double vBefore = atrBefore[key];
 
-			// Меняем самую ПОСЛЕДНЮЮ свечу (индекс 11) — это чистое будущее для точки с key.
-			arr[11].High += 1000;
-			arr[11].Low -= 1000;
-			arr[11].Close += 500;
+            // Меняем самую ПОСЛЕДНЮЮ свечу (индекс 11) — это чистое будущее для точки с key.
+            arr[11].Close += 500;
+            arr[11].High = arr[11].Close + 2.0;
+            arr[11].Low = arr[11].Close - 2.0;
 
-			var atrAfter = CoreIndicators.ComputeAtr6h (arr, period);
+            var atrAfter = CoreIndicators.ComputeAtr6h (arr, period);
 			double vAfter = atrAfter[key];
 
 			Assert.Equal (vBefore, vAfter, 10);

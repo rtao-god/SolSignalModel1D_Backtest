@@ -1,144 +1,170 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using SolSignalModel1D_Backtest.Core.Data;
-using SolSignalModel1D_Backtest.SanityChecks.SanityChecks;
-using DataRow = SolSignalModel1D_Backtest.Core.Causal.Data.DataRow;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Causal.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Utils.Time;
+using BacktestRecord = SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data.BacktestRecord;
+using CoreNyWindowing = SolSignalModel1D_Backtest.Core.Causal.Time.NyWindowing;
 
 namespace SolSignalModel1D_Backtest.SanityChecks.SanityChecks.Leakage.Micro
-	{
-	/// <summary>
-	/// Sanity-проверки для микро-слоя:
-	/// - достаточное число размеченных микро-дней;
-	/// - покрытие прогнозами;
-	/// - сравнение accuracies train vs OOS и с рандомным baseline.
-	/// </summary>
-	public static class MicroLeakageChecks
-		{
-		/// <summary>
-		/// Основная проверка микро-слоя по текущему контексту.
-		/// </summary>
-		public static SelfCheckResult CheckMicroLayer ( SelfCheckContext ctx )
-			{
-			if (ctx == null) throw new ArgumentNullException (nameof (ctx));
+{
+    /// <summary>
+    /// Sanity-проверки для микро-слоя:
+    /// - достаточное число размеченных микро-дней;
+    /// - покрытие прогнозами;
+    /// - сравнение accuracies train vs OOS и с рандомным baseline.
+    /// </summary>
+    public static class MicroLeakageChecks
+    {
+        public static SelfCheckResult CheckMicroLayer(SelfCheckContext ctx)
+        {
+            if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-			var mornings = ctx.Mornings ?? Array.Empty<DataRow> ();
-			var records = ctx.Records ?? Array.Empty<PredictionRecord> ();
+            var mornings = ctx.Mornings ?? Array.Empty<LabeledCausalRow>();
+            var records = ctx.Records ?? Array.Empty<BacktestRecord>();
 
-			if (mornings.Count == 0 || records.Count == 0)
-				{
-				return SelfCheckResult.Ok ("[micro] нет данных для микро-слоя (mornings/records пусты).");
-				}
+            if (mornings.Count == 0 || records.Count == 0)
+            {
+                return SelfCheckResult.Ok("[micro] нет данных для микро-слоя (mornings/records пусты).");
+            }
 
-			// Берём утренние точки с path-based микро-разметкой.
-			var labeled = mornings
-				.Where (r => r.FactMicroUp || r.FactMicroDown)
-				.OrderBy (r => r.Date)
-				.ToList ();
+            var labeled = mornings
+                .Where(r => r.MicroTruth.HasValue)
+                .OrderBy(r => CausalTimeKey.EntryDayKeyUtc(r))
+                .ToList();
 
-			if (labeled.Count < 20)
-				{
-				return SelfCheckResult.Ok (
-					$"[micro] размеченных микро-дней слишком мало ({labeled.Count}), пропускаем sanity-проверку.");
-				}
+            if (labeled.Count < 20)
+            {
+                return SelfCheckResult.Ok(
+                    $"[micro] размеченных микро-дней слишком мало ({labeled.Count}), пропускаем sanity-проверку.");
+            }
 
-			// Мапа дата → факт (FactMicroUp/Down).
-			var factByDate = labeled.ToDictionary (r => r.Date, r => r);
+            var factByDayKey = labeled.ToDictionary(r => CausalTimeKey.EntryDayKeyUtc(r), r => r);
 
-			// Собираем пары (прогноз микро-слоя + факт).
-			var pairs = new List<(DateTime DateUtc, bool PredUp, bool FactUp)> ();
+            // Пары собираем по exit-day-key (baseline-exit), чтобы сравнение train vs OOS было по каноничной границе.
+            var pairs = new List<(ExitDayKeyUtc ExitDayKeyUtc, bool PredUp, bool FactUp)>();
 
-			foreach (var rec in records)
-				{
-				if (!factByDate.TryGetValue (rec.DateUtc, out var row))
-					continue;
+            foreach (var rec in records)
+            {
+                var dayKey = CausalTimeKey.EntryDayKeyUtc(rec);
 
-				// Если микро-прогноз не был выдан, пропускаем день.
-				if (!rec.PredMicroUp && !rec.PredMicroDown)
-					continue;
+                if (!factByDayKey.TryGetValue(dayKey, out var row))
+                    continue;
 
-				pairs.Add ((
-					rec.DateUtc,
-					PredUp: rec.PredMicroUp,
-					FactUp: row.FactMicroUp));
-				}
+                if (!rec.PredMicroUp && !rec.PredMicroDown)
+                    continue;
 
-			if (pairs.Count < 20)
-				{
-				return SelfCheckResult.Ok (
-					$"[micro] слишком мало дней, где есть и микро-прогноз, и path-based разметка ({pairs.Count}).");
-				}
+                var exitDayKeyUtc = CoreNyWindowing.ComputeExitDayKeyUtc(rec.EntryUtc, CoreNyWindowing.NyTz);
 
-			var train = pairs.Where (p => p.DateUtc <= ctx.TrainUntilUtc).ToList ();
-			var oos = pairs.Where (p => p.DateUtc > ctx.TrainUntilUtc).ToList ();
+                pairs.Add((
+                    ExitDayKeyUtc: exitDayKeyUtc,
+                    PredUp: rec.PredMicroUp,
+                    FactUp: row.MicroTruth.Value == MicroTruthDirection.Up));
+            }
 
-			double accAll = ComputeAccuracy (pairs);
-			double accTrain = ComputeAccuracy (train);
-			double accOos = ComputeAccuracy (oos);
+            // Граница сравнения для micro-check: day-key границы trainUntil (exit-day-key по контракту пайплайна).
+            var trainUntilExitDayKey = ctx.TrainUntilExitDayKeyUtc;
 
-			const double shuffleAcc = 0.5; // бинарный рандом baseline
+            int labeledExcluded = 0;
+            int labeledOosCount = 0;
 
-			var warnings = new List<string> ();
-			var errors = new List<string> ();
+            for (int i = 0; i < labeled.Count; i++)
+            {
+                var entryUtc = new EntryUtc(labeled[i].Causal.EntryUtc.Value);
 
-			if (train.Count < 30)
-				{
-				warnings.Add ($"[micro] train-выборка микро-слоя мала ({train.Count}), статистика шумная.");
-				}
+                if (!CoreNyWindowing.TryComputeExitDayKeyUtc(entryUtc, CoreNyWindowing.NyTz, out var exitDayKeyUtc))
+                {
+                    labeledExcluded++;
+                    continue;
+                }
 
-			if (oos.Count == 0)
-				{
-				warnings.Add ("[micro] OOS-часть для микро-слоя пуста (нет дней с DateUtc > _trainUntilUtc).");
-				}
+                if (exitDayKeyUtc.Value > trainUntilExitDayKey.Value)
+                    labeledOosCount++;
+            }
 
-			// OOS слишком хорош → подозрение на утечку.
-			if (!double.IsNaN (accOos) && oos.Count >= 50 && accOos > 0.90)
-				{
-				errors.Add ($"[micro] OOS accuracy {accOos:P1} при {oos.Count} дней — подозрение на утечку в микро-слое.");
-				}
+            if (pairs.Count < 20)
+            {
+                return SelfCheckResult.Ok(
+                    $"[micro] слишком мало дней, где есть и микро-прогноз, и path-based разметка ({pairs.Count}).");
+            }
 
-			// Модель почти не лучше рандома по всей выборке.
-			if (!double.IsNaN (accAll) && accAll < shuffleAcc + 0.05)
-				{
-				warnings.Add ($"[micro] accuracy по всей выборке {accAll:P1} почти не лучше случайной модели {shuffleAcc:P1}.");
-				}
+            var train = pairs.Where(p => p.ExitDayKeyUtc.Value <= trainUntilExitDayKey.Value).ToList();
+            var oos = pairs.Where(p => p.ExitDayKeyUtc.Value > trainUntilExitDayKey.Value).ToList();
 
-			// Дегенеративное поведение: почти всегда один знак.
-			int predUpCount = pairs.Count (p => p.PredUp);
-			int predDownCount = pairs.Count - predUpCount;
+            double accAll = ComputeAccuracy(pairs);
+            double accTrain = ComputeAccuracy(train);
+            double accOos = ComputeAccuracy(oos);
 
-			if (predUpCount == 0 || predDownCount == 0)
-				{
-				warnings.Add ("[micro] микро-слой почти всегда даёт один и тот же знак (up или down) — проверь пороги и покрытие.");
-				}
+            const double shuffleAcc = 0.5;
 
-			string summary =
-				$"[micro] pairs={pairs.Count}, train={train.Count}, oos={oos.Count}, " +
-				$"acc_all={accAll:P1}, acc_train={accTrain:P1}, acc_oos={accOos:P1}";
+            var warnings = new List<string>();
+            var errors = new List<string>();
 
-			var result = new SelfCheckResult
-				{
-				Success = errors.Count == 0,
-				Summary = summary
-				};
-			result.Errors.AddRange (errors);
-			result.Warnings.AddRange (warnings);
-			return result;
-			}
+            if (train.Count < 30)
+            {
+                warnings.Add($"[micro] train-выборка микро-слоя мала ({train.Count}), статистика шумная.");
+            }
 
-		private static double ComputeAccuracy ( IReadOnlyList<(DateTime DateUtc, bool PredUp, bool FactUp)> items )
-			{
-			if (items == null || items.Count == 0)
-				return double.NaN;
+            if (oos.Count == 0)
+            {
+                if (labeledOosCount > 0)
+                {
+                    warnings.Add(
+                        "[micro] OOS-часть по микро-прогнозам пуста " +
+                        $"(есть микро-факты после границы, labeledOos={labeledOosCount}, predOos=0).");
+                }
+                else
+                {
+                    warnings.Add(
+                        "[micro] OOS-часть по микро-фактам пуста " +
+                        $"(нет микро-дней после границы по baseline-exit, excluded={labeledExcluded}).");
+                }
+            }
 
-			int ok = 0;
-			for (int i = 0; i < items.Count; i++)
-				{
-				if (items[i].PredUp == items[i].FactUp)
-					ok++;
-				}
+            if (!double.IsNaN(accOos) && oos.Count >= 50 && accOos > 0.90)
+            {
+                errors.Add($"[micro] OOS accuracy {accOos:P1} при {oos.Count} дней — подозрение на утечку в микро-слое.");
+            }
 
-			return ok / (double) items.Count;
-			}
-		}
-	}
+            if (!double.IsNaN(accAll) && accAll < shuffleAcc + 0.05)
+            {
+                warnings.Add($"[micro] accuracy по всей выборке {accAll:P1} почти не лучше случайной модели {shuffleAcc:P1}.");
+            }
+
+            int predUpCount = pairs.Count(p => p.PredUp);
+            int predDownCount = pairs.Count - predUpCount;
+
+            if (predUpCount == 0 || predDownCount == 0)
+            {
+                warnings.Add("[micro] микро-слой почти всегда даёт один и тот же знак (up или down) — проверь пороги и покрытие.");
+            }
+
+            string summary =
+                $"[micro] pairs={pairs.Count}, train={train.Count}, oos={oos.Count}, " +
+                $"acc_all={accAll:P1}, acc_train={accTrain:P1}, acc_oos={accOos:P1}";
+
+            var result = new SelfCheckResult
+            {
+                Success = errors.Count == 0,
+                Summary = summary
+            };
+            result.Errors.AddRange(errors);
+            result.Warnings.AddRange(warnings);
+            return result;
+        }
+
+        private static double ComputeAccuracy(IReadOnlyList<(ExitDayKeyUtc ExitDayKeyUtc, bool PredUp, bool FactUp)> items)
+        {
+            if (items == null || items.Count == 0)
+                return double.NaN;
+
+            int ok = 0;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i].PredUp == items[i].FactUp)
+                    ok++;
+            }
+
+            return ok / (double)items.Count;
+        }
+    }
+}
+

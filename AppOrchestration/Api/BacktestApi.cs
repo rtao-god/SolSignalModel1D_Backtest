@@ -1,104 +1,123 @@
-﻿using SolSignalModel1D_Backtest.Core.Backtest;
-using SolSignalModel1D_Backtest.Core.Data;
+using SolSignalModel1D_Backtest.Core.Omniscient.Backtest;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Core.Omniscient.Omniscient.Data;
 
 namespace SolSignalModel1D_Backtest
-	{
-	/// <summary>
-	/// Частичный класс Program: публичный энтрипоинт для сборки снапшота бэктеста,
-	/// переиспользуемый как консолью, так и API.
-	/// </summary>
-	public partial class Program
-		{
-		/// <summary>
-		/// Высокоуровневый пайплайн подготовки данных для бэктеста/превью.
-		/// 
-		/// Логика по слоям:
-		/// 1) BootstrapDataAsync — общий инфраструктурный бутстрап:
-		///    - обновление свечей;
-		///    - загрузка всех временных рядов;
-		///    - индикаторы;
-		///    - дневные строки (DailyRowsBundle).
-		/// 2) Поверх бутстрапа:
-		///    - дневная модель (PredictionRecord);
-		///    - SL-модель;
-		///    - Delayed A по минуткам.
-		/// 
-		/// На выходе выдаётся стабильный контракт BacktestDataSnapshot,
-		/// который использует BacktestEngine и API-превью.
-		/// </summary>
-		public static async Task<BacktestDataSnapshot> BuildBacktestDataAsync ()
-			{
-			// 1. Общий бутстрап данных (свечи + индикаторы + дневные строки).
-			// Методы, которые дергает BootstrapDataAsync (UpdateCandlesAsync, LoadAllCandlesAndWindow,
-			// BuildIndicatorsAsync, BuildDailyRowsBundleAsync), остаются инкапсулированы внутри Program.
-			var bootstrap = await BootstrapDataAsync ();
+{
+    /// <summary>
+    /// Частичный класс Program: публичный энтрипоинт для сборки снапшота бэктеста,
+    /// переиспользуемый как консолью, так и API.
+    /// </summary>
+    public partial class Program
+    {
+        /// <summary>
+        /// Высокоуровневый пайплайн подготовки данных для бэктеста/превью.
+        ///
+        /// Логика по слоям:
+        /// 1) BootstrapDataAsync — общий инфраструктурный бутстрап:
+        ///    - обновление свечей;
+        ///    - загрузка всех временных рядов;
+        ///    - индикаторы;
+        ///    - дневные строки (DailyRowsBundle).
+        /// 2) Поверх бутстрапа:
+        ///    - дневная модель (PredictionRecord);
+        ///    - SL-модель;
+        ///    - Delayed A по минуткам.
+        ///
+        /// На выходе выдаётся стабильный контракт BacktestDataSnapshot,
+        /// который использует BacktestEngine и API-превью.
+        /// </summary>
+        public static async Task<BacktestDataSnapshot> BuildBacktestDataAsync()
+        {
+            // 1. Общий бутстрап данных (свечи + индикаторы + дневные строки).
+            var bootstrap = await BootstrapDataAsync();
 
-			var rowsBundle = bootstrap.RowsBundle;
-			var allRows = rowsBundle.AllRows;
-			var mornings = rowsBundle.Mornings;
+            var rowsBundle = bootstrap.RowsBundle;
+            var allRows = rowsBundle.AllRows;
+            var mornings = rowsBundle.Mornings;
 
-			Console.WriteLine ($"[rows] mornings (NY window) = {mornings.Count}");
-			if (mornings.Count == 0)
-				throw new InvalidOperationException ("[rows] После фильтров нет утренних точек.");
+            Console.WriteLine($"[rows] mornings (NY window) = {mornings.Count}");
+            if (mornings.Count == 0)
+                throw new InvalidOperationException("[rows] После фильтров нет утренних точек.");
 
-			// 2. Основная дневная модель: строим prediction-записи по утренним точкам.
-			// Здесь переиспользуются уже существующие утилиты Program:
-			// - CreatePredictionEngineOrFallback;
-			// - LoadPredictionRecordsAsync.
-			// Это позволяет менять реализацию модели без влияния на API-контракт.
-			List<PredictionRecord> records;
-				{
-				var engine = CreatePredictionEngineOrFallback (allRows);
+            // 2. Основная дневная модель: строим prediction-записи по утренним точкам.
+            List<BacktestRecord> records;
+            {
+                var engine = CreatePredictionEngineOrFallback(allRows);
 
-				records = await LoadPredictionRecordsAsync (
-					mornings,
-					bootstrap.SolAll6h,
-					engine
-				);
+                records = await LoadPredictionRecordsAsync(
+                    mornings,
+                    bootstrap.Sol1m,
+                    engine
+                );
 
-				Console.WriteLine ($"[records] built = {records.Count}");
-				}
+                Console.WriteLine($"[records] built = {records.Count}");
+            }
 
-			// 3. SL-модель: оффлайн-обучение и применение на основе дневных предсказаний.
-			// Обучение ограничивается train-окном (_trainUntilUtc), чтобы не ловить "look-ahead bias".
-				{
-				var slTrainRows = allRows
-					.Where (r => r.Date <= _trainUntilUtc)
-					.ToList ();
+            // 3. SL-модель: обучаемся строго на TrainOnly<BacktestRecord> по baseline-exit контракту.
+            {
+                var trainUntilExitDayKeyUtc = _trainUntilExitDayKeyUtc;
 
-				TrainAndApplySlModelOffline (
-					allRows: slTrainRows,
-					records: records,
-					sol1h: bootstrap.SolAll1h,
-					sol1m: bootstrap.Sol1m,
-					solAll6h: bootstrap.SolAll6h
-				);
-				}
+                var orderedRecords = records
+                    .OrderBy(r => r.Causal.EntryUtc.Value)
+                    .ToList();
 
-			// 4. Delayed A: расчёт отложенной доходности по минутным свечам.
-			// Параметры dipFrac/tpPct/slPct зашиты здесь, чтобы контракт снапшота оставался простым,
-			// а детали risk-профиля были локализованы.
-				{
-				PopulateDelayedA (
-					records: records,
-					allRows: allRows,
-					sol1h: bootstrap.SolAll1h,
-					solAll6h: bootstrap.SolAll6h,
-					sol1m: bootstrap.Sol1m,
-					dipFrac: 0.005,
-					tpPct: 0.010,
-					slPct: 0.010
-				);
-				}
+                Console.WriteLine(
+                    $"[sl] запуск SplitByBaselineExitStrict: тег='sl', trainUntilExitDayKeyUtc={trainUntilExitDayKeyUtc.Value:yyyy-MM-dd}");
 
-			// 5. Финальный снэпшот:
-			// минимально необходимый набор данных для бэктеста и превью.
-			return new BacktestDataSnapshot
-				{
-				Mornings = mornings,
-				Records = records,
-				Candles1m = bootstrap.Sol1m
-				};
-			}
-		}
-	}
+                var recSplit = NyTrainSplit.SplitByBaselineExitStrict(
+                    ordered: orderedRecords,
+                    entrySelector: static r => r.Causal.EntryUtc,
+                    trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+                    nyTz: NyTz,
+                    tag: "sl");
+
+                Console.WriteLine(
+                    $"[sl] records split: train={recSplit.Train.Count}, oos={recSplit.Oos.Count}, " +
+                    $"trainUntilExitDayKey={NyTrainSplit.ToIsoDate(trainUntilExitDayKeyUtc)}");
+
+                if (recSplit.Train.Count < 50)
+                {
+                    var trMin = recSplit.Train.Count > 0 ? recSplit.Train.Min(r => r.Causal.EntryDayKeyUtc.Value) : default;
+                    var trMax = recSplit.Train.Count > 0 ? recSplit.Train.Max(r => r.Causal.EntryDayKeyUtc.Value) : default;
+
+                    throw new InvalidOperationException(
+                        $"[sl] SL train subset too small (count={recSplit.Train.Count}). " +
+                        $"period={(recSplit.Train.Count > 0 ? $"{trMin:yyyy-MM-dd}..{trMax:yyyy-MM-dd}" : "n/a")}.");
+                }
+
+                TrainAndApplySlModelOffline(
+                    trainRecords: recSplit.Train,
+                    records: records,
+                    sol1h: bootstrap.SolAll1h,
+                    sol1m: bootstrap.Sol1m,
+                    solAll6h: bootstrap.SolAll6h
+                );
+            }
+
+            // 4. Delayed A: расчёт отложенной доходности по минутным свечам.
+            {
+                PopulateDelayedA(
+                    records: records,
+                    allRows: allRows,
+                    trainUntilExitDayKeyUtc: _trainUntilExitDayKeyUtc,
+                    sol1h: bootstrap.SolAll1h,
+                    solAll6h: bootstrap.SolAll6h,
+                    sol1m: bootstrap.Sol1m,
+                    dipFrac: 0.005,
+                    tpPct: 0.010,
+                    slPct: 0.010
+                );
+            }
+
+            // 5. Финальный снэпшот.
+            return new BacktestDataSnapshot
+            {
+                Mornings = mornings,
+                Records = records,
+                Candles1m = bootstrap.Sol1m
+            };
+        }
+    }
+}
+

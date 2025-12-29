@@ -1,4 +1,4 @@
-﻿namespace SolSignalModel1D_Backtest.Api.CurrentPrediction
+namespace SolSignalModel1D_Backtest.Api.CurrentPrediction
 	{
 	/// <summary>
 	/// ДТО верхнего уровня для REST-эндпоинта "текущий прогноз".

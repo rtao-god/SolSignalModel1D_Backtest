@@ -1,24 +1,25 @@
-﻿using Microsoft.ML;
+using Microsoft.ML;
+using SolSignalModel1D_Backtest.Core.Causal.Analytics.Contracts;
 using SolSignalModel1D_Backtest.Core.Causal.Data;
-using SolSignalModel1D_Backtest.Core.ML;
-using SolSignalModel1D_Backtest.Core.ML.Daily;
-using SolSignalModel1D_Backtest.Core.ML.Shared;
-using SolSignalModel1D_Backtest.Core.ML.Utils;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.ML.Daily;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Shared;
+using SolSignalModel1D_Backtest.Core.Causal.ML.Utils;
 using Xunit;
+using SolSignalModel1D_Backtest.Core.Causal.Time;
+using SolSignalModel1D_Backtest.Tests.TestUtils;
+using SolSignalModel1D_Backtest.Core.Causal.Causal.Time;
+using System.Reflection;
 
 namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 	{
 	/// <summary>
-	/// Тесты утечки на уровне обучения дневной модели (move + dir).
-	/// Предполагается, что DailyDatasetBuilder уже прошёл свои future-blind тесты.
-	/// Здесь проверяется:
-	///   - изменение хвоста (Date > trainUntil) не меняет предсказания на train-наборе.
+	/// Утечка на уровне обучения дневных моделей:
+	/// изменение хвоста (DateUtc > trainUntilUtc) не меняет предсказания на train-наборе.
 	/// </summary>
-	public class LeakageDailyModelTrainingTests
+	public sealed class LeakageDailyModelTrainingTests
 		{
 		private sealed class BinaryOutput
 			{
-			// Имена совпадают с дефолтными колонками ML.NET LightGBM
 			public bool PredictedLabel { get; set; }
 			public float Score { get; set; }
 			public float Probability { get; set; }
@@ -27,54 +28,48 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 		[Fact]
 		public void DailyMoveAndDir_Training_IsFutureBlind_ToTailMutation ()
 			{
-			// 1. Строим синтетическую историю DataRow.
-			var allRows = BuildSyntheticRows (count: 400);
+			var allRows = BuildSyntheticRows (count: 420);
 
 			const int HoldoutDays = 120;
-			var maxDate = allRows.Last ().Date;
-			var trainUntil = maxDate.AddDays (-HoldoutDays);
+			var maxEntryUtc = allRows[^1].EntryUtc.Value;
+			var trainUntilEntryUtc = maxEntryUtc.AddDays (-HoldoutDays);
+			var trainUntilExitDayKeyUtc = TrainUntilExitDayKeyUtc.FromExitDayKeyUtc (
+				NyWindowing.ComputeExitDayKeyUtc (
+					new EntryUtc (trainUntilEntryUtc),
+					NyWindowing.NyTz));
 
-			Assert.Contains (allRows, r => r.Date > trainUntil);
+			Assert.Contains (allRows, r => r.EntryUtc.Value > trainUntilEntryUtc);
 
-			// 2. Две копии: A — оригинал, B — с жёстко замутивированным хвостом.
 			var rowsA = CloneRows (allRows);
-			var rowsB = CloneRows (allRows);
+			var rowsB = MutateFutureTail (CloneRows (allRows), trainUntilExitDayKeyUtc);
 
-			MutateFutureTail (rowsB, trainUntil);
-
-			// 3. Датасеты A и B (они уже future-blind, то есть train-часть совпадает).
 			var dsA = DailyDatasetBuilder.Build (
 				allRows: rowsA,
-				trainUntil: trainUntil,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
-				datesToExclude: null);
+				dayKeysToExclude: null);
 
 			var dsB = DailyDatasetBuilder.Build (
 				allRows: rowsB,
-				trainUntil: trainUntil,
+				trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
 				balanceMove: true,
 				balanceDir: true,
 				balanceTargetFrac: 0.7,
-				datesToExclude: null);
+				dayKeysToExclude: null);
 
-			// sanity: train-чать у датасетов совпадает (это уже проверяет отдельный dataset-тест,
-			// но здесь дублируем asserty, чтобы не зависеть от другого класса).
 			AssertRowsEqual (dsA.TrainRows, dsB.TrainRows);
 			AssertRowsEqual (dsA.MoveTrainRows, dsB.MoveTrainRows);
 			AssertRowsEqual (dsA.DirNormalRows, dsB.DirNormalRows);
 			AssertRowsEqual (dsA.DirDownRows, dsB.DirDownRows);
 
-			// 4. Обучаем дневные модели на train-части A и B.
 			var trainerA = new ModelTrainer ();
-			var bundleA = trainerA.TrainAll (new List<DataRow> (dsA.TrainRows));
+			var bundleA = trainerA.TrainAll (dsA.TrainRows);
 
 			var trainerB = new ModelTrainer ();
-			var bundleB = trainerB.TrainAll (new List<DataRow> (dsB.TrainRows));
+			var bundleB = trainerB.TrainAll (dsB.TrainRows);
 
-			// 5. Сравниваем предсказания move/dir на одних и тех же train-данных.
-			// Если кто-то начнёт использовать будущий хвост в обучении — модели разъедутся.
 			var movePredsA = GetMovePredictions (bundleA, dsA.MoveTrainRows);
 			var movePredsB = GetMovePredictions (bundleB, dsB.MoveTrainRows);
 			AssertBinaryOutputsEqual (movePredsA, movePredsB);
@@ -88,107 +83,277 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			AssertBinaryOutputsEqual (dirDownPredsA, dirDownPredsB);
 			}
 
-		// === вспомогательные методы ===
-
-		private static List<DataRow> BuildSyntheticRows ( int count )
+		[Fact]
+		public void DeriveTrainUntilUtcFromHoldout_UsesBaselineExitDomain ()
 			{
-			var rows = new List<DataRow> (count);
-			var start = new DateTime (2021, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+			var rows = BuildSyntheticRows (count: 5);
 
-			for (var i = 0; i < count; i++)
-				{
-				var date = start.AddDays (i);
+			const int HoldoutDays = 2;
 
-				// простая схема: 0 / 1 / 2 по кругу
-				var label = i % 3;
+			var method = typeof (Program).GetMethod (
+				"DeriveTrainUntilUtcFromHoldout",
+				BindingFlags.NonPublic | BindingFlags.Static);
 
-				var features = new[]
-				{
-					i / (double) count,
-					Math.Sin(i * 0.05),
-					Math.Cos(i * 0.07),
-					label
-				};
+			Assert.NotNull (method);
 
-				var row = new DataRow
-					{
-					Date = date,
-					Label = label,
-					RegimeDown = (i % 5 == 0),
-					Features = features
-					};
+			var trainUntilUtcObj = method!.Invoke (
+				null,
+				new object[] { rows, HoldoutDays, NyWindowing.NyTz });
 
-				rows.Add (row);
-				}
+			Assert.NotNull (trainUntilUtcObj);
 
-			return rows.OrderBy (r => r.Date).ToList ();
+			var trainUntilUtc = (DateTime)trainUntilUtcObj;
+
+			var entryThu = rows[3].EntryUtc;
+			var exitThu = NyWindowing.ComputeBaselineExitUtc (entryThu, NyWindowing.NyTz).Value;
+			var expected = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow (exitThu);
+
+			var actual = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow (trainUntilUtc);
+
+			Assert.Equal (expected.Value, actual.Value);
+
+			var entryWed = rows[2].EntryUtc;
+			var exitWed = NyWindowing.ComputeBaselineExitUtc (entryWed, NyWindowing.NyTz).Value;
+			var wrong = TrainUntilExitDayKeyUtc.FromBaselineExitUtcOrThrow (exitWed);
+
+			Assert.NotEqual (wrong.Value, actual.Value);
 			}
 
-		private static List<DataRow> CloneRows ( List<DataRow> src )
+		private static List<LabeledCausalRow> BuildSyntheticRows ( int count )
 			{
-			var res = new List<DataRow> (src.Count);
+			var rows = new List<LabeledCausalRow> (count);
+			var datesUtc = NyTestDates.BuildNyWeekdaySeriesUtc (
+				startNyLocalDate: NyTestDates.NyLocal (2024, 1, 1, 0),
+				count: count,
+				hour: 8);
+
+			var rng = new Random (123);
+
+			for (int i = 0; i < count; i++)
+				{
+				var dateUtc = datesUtc[i];
+				var entryUtc = NyWindowing.CreateNyTradingEntryUtcOrThrow (new EntryUtc (dateUtc), NyWindowing.NyTz);
+
+				double solRet1 = (rng.NextDouble () - 0.5) * 0.10;
+
+				int label =
+					solRet1 > 0.01 ? 2 :
+					solRet1 < -0.01 ? 0 :
+					1;
+
+				bool regimeDown = (label == 0);
+
+				bool factMicroUp = false;
+				bool factMicroDown = false;
+
+				if (label == 1)
+					{
+					factMicroUp = rng.NextDouble () < 0.5;
+					factMicroDown = !factMicroUp;
+					}
+
+				var causal = CreateCausal (
+					entryUtc: entryUtc,
+					regimeDown: regimeDown,
+					solRet1: solRet1);
+
+				var microTruth = label == 1
+					? (factMicroUp
+						? OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Up)
+						: OptionalValue<MicroTruthDirection>.Present(MicroTruthDirection.Down))
+					: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth);
+
+				rows.Add (new LabeledCausalRow (
+					causal: causal,
+					trueLabel: label,
+					microTruth: microTruth));
+				}
+
+			return rows.OrderBy (r => r.EntryUtc.Value).ToList ();
+			}
+
+		private static CausalDataRow CreateCausal ( NyTradingEntryUtc entryUtc, bool regimeDown, double solRet1 )
+			{
+			return new CausalDataRow (
+				entryUtc: entryUtc,
+				regimeDown: regimeDown,
+				isMorning: true,
+				hardRegime: 1,
+				minMove: 0.02,
+
+				solRet30: solRet1 * 0.2,
+				btcRet30: 0.0,
+				solBtcRet30: 0.0,
+
+				solRet1: solRet1,
+				solRet3: solRet1 * 0.7,
+				btcRet1: solRet1 * 0.1,
+				btcRet3: solRet1 * 0.05,
+
+				fngNorm: 0.0,
+				dxyChg30: 0.0,
+				goldChg30: 0.0,
+
+				btcVs200: 0.0,
+
+				solRsiCenteredScaled: 0.0,
+				rsiSlope3Scaled: 0.0,
+
+				gapBtcSol1: 0.0,
+				gapBtcSol3: 0.0,
+
+				atrPct: 0.02,
+				dynVol: 1.0,
+
+				solAboveEma50: 1.0,
+				solEma50vs200: 0.01,
+				btcEma50vs200: 0.01);
+			}
+
+		private static List<LabeledCausalRow> CloneRows ( List<LabeledCausalRow> src )
+			{
+			var res = new List<LabeledCausalRow> (src.Count);
 
 			foreach (var r in src)
 				{
-				res.Add (new DataRow
-					{
-					Date = r.Date,
-					Label = r.Label,
-					RegimeDown = r.RegimeDown,
-					Features = r.Features?.ToArray () ?? Array.Empty<double> ()
-					});
+				var c = r.Causal;
+
+				var clonedCausal = new CausalDataRow (
+					entryUtc: c.TradingEntryUtc,
+					regimeDown: c.RegimeDown,
+					isMorning: c.IsMorning,
+					hardRegime: c.HardRegime,
+					minMove: c.MinMove,
+
+					solRet30: c.SolRet30,
+					btcRet30: c.BtcRet30,
+					solBtcRet30: c.SolBtcRet30,
+
+					solRet1: c.SolRet1,
+					solRet3: c.SolRet3,
+					btcRet1: c.BtcRet1,
+					btcRet3: c.BtcRet3,
+
+					fngNorm: c.FngNorm,
+					dxyChg30: c.DxyChg30,
+					goldChg30: c.GoldChg30,
+
+					btcVs200: c.BtcVs200,
+
+					solRsiCenteredScaled: c.SolRsiCenteredScaled,
+					rsiSlope3Scaled: c.RsiSlope3Scaled,
+
+					gapBtcSol1: c.GapBtcSol1,
+					gapBtcSol3: c.GapBtcSol3,
+
+					atrPct: c.AtrPct,
+					dynVol: c.DynVol,
+
+					solAboveEma50: c.SolAboveEma50,
+					solEma50vs200: c.SolEma50vs200,
+					btcEma50vs200: c.BtcEma50vs200);
+
+				res.Add (new LabeledCausalRow (
+					causal: clonedCausal,
+					trueLabel: r.TrueLabel,
+					microTruth: r.MicroTruth));
 				}
 
 			return res;
 			}
 
-		/// <summary>
-		/// Мутируем только хвост Date &gt; trainUntil, имитируя "инородное будущее".
-		/// </summary>
-		private static void MutateFutureTail ( List<DataRow> rows, DateTime trainUntil )
+		private static List<LabeledCausalRow> MutateFutureTail ( List<LabeledCausalRow> rows, TrainUntilExitDayKeyUtc trainUntilExitDayKeyUtc )
 			{
-			foreach (var r in rows.Where (r => r.Date > trainUntil))
-				{
-				r.Label = 2;
-				r.RegimeDown = !r.RegimeDown;
+			var res = new List<LabeledCausalRow> (rows.Count);
 
-				if (r.Features is { Length: > 0 })
+			foreach (var r in rows)
+				{
+				var cls = NyTrainSplit.ClassifyByBaselineExit (
+					entryUtc: new EntryUtc (r.EntryUtc.Value),
+					trainUntilExitDayKeyUtc: trainUntilExitDayKeyUtc,
+					nyTz: NyWindowing.NyTz,
+					baselineExitDayKeyUtc: out _);
+
+				if (cls == NyTrainSplit.EntryClass.Train)
 					{
-					for (var i = 0; i < r.Features.Length; i++)
-						{
-						r.Features[i] = 10_000.0 + i;
-						}
+					res.Add (r);
+					continue;
 					}
+
+				var c = r.Causal;
+
+				var mutatedCausal = new CausalDataRow (
+					entryUtc: c.TradingEntryUtc,
+					regimeDown: !c.RegimeDown,
+					isMorning: c.IsMorning,
+					hardRegime: c.HardRegime,
+					minMove: c.MinMove * 2.0,
+
+					solRet30: 10_000.0,
+					btcRet30: 10_001.0,
+					solBtcRet30: 10_002.0,
+
+					solRet1: 10_003.0,
+					solRet3: 10_004.0,
+					btcRet1: 10_005.0,
+					btcRet3: 10_006.0,
+
+					fngNorm: 10_007.0,
+					dxyChg30: 10_008.0,
+					goldChg30: 10_009.0,
+
+					btcVs200: 10_010.0,
+
+					solRsiCenteredScaled: 10_011.0,
+					rsiSlope3Scaled: 10_012.0,
+
+					gapBtcSol1: 10_013.0,
+					gapBtcSol3: 10_014.0,
+
+					atrPct: 10_015.0,
+					dynVol: 10_016.0,
+
+					solAboveEma50: 10_017.0,
+					solEma50vs200: 10_018.0,
+					btcEma50vs200: 10_019.0);
+
+				res.Add (new LabeledCausalRow (
+					causal: mutatedCausal,
+					trueLabel: 2,
+					microTruth: OptionalValue<MicroTruthDirection>.Missing(MissingReasonCodes.NonFlatTruth)));
 				}
+
+			return res;
 			}
 
-		private static void AssertRowsEqual ( List<DataRow> xs, List<DataRow> ys )
+		private static void AssertRowsEqual ( IReadOnlyList<LabeledCausalRow> xs, IReadOnlyList<LabeledCausalRow> ys )
 			{
 			Assert.Equal (xs.Count, ys.Count);
 
-			for (var i = 0; i < xs.Count; i++)
+			for (int i = 0; i < xs.Count; i++)
 				{
 				var a = xs[i];
 				var b = ys[i];
 
-				Assert.Equal (a.Date, b.Date);
-				Assert.Equal (a.Label, b.Label);
-				Assert.Equal (a.RegimeDown, b.RegimeDown);
+				Assert.Equal (a.EntryUtc.Value, b.EntryUtc.Value);
+				Assert.Equal (a.TrueLabel, b.TrueLabel);
+				Assert.Equal (a.Causal.RegimeDown, b.Causal.RegimeDown);
+				Assert.Equal (a.MicroTruth, b.MicroTruth);
 
-				var fa = a.Features ?? Array.Empty<double> ();
-				var fb = b.Features ?? Array.Empty<double> ();
+				var va = a.Causal.FeaturesVector;
+				var vb = b.Causal.FeaturesVector;
 
-				Assert.Equal (fa.Length, fb.Length);
-				for (var j = 0; j < fa.Length; j++)
-					{
-					Assert.Equal (fa[j], fb[j]);
-					}
+				Assert.Equal (va.Length, vb.Length);
+
+				var sa = va.Span;
+				var sb = vb.Span;
+
+				for (int j = 0; j < sa.Length; j++)
+					Assert.Equal (sa[j], sb[j]);
 				}
 			}
 
-		private static List<BinaryOutput> GetMovePredictions (
-			ModelBundle bundle,
-			List<DataRow> rows )
+		private static List<BinaryOutput> GetMovePredictions ( ModelBundle bundle, IReadOnlyList<LabeledCausalRow> rows )
 			{
 			if (bundle.MoveModel == null || rows.Count == 0)
 				return new List<BinaryOutput> ();
@@ -198,25 +363,18 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label != 1,
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.TrueLabel != 1,
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 					}));
 
 			var scored = bundle.MoveModel.Transform (data);
 
-			return ml.Data
-				.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false)
-				.ToList ();
+			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
-		private static List<BinaryOutput> GetDirPredictions (
-			ModelBundle bundle,
-			List<DataRow> rows )
+		private static List<BinaryOutput> GetDirPredictions ( ModelBundle bundle, IReadOnlyList<LabeledCausalRow> rows )
 			{
-			if (bundle.DirModelNormal == null && bundle.DirModelDown == null)
-				return new List<BinaryOutput> ();
-
-			if (rows.Count == 0)
+			if ((bundle.DirModelNormal == null && bundle.DirModelDown == null) || rows.Count == 0)
 				return new List<BinaryOutput> ();
 
 			var ml = bundle.MlCtx ?? new MLContext (seed: 42);
@@ -224,46 +382,22 @@ namespace SolSignalModel1D_Backtest.Tests.Leakage.Daily
 			var data = ml.Data.LoadFromEnumerable (
 				rows.Select (r => new MlSampleBinary
 					{
-					Label = r.Label == 2, // up = true, down = false
-					Features = MlTrainingUtils.ToFloatFixed (r.Features)
+					Label = r.TrueLabel == 2,
+					Features = MlTrainingUtils.ToFloatFixed (r.Causal.FeaturesVector)
 					}));
 
-			// Здесь намеренно не различаем dir-normal / dir-down:
-			// тест вызывается с нужным подмножеством rows, и мы передаём
-			// сюда уже подготовленный bundle.[DirModelX].
-			// Выберем нужную модель снаружи.
-			ITransformer? model = null;
-
-			if (rows.Any (r => r.RegimeDown))
-				{
-				model = bundle.DirModelDown;
-				}
-			else
-				{
-				model = bundle.DirModelNormal;
-				}
+			bool isDownSubset = rows.Any (r => r.Causal.RegimeDown);
+			var model = isDownSubset ? bundle.DirModelDown : bundle.DirModelNormal;
 
 			if (model == null)
 				return new List<BinaryOutput> ();
 
 			var scored = model.Transform (data);
 
-			return ml.Data
-				.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false)
-				.ToList ();
+			return ml.Data.CreateEnumerable<BinaryOutput> (scored, reuseRowObject: false).ToList ();
 			}
 
-		/// <summary>
-		/// Сравнивает два списка бинарных предсказаний:
-		/// - PredictedLabel — строго;
-		/// - Score/Probability — с небольшим допуском по плавающей точке.
-		/// Такой инвариант гарантирует, что обучение не стало зависеть от мутированного хвоста.
-		/// Альтернатива — сравнивать только Score или только Probability, но тогда сложнее
-		/// отлавливать мелкие дрожания в пороге.
-		/// </summary>
-		private static void AssertBinaryOutputsEqual (
-			IReadOnlyList<BinaryOutput> a,
-			IReadOnlyList<BinaryOutput> b )
+		private static void AssertBinaryOutputsEqual ( IReadOnlyList<BinaryOutput> a, IReadOnlyList<BinaryOutput> b )
 			{
 			Assert.Equal (a.Count, b.Count);
 
